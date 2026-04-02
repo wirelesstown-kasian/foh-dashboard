@@ -128,3 +128,30 @@
     @apply font-sans;
   }
 }
+
+@media (pointer: coarse) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  *:focus,
+  *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+}
+
+@media (pointer: coarse) and (orientation: landscape) {
+  html {
+    font-size: 15px;
+  }
+
+  body {
+    background: linear-gradient(180deg, #f4f5f7 0%, #eef1f4 100%);
+  }
+
+  main {
+    padding-inline: 12px;
+    padding-bottom: 12px;
+  }
+}

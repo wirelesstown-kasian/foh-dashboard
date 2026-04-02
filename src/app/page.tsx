@@ -1,65 +1,167 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useState, useEffect, useCallback } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Employee, Schedule, TaskCategory, Task, TaskCompletion, DailySession } from '@/lib/types'
+import { getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
+import { ensureDefaultClockTasks } from '@/lib/defaultTasks'
+import { StaffSidebar } from '@/components/dashboard/StaffSidebar'
+import { TaskFlow } from '@/components/dashboard/TaskFlow'
+import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
+import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
+import { Textarea } from '@/components/ui/textarea'
+import { format } from 'date-fns'
+
+export default function DashboardPage() {
+  const [now, setNow] = useState(() => new Date())
+  const businessDate = getBusinessDate(now)
+  const today = getBusinessDateString(now)
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [categories, setCategories] = useState<TaskCategory[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [completions, setCompletions] = useState<TaskCompletion[]>([])
+  const [session, setSession] = useState<DailySession | null>(null)
+  const [notes, setNotes] = useState('')
+  const [notesSaved, setNotesSaved] = useState(false)
+
+  const load = useCallback(async () => {
+    const [empRes, schRes, catRes, taskRes, compRes, sessRes] = await Promise.all([
+      supabase.from('employees').select('*').eq('is_active', true),
+      supabase.from('schedules').select('*').eq('date', today),
+      supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
+      supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),
+      supabase.from('task_completions').select('*, employee:employees(*)').eq('session_date', today),
+      supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
+    ])
+
+    const loadedCategories = catRes.data ?? []
+    let loadedTasks = taskRes.data ?? []
+
+    try {
+      const insertedDefaults = await ensureDefaultClockTasks(supabase, loadedCategories, loadedTasks)
+      if (insertedDefaults) {
+        const refreshedTasks = await supabase.from('tasks').select('*').eq('is_active', true).order('display_order')
+        loadedTasks = refreshedTasks.data ?? loadedTasks
+      }
+    } catch (error) {
+      console.error('Failed to ensure default clock tasks', error)
+    }
+
+    setEmployees(empRes.data ?? [])
+    setSchedules(schRes.data ?? [])
+    setCategories(loadedCategories)
+    setTasks(loadedTasks)
+    setCompletions(compRes.data ?? [])
+    const loadedSession = sessRes.data ?? null
+    setSession(loadedSession)
+    setNotes(loadedSession?.notes ?? '')
+  }, [today, setNotes])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(new Date())
+    }, 60_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+
+    void (async () => {
+      if (!mounted) return
+      await load()
+    })()
+
+    return () => {
+      mounted = false
+    }
+  }, [load])
+
+  const saveNotes = async () => {
+    if (session) {
+      await supabase.from('daily_sessions').update({ notes }).eq('id', session.id)
+    } else {
+      await supabase.from('daily_sessions').insert({ session_date: today, notes, current_phase: 'pre_shift' })
+    }
+    setNotesSaved(true)
+    setTimeout(() => setNotesSaved(false), 2000)
+    await load()
+  }
+
+  const getTaskCounts = (phase: 'pre_shift' | 'operation' | 'closing'): [number, number] => {
+    const cat = categories.find(c => c.type === phase)
+    if (!cat) return [0, 0]
+    const phaseTasks = tasks.filter(t => t.category_id === cat.id && t.is_active)
+    const done = phaseTasks.filter(t => completions.some(c => c.task_id === t.id)).length
+    return [done, phaseTasks.length]
+  }
+
+  const totalTasks = tasks.filter(t => t.is_active).length
+  const doneTasks = new Set(completions.map(c => c.task_id)).size
+  const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="h-full flex flex-col">
+      {/* Top bar */}
+      <div className="bg-white border-b px-4 py-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-bold">
+              {format(businessDate, 'EEEE, MMMM d, yyyy')}
+            </h1>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+              </div>
+              <span className="text-sm font-medium">{doneTasks}/{totalTasks} tasks</span>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+
+        <PerformanceBar employees={employees} completions={completions} today={today} />
+
+        <div className="flex items-start gap-4">
+          <TaskRoadmap
+            session={session}
+            taskCounts={{
+              pre_shift: getTaskCounts('pre_shift'),
+              operation: getTaskCounts('operation'),
+              closing: getTaskCounts('closing'),
+            }}
+          />
+          <div className="flex-1 flex gap-2">
+            <Textarea
+              placeholder="Notes / events for today…"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              className="text-sm h-10 min-h-0 resize-none py-2"
+              onBlur={saveNotes}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            {notesSaved && <span className="text-xs text-green-600 self-center shrink-0">Saved</span>}
+          </div>
         </div>
-      </main>
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 flex overflow-hidden">
+        <StaffSidebar schedules={schedules} employees={employees} />
+        <TaskFlow
+          key={today}
+          categories={categories}
+          tasks={tasks}
+          schedules={schedules}
+          completions={completions}
+          session={session}
+          employees={employees}
+          today={today}
+          now={now}
+          onRefresh={load}
+        />
+      </div>
     </div>
-  );
+  )
 }
