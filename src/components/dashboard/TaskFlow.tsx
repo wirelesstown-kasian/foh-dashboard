@@ -128,8 +128,11 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
     if (!activeReminder || typeof window === 'undefined') return
     if (window.localStorage.getItem(activeReminder.storageKey) === 'seen') return
 
+    const reminderTask = activeReminder.task
+    if (!reminderTask) return
+
     window.localStorage.setItem(activeReminder.storageKey, 'seen')
-    window.alert(`${activeReminder.task.title} Reminder\n\n${activeReminder.eventLabel}. Please complete this task before the scheduled time.`)
+    window.alert(`${reminderTask.title} Reminder\n\n${activeReminder.eventLabel}. Please complete this task before the scheduled time.`)
   }, [clockInTask, clockOutTask, completions, currentPhase, firstShift, lastShift, now, today])
 
   const handlePinConfirm = async (pin: string) => {
