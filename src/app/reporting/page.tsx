@@ -211,6 +211,9 @@ export default function ReportingPage() {
   })
 
   const monthlyRankings = period === 'monthly' ? employeeMonthStats : null
+  const performanceLeader = perfStats[0] ?? null
+  const performanceTotalTasks = perfStats.reduce((sum, item) => sum + item.done, 0)
+  const activePerformanceCount = perfStats.filter(item => item.done > 0).length
 
   const tipWeekStart = format(startOfWeek(refDate, { weekStartsOn: 1 }), 'yyyy-MM-dd')
   const tipWeekEnd = format(endOfWeek(refDate, { weekStartsOn: 1 }), 'yyyy-MM-dd')
@@ -259,6 +262,24 @@ export default function ReportingPage() {
     const totalRate = totalHours > 0 ? total / totalHours : null
     return { emp, daily, total, totalHours, totalHouse, totalRate }
   }).filter(x => x.total > 0)
+
+  const tipDailyTotals = weekDays.map(day => {
+    const dateKey = format(day, 'yyyy-MM-dd')
+    const totalHours = totalHoursByDay.get(dateKey) ?? 0
+    const totalTips = totalTipsByDay.get(dateKey) ?? 0
+    const totalHouse = totalHouseByDay.get(dateKey) ?? 0
+    return {
+      date: dateKey,
+      totalHours,
+      totalTips,
+      totalHouse,
+      totalRate: totalHours > 0 ? totalTips / totalHours : null,
+    }
+  })
+  const weekTotalHours = tipDailyTotals.reduce((sum, item) => sum + item.totalHours, 0)
+  const weekTotalTips = tipDailyTotals.reduce((sum, item) => sum + item.totalTips, 0)
+  const weekTotalHouse = tipDailyTotals.reduce((sum, item) => sum + item.totalHouse, 0)
+  const weekTotalRate = weekTotalHours > 0 ? weekTotalTips / weekTotalHours : null
 
   const selectedEmployeeStats = employeeMonthStats.find(item => item.emp.id === selectedEmployeeId) ?? null
   const selectedWeekTips = tipByEmployee.find(item => item.emp.id === selectedEmployeeId) ?? null
@@ -514,6 +535,29 @@ export default function ReportingPage() {
                 <Download className="w-4 h-4 mr-2" /> Export
               </Button>
             </div>
+            <div className="mb-5 grid gap-4 md:grid-cols-4">
+              <div className="rounded-xl border bg-amber-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-amber-700">Top Performer</div>
+                <div className="mt-2 text-lg font-semibold text-amber-950">{performanceLeader?.emp.name ?? '—'}</div>
+                <div className="text-sm text-amber-800">{performanceLeader ? `${performanceLeader.done} tasks in ${periodLabel()}` : 'No task data yet'}</div>
+              </div>
+              <div className="rounded-xl border bg-sky-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-sky-700">Tasks In Period</div>
+                <div className="mt-2 text-2xl font-bold text-sky-950">{performanceTotalTasks}</div>
+                <div className="text-sm text-sky-800">{formatDateRangeLabel(startDate, endDate)}</div>
+              </div>
+              <div className="rounded-xl border bg-green-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-green-700">Active Staff</div>
+                <div className="mt-2 text-2xl font-bold text-green-950">{activePerformanceCount}</div>
+                <div className="text-sm text-green-800">Staff with completed tasks in this view</div>
+              </div>
+              <div className="rounded-xl border bg-violet-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-violet-700">Quick Read</div>
+                <div className="mt-2 text-sm font-medium text-violet-950">
+                  Click any name below to open score, rank, tip pace, and task pace details.
+                </div>
+              </div>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -522,6 +566,7 @@ export default function ReportingPage() {
                   <TableHead>Role</TableHead>
                   <TableHead className="text-right">Tasks This Period</TableHead>
                   <TableHead className="text-right">Monthly Tasks</TableHead>
+                  <TableHead className="text-right">Share</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -538,11 +583,14 @@ export default function ReportingPage() {
                     <TableCell className="capitalize text-muted-foreground">{emp.role}</TableCell>
                     <TableCell className="text-right font-semibold">{done}</TableCell>
                     <TableCell className="text-right text-muted-foreground">{allTime}</TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      {performanceTotalTasks > 0 ? getPercent((done / performanceTotalTasks) * 100) : '0.0%'}
+                    </TableCell>
                   </TableRow>
                 ))}
                 {perfStats.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-6">No task data for this period</TableCell>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-6">No task data for this period</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -710,6 +758,23 @@ export default function ReportingPage() {
                     <TableCell className="text-right font-bold text-green-700">${total.toFixed(2)}</TableCell>
                   </TableRow>
                 ))}
+                {tipByEmployee.length > 0 && (
+                  <TableRow className="bg-amber-50/70">
+                    <TableCell className="font-semibold">Daily Total</TableCell>
+                    {tipDailyTotals.map(day => (
+                      <TableCell key={day.date} className="text-center text-xs leading-5">
+                        <div className="font-semibold text-amber-900">${day.totalTips.toFixed(2)}</div>
+                        <div className="text-muted-foreground">{day.totalHours.toFixed(1)}h worked</div>
+                        <div className="text-muted-foreground">{day.totalRate !== null ? `$${day.totalRate.toFixed(2)}/hr` : '—/hr'}</div>
+                        <div className="text-amber-700">House: ${day.totalHouse.toFixed(2)}</div>
+                      </TableCell>
+                    ))}
+                    <TableCell className="text-right text-sm font-medium text-amber-900">{weekTotalHours.toFixed(1)}h</TableCell>
+                    <TableCell className="text-right text-sm font-medium">{weekTotalRate !== null ? `$${weekTotalRate.toFixed(2)}` : '—'}</TableCell>
+                    <TableCell className="text-right text-sm font-medium text-amber-700">${weekTotalHouse.toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-bold text-green-700">${weekTotalTips.toFixed(2)}</TableCell>
+                  </TableRow>
+                )}
                 {tipByEmployee.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={12} className="text-center text-muted-foreground py-6">No tip data for this week</TableCell>

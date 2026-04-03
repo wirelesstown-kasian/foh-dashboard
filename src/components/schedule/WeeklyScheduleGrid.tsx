@@ -118,7 +118,7 @@ export function WeeklyScheduleGrid() {
                   <th key={d.toISOString()} className="text-center p-3 font-semibold border-b min-w-32">
                     <div>{getDayName(d)}</div>
                     <div className="text-xs text-muted-foreground font-normal">{formatDisplayDate(d)}</div>
-                    <div className="text-xs text-muted-foreground font-normal mt-0.5">
+                    <div className="text-xs font-medium text-amber-700 mt-0.5">
                       {formatHours(getDayTotal(formatDate(d)))} total
                     </div>
                   </th>

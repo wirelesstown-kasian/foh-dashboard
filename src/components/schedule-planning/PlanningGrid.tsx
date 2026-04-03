@@ -60,6 +60,53 @@ function draftKey(weekRef: Date) {
   return `schedule_draft_${formatDate(days[0])}`
 }
 
+async function saveServerDrafts(weekStart: string, nextDrafts: ShiftDraft[]) {
+  const weekUpsert = await supabase
+    .from('schedule_draft_weeks')
+    .upsert({ week_start: weekStart, updated_at: new Date().toISOString() }, { onConflict: 'week_start' })
+
+  if (weekUpsert.error) throw weekUpsert.error
+
+  const deleteExisting = await supabase
+    .from('schedule_drafts')
+    .delete()
+    .eq('week_start', weekStart)
+
+  if (deleteExisting.error) throw deleteExisting.error
+
+  if (nextDrafts.length === 0) return
+
+  const insertDrafts = await supabase
+    .from('schedule_drafts')
+    .insert(nextDrafts.map(draft => ({
+      week_start: weekStart,
+      employee_id: draft.employee_id,
+      date: draft.date,
+      start_time: draft.start_time,
+      end_time: draft.end_time,
+      is_off: !!draft.is_off,
+      updated_at: new Date().toISOString(),
+    })))
+
+  if (insertDrafts.error) throw insertDrafts.error
+}
+
+async function clearServerDrafts(weekStart: string) {
+  const draftDelete = await supabase
+    .from('schedule_drafts')
+    .delete()
+    .eq('week_start', weekStart)
+
+  if (draftDelete.error) throw draftDelete.error
+
+  const weekDelete = await supabase
+    .from('schedule_draft_weeks')
+    .delete()
+    .eq('week_start', weekStart)
+
+  if (weekDelete.error) throw weekDelete.error
+}
+
 export function PlanningGrid() {
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
@@ -71,6 +118,7 @@ export function PlanningGrid() {
   const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string } | null>(null)
   const [addForm, setAddForm] = useState({ start_time: '15:30', end_time: '01:00', is_off: false })
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
+  const [serverDraftsReady, setServerDraftsReady] = useState(true)
   const allowedTimeOptions = getAllowedTimeOptions()
 
   useEffect(() => {
@@ -97,9 +145,11 @@ export function PlanningGrid() {
     const endDate = formatDate(days[6])
     const key = `schedule_draft_${startDate}`
 
-    const [empRes, schRes] = await Promise.all([
+    const [empRes, schRes, draftWeekRes, draftRes] = await Promise.all([
       supabase.from('employees').select('*').eq('is_active', true).order('name'),
       supabase.from('schedules').select('*, employee:employees(id, name, role, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate),
+      supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
+      supabase.from('schedule_drafts').select('*').eq('week_start', startDate).order('date'),
     ])
     const activeEmployees = empRes.data ?? []
     const loadedSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
@@ -139,19 +189,42 @@ export function PlanningGrid() {
     setEmployees([...activeEmployees, ...scheduledOnlyEmployees].sort((a, b) => a.name.localeCompare(b.name)))
 
     const saved = localStorage.getItem(key)
-    if (saved && isEditableWeek) {
+    const published = loadedSchedules.map((s: Schedule) => ({
+      id: s.id,
+      employee_id: s.employee_id,
+      date: s.date,
+      start_time: s.start_time,
+      end_time: s.end_time,
+    }))
+
+    const hasServerDraftWeek = !!draftWeekRes.data && !draftWeekRes.error
+    const canUseServerDrafts = hasServerDraftWeek && !draftRes.error
+
+    if (draftWeekRes.error || draftRes.error) {
+      setServerDraftsReady(false)
+    } else {
+      setServerDraftsReady(true)
+    }
+
+    if (canUseServerDrafts && isEditableWeek) {
+      const serverDrafts = ((draftRes.data ?? []) as Array<ShiftDraft & { id?: string }>).map(draft => ({
+        id: draft.id,
+        employee_id: draft.employee_id,
+        date: draft.date,
+        start_time: draft.start_time,
+        end_time: draft.end_time,
+        is_off: draft.is_off ?? false,
+      }))
+      setDrafts(serverDrafts)
+      setIsDirty(true)
+      localStorage.setItem(key, JSON.stringify(serverDrafts))
+    } else if (saved && isEditableWeek && published.length === 0) {
       setDrafts(JSON.parse(saved))
       setIsDirty(true)
     } else {
-      const published = loadedSchedules.map((s: Schedule) => ({
-        id: s.id,
-        employee_id: s.employee_id,
-        date: s.date,
-        start_time: s.start_time,
-        end_time: s.end_time,
-      }))
       setDrafts(published)
       setIsDirty(false)
+      localStorage.removeItem(key)
     }
     setLoading(false)
   }, [days, isEditableWeek])
@@ -163,6 +236,19 @@ export function PlanningGrid() {
     const key = draftKey(weekRef)
     localStorage.setItem(key, JSON.stringify(drafts))
   }, [drafts, loading, days, weekRef, isEditableWeek])
+
+  useEffect(() => {
+    if (loading || !isEditableWeek || days.length === 0 || !isDirty || !serverDraftsReady) return
+
+    const weekStart = formatDate(days[0])
+    const timeoutId = window.setTimeout(() => {
+      void saveServerDrafts(weekStart, drafts).catch(error => {
+        console.error('Failed to save schedule drafts to server', error)
+      })
+    }, 300)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [days, drafts, isDirty, isEditableWeek, loading, serverDraftsReady])
 
   useEffect(() => {
     if (!isEditableWeek) return
@@ -224,6 +310,11 @@ export function PlanningGrid() {
       .filter(d => d.employee_id === employeeId && !d.is_off)
       .reduce((sum, d) => sum + calcHours(d.start_time, d.end_time), 0)
 
+  const getDayTotal = (date: string) =>
+    drafts
+      .filter(d => d.date === date && !d.is_off)
+      .reduce((sum, d) => sum + calcHours(d.start_time, d.end_time), 0)
+
   const handlePublish = async () => {
     if (days.length === 0 || !isEditableWeek) return
     setSaving(true)
@@ -252,6 +343,9 @@ export function PlanningGrid() {
       body: JSON.stringify({ week_start: startDate, week_end: endDate }),
     }).catch(() => {/* fire and forget */})
 
+    await clearServerDrafts(startDate).catch(error => {
+      console.error('Failed to clear schedule drafts after publish', error)
+    })
     localStorage.removeItem(key)
     await loadData()
     setIsDirty(false)
@@ -300,6 +394,9 @@ export function PlanningGrid() {
                   <th key={d.toISOString()} className="text-center p-3 font-semibold border-b min-w-32">
                     <div>{getDayName(d)}</div>
                     <div className="text-xs text-muted-foreground font-normal">{formatDisplayDate(d)}</div>
+                    <div className="text-xs text-muted-foreground font-normal mt-0.5">
+                      {formatHours(getDayTotal(formatDate(d)))} total
+                    </div>
                   </th>
                 ))}
                 <th className="text-center p-3 font-semibold border-b w-24">Total</th>

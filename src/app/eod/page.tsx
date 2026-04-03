@@ -59,6 +59,10 @@ function getTipDraftKey(sessionDate: string) {
   return `eod-tip-distribution:${sessionDate}`
 }
 
+function getFinancialDraftKey(sessionDate: string) {
+  return `eod-financials:${sessionDate}`
+}
+
 export default function EodPage() {
   const businessDate = getBusinessDate()
   const today = getBusinessDateString()
@@ -76,6 +80,8 @@ export default function EodPage() {
   const [managerOverride, setManagerOverride] = useState(false)
   const [showUnlockPin, setShowUnlockPin] = useState(false)
   const [unlockError, setUnlockError] = useState<string | null>(null)
+  const [showFinancialConfirm, setShowFinancialConfirm] = useState(false)
+  const [financialsSaved, setFinancialsSaved] = useState(false)
   const [tipDistributionSaved, setTipDistributionSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -124,6 +130,7 @@ export default function EodPage() {
           name: d.employee?.name ?? '',
         }
       }))
+      setFinancialsSaved(true)
       setTipDistributionSaved(true)
     } else {
       const rows: TipRow[] = (schRes.data ?? []).map((s: Schedule) => {
@@ -136,6 +143,7 @@ export default function EodPage() {
         }
       })
       setTipRows(rows)
+      setFinancialsSaved(false)
       setTipDistributionSaved(false)
     }
     setLoading(false)
@@ -147,6 +155,17 @@ export default function EodPage() {
 
   useEffect(() => {
     if (loading) return
+
+    const storedFinancials = window.localStorage.getItem(getFinancialDraftKey(today))
+    if (storedFinancials && !existing) {
+      try {
+        const parsed = JSON.parse(storedFinancials) as typeof form
+        setForm(parsed)
+        setFinancialsSaved(true)
+      } catch {
+        window.localStorage.removeItem(getFinancialDraftKey(today))
+      }
+    }
 
     const stored = window.localStorage.getItem(getTipDraftKey(today))
     if (!stored) return
@@ -160,7 +179,7 @@ export default function EodPage() {
     } catch {
       window.localStorage.removeItem(getTipDraftKey(today))
     }
-  }, [loading, today])
+  }, [existing, loading, today])
 
   const isLocked = !managerOverride && (!!existing || !session || session.current_phase !== 'complete')
 
@@ -176,7 +195,10 @@ export default function EodPage() {
     }))
   )
 
-  const setField = (field: string, value: string) => setForm(f => ({ ...f, [field]: value }))
+  const setField = (field: string, value: string) => {
+    setFinancialsSaved(false)
+    setForm(f => ({ ...f, [field]: value }))
+  }
 
   const addTipRow = () => {
     const unusedEmp = employees.find(e => !tipRows.some(r => r.employee_id === e.id))
@@ -219,6 +241,13 @@ export default function EodPage() {
     window.localStorage.setItem(getTipDraftKey(today), JSON.stringify(tipRows))
     setTipDistributionSaved(true)
     setSaveError(null)
+  }
+
+  const handleFinancialSave = async () => {
+    window.localStorage.setItem(getFinancialDraftKey(today), JSON.stringify(form))
+    setFinancialsSaved(true)
+    setSaveError(null)
+    setShowFinancialConfirm(true)
   }
 
   const saveTipDistributions = async (reportId: string) => {
@@ -290,7 +319,9 @@ export default function EodPage() {
 
       await saveTipDistributions(reportId)
       await load()
+      window.localStorage.removeItem(getFinancialDraftKey(today))
       window.localStorage.removeItem(getTipDraftKey(today))
+      setFinancialsSaved(true)
       setTipDistributionSaved(true)
       setCurrentReportId(reportId)
       setSubmissionComplete(false)
@@ -421,10 +452,36 @@ export default function EodPage() {
   )
 
   const eodAlreadySaved = !!existing
+  const canSaveFinancials =
+    form.cash_total.trim() !== '' &&
+    form.batch_total.trim() !== '' &&
+    form.cc_tip.trim() !== '' &&
+    form.cash_tip.trim() !== ''
 
   return (
     <>
       {confirmDialog}
+      <Dialog open={showFinancialConfirm} onOpenChange={setShowFinancialConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Revenue & Tips Saved</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border bg-amber-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Cash Drop Amount</p>
+              <p className="mt-1 text-2xl font-bold text-amber-900">${totalCashDeposit.toFixed(2)}</p>
+            </div>
+            <div className="rounded-lg border bg-gray-50 p-4 text-gray-700">
+              <p className="font-medium">Drop Instructions</p>
+              <p className="mt-2">Combine this cash amount with the Toast printout slip and place it in the cash drop.</p>
+              <p className="mt-2">Next, complete the Tip Distribution section below. After Tip Distribution is saved, `Save EOD` will activate.</p>
+            </div>
+            <Button className="w-full" onClick={() => setShowFinancialConfirm(false)}>
+              Continue to Tip Distribution
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="p-6 max-w-4xl">
         {submissionComplete ? (
           <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center p-8">
@@ -532,14 +589,26 @@ export default function EodPage() {
               </div>
             </div>
 
+            <div className="mt-4 flex justify-center">
+              <Button onClick={handleFinancialSave} disabled={!canSaveFinancials || saving || submitting}>
+                Save Revenue & Tips
+              </Button>
+            </div>
+            <div className="mt-2 text-center text-xs text-muted-foreground">
+              {!financialsSaved ? 'Fill in revenue and tip totals, then save to unlock Tip Distribution.' : 'Revenue and tips saved. Continue with Tip Distribution.'}
+            </div>
+
             {/* Tip Distribution */}
-            <div className="bg-white rounded-xl border p-5 mt-6">
+            <div className={`bg-white rounded-xl border p-5 mt-6 ${!financialsSaved ? 'pointer-events-none opacity-60' : ''}`}>
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="font-semibold">Tip Distribution</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     House takes 15% — distributing ${(tipTotal * 0.85).toFixed(2)} among staff
                   </p>
+                  {!financialsSaved && (
+                    <p className="mt-1 text-xs text-amber-600">Save Revenue & Tips first to activate this section.</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Button size="sm" variant="outline" onClick={addTipRow}>
@@ -643,7 +712,11 @@ export default function EodPage() {
             </div>
 
             <div className="mt-3 text-center text-xs text-muted-foreground">
-              {!tipDistributionSaved ? 'Save Tip Distribution first before saving EOD.' : 'Tip Distribution saved and ready.'}
+              {!financialsSaved
+                ? 'Save Revenue & Tips first.'
+                : !tipDistributionSaved
+                  ? 'Save Tip Distribution first before saving EOD.'
+                  : 'Tip Distribution saved and ready.'}
             </div>
             {saveError && (
               <div className="mt-2 text-center text-sm text-red-600">
@@ -652,7 +725,7 @@ export default function EodPage() {
             )}
 
             <div className="mt-3 flex justify-center">
-              <Button onClick={handleSave} disabled={saving || submitting || !tipDistributionSaved}>
+              <Button onClick={handleSave} disabled={saving || submitting || !financialsSaved || !tipDistributionSaved}>
                 {saving ? 'Saving…' : 'Save EOD'}
               </Button>
             </div>
