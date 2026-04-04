@@ -48,11 +48,12 @@ function getAllowedTimeOptions() {
   return options
 }
 
-function getDefaultTimes(dateStr: string): { start: string; end: string } {
+function getDefaultTimes(dateStr: string): { start: string; end: string; isOff: boolean } {
   const day = new Date(dateStr + 'T12:00:00').getDay() // 0=Sun,1=Mon,...,6=Sat
-  if (day === 5 || day === 6) return { start: '15:30', end: '02:00' }  // Fri-Sat
-  if (day === 0) return { start: '15:30', end: '00:00' }               // Sun
-  return { start: '15:30', end: '01:00' }                               // Mon-Thu
+  if (day === 1) return { start: '15:30', end: '01:00', isOff: true }   // Mon
+  if (day === 5 || day === 6) return { start: '15:30', end: '02:00', isOff: false }  // Fri-Sat
+  if (day === 0) return { start: '15:30', end: '00:00', isOff: false }               // Sun
+  return { start: '15:30', end: '01:00', isOff: false }                               // Tue-Thu
 }
 
 function draftKey(weekRef: Date) {
@@ -337,7 +338,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
   const openAddDialog = (date: string, employee_id: string) => {
     if (!isEditableWeek) return
     const defaults = getDefaultTimes(date)
-    setAddForm({ start_time: defaults.start, end_time: defaults.end, is_off: false })
+    setAddForm({ start_time: defaults.start, end_time: defaults.end, is_off: defaults.isOff })
     setAddDialog({ date, employee_id })
   }
 
