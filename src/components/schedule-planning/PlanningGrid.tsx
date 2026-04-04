@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown, Ellipsis } from 'lucide-react'
 
 type ShiftDraft = {
   id?: string
@@ -149,6 +149,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
   const [serverDraftsReady, setServerDraftsReady] = useState(true)
   const [draftSavedMessage, setDraftSavedMessage] = useState<string | null>(null)
+  const [shiftActionTarget, setShiftActionTarget] = useState<{ draftIndex: number; employeeId: string; date: string } | null>(null)
   const allowedTimeOptions = getAllowedTimeOptions()
 
   useEffect(() => {
@@ -693,26 +694,30 @@ export function PlanningGrid({ department }: PlanningGridProps) {
               {displayedEmployees.map((emp, rowIndex) => (
                 <tr key={emp.id} className="border-b border-slate-200 hover:bg-slate-50/70">
                   <td className="p-4 align-top">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-semibold text-base">{employeeNamesById.get(emp.id) ?? emp.name}</div>
-                        <div className="text-sm text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="flex flex-col gap-2">
+                          <button
+                            className="rounded-lg border border-slate-300 p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:text-gray-300"
+                            disabled={!isEditableWeek || rowIndex === 0}
+                            onClick={() => moveStaffRow(emp.id, 'up')}
+                          >
+                            <ChevronUp className="w-5 h-5" />
+                          </button>
+                          <button
+                            className="rounded-lg border border-slate-300 p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:text-gray-300"
+                            disabled={!isEditableWeek || rowIndex === displayedEmployees.length - 1}
+                            onClick={() => moveStaffRow(emp.id, 'down')}
+                          >
+                            <ChevronDown className="w-5 h-5" />
+                          </button>
+                        </div>
+                        <div>
+                          <div className="font-semibold text-base">{employeeNamesById.get(emp.id) ?? emp.name}</div>
+                          <div className="text-sm text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          className="rounded-md border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:text-gray-300"
-                          disabled={!isEditableWeek || rowIndex === 0}
-                          onClick={() => moveStaffRow(emp.id, 'up')}
-                        >
-                          <ChevronUp className="w-4 h-4" />
-                        </button>
-                        <button
-                          className="rounded-md border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:text-gray-300"
-                          disabled={!isEditableWeek || rowIndex === displayedEmployees.length - 1}
-                          onClick={() => moveStaffRow(emp.id, 'down')}
-                        >
-                          <ChevronDown className="w-4 h-4" />
-                        </button>
+                      <div className="flex items-center gap-1.5 pt-1">
                         <button
                           className="rounded-md border border-red-200 p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:text-gray-300"
                           disabled={!isEditableWeek}
@@ -732,34 +737,36 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                           const globalIdx = drafts.indexOf(sh)
                           return sh.is_off ? (
                             <div key={idx} className="mb-2 rounded-xl border border-slate-300 bg-slate-100 p-2.5 text-center text-sm font-semibold text-slate-600">
-                              <div>Off</div>
-                              {isEditableWeek && (
-                                <div className="mt-2 flex justify-center gap-2">
-                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs" onClick={() => openAddDialog(dateStr, emp.id, globalIdx)}>
-                                    Modify
-                                  </Button>
-                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs text-red-600" onClick={() => removeShift(globalIdx)}>
-                                    Remove
-                                  </Button>
-                                </div>
-                              )}
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="mx-auto">Off</span>
+                                {isEditableWeek && (
+                                  <button
+                                    className="rounded-md border border-slate-300 bg-white p-1 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                                    onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
+                                  >
+                                    <Ellipsis className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           ) : (
                             <div key={idx} className="mb-2 rounded-xl border border-slate-400 bg-white p-2.5 text-sm shadow-sm">
-                              <div className="font-semibold text-slate-900">
-                                {formatTime(sh.start_time)} – {formatTime(sh.end_time)}
-                              </div>
-                              <div className="mt-1 text-sm text-slate-600">{formatHours(calcHours(sh.start_time, sh.end_time))}</div>
-                              {isEditableWeek && (
-                                <div className="mt-2 flex gap-2">
-                                  <Button variant="outline" size="sm" className="h-8 flex-1 text-xs" onClick={() => openAddDialog(dateStr, emp.id, globalIdx)}>
-                                    Modify
-                                  </Button>
-                                  <Button variant="outline" size="sm" className="h-8 flex-1 text-xs text-red-600" onClick={() => removeShift(globalIdx)}>
-                                    Remove
-                                  </Button>
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="font-semibold text-slate-900">
+                                    {formatTime(sh.start_time)} – {formatTime(sh.end_time)}
+                                  </div>
+                                  <div className="mt-1 text-sm text-slate-600">{formatHours(calcHours(sh.start_time, sh.end_time))}</div>
                                 </div>
-                              )}
+                                {isEditableWeek && (
+                                  <button
+                                    className="rounded-md border border-slate-300 bg-slate-50 p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                                    onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
+                                  >
+                                    <Ellipsis className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           )
                         })}
@@ -967,6 +974,46 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                 <Button variant="outline" className="flex-1" onClick={() => setAddDialog(null)}>Cancel</Button>
                 <Button className="flex-1" onClick={addShift}>
                   {addForm.is_off ? 'Save Off Day' : 'Add Shift'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!shiftActionTarget} onOpenChange={open => !open && setShiftActionTarget(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Shift Actions</DialogTitle>
+          </DialogHeader>
+          {shiftActionTarget && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {employeeNamesById.get(shiftActionTarget.employeeId) ?? employees.find(employee => employee.id === shiftActionTarget.employeeId)?.name} — {shiftActionTarget.date}
+              </p>
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  className="h-11 justify-start"
+                  onClick={() => {
+                    openAddDialog(shiftActionTarget.date, shiftActionTarget.employeeId, shiftActionTarget.draftIndex)
+                    setShiftActionTarget(null)
+                  }}
+                >
+                  Modify Shift
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-11 justify-start text-red-600"
+                  onClick={() => {
+                    removeShift(shiftActionTarget.draftIndex)
+                    setShiftActionTarget(null)
+                  }}
+                >
+                  Remove Shift
+                </Button>
+                <Button variant="ghost" className="h-10" onClick={() => setShiftActionTarget(null)}>
+                  Cancel
                 </Button>
               </div>
             </div>

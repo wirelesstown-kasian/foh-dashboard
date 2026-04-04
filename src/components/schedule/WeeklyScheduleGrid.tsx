@@ -112,6 +112,9 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
       .filter(s => s.date === date)
       .reduce((sum, s) => sum + calcHours(s.start_time, s.end_time), 0)
 
+  const totalWeekHours = days.reduce((sum, day) => sum + getDayTotal(formatDate(day)), 0)
+  const totalShifts = schedules.length
+
   const exportDepartmentPdf = () => {
     if (days.length === 0) return
 
@@ -204,44 +207,75 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">{department === 'boh' ? 'BOH Schedule' : 'FOH Schedule'}</h1>
-          <p className="text-sm text-muted-foreground">
-            {department === 'boh' ? 'Kitchen staff schedule view.' : 'Front-of-house weekly schedule view.'}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <span className="font-medium text-sm min-w-48 text-center">{formatWeekRange(weekRef)}</span>
-          <Button variant="outline" size="sm" onClick={() => setWeekRef(getNextWeek(weekRef))}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setWeekRef(new Date())}>
-            Today&apos;s Week
-          </Button>
-          <Button variant="outline" size="sm" onClick={exportDepartmentPdf}>
-            <Download className="w-4 h-4 mr-2" />
-            Export PDF
-          </Button>
+    <div className="space-y-5">
+      <div className="rounded-[28px] border border-slate-300 bg-[linear-gradient(180deg,#f7f3ea_0%,#ffffff_78%)] p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div className="space-y-3">
+            <div className="inline-flex items-center rounded-full border border-slate-300 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600">
+              {department === 'boh' ? 'Back Of House' : 'Front Of House'}
+            </div>
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+                {department === 'boh' ? 'BOH Weekly Schedule' : 'FOH Weekly Schedule'}
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                {department === 'boh'
+                  ? 'Kitchen and manager coverage for the week.'
+                  : 'Front-of-house lineup and shift coverage for the week.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Staff</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-900">{employees.length}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Shifts</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-900">{totalShifts}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Week Hours</div>
+                <div className="mt-1 text-2xl font-semibold text-slate-900">{formatHours(totalWeekHours)}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-300 bg-white/90 p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" className="h-11 w-11 rounded-2xl" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <div className="min-w-56 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-center">
+                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Week Of</div>
+                <div className="mt-1 text-base font-semibold text-slate-900">{formatWeekRange(weekRef)}</div>
+              </div>
+              <Button variant="outline" size="sm" className="h-11 w-11 rounded-2xl" onClick={() => setWeekRef(getNextWeek(weekRef))}>
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" className="h-11 rounded-2xl px-4" onClick={() => setWeekRef(new Date())}>
+                Today&apos;s Week
+              </Button>
+              <Button variant="outline" size="sm" className="h-11 rounded-2xl px-4" onClick={exportDepartmentPdf}>
+                <Download className="w-4 h-4 mr-2" />
+                Export PDF
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
       {loading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border-2 border-slate-500 bg-white">
-          <table className="w-full min-w-[980px] text-[15px]">
-            <thead className="bg-slate-200">
+        <div className="overflow-x-auto rounded-[30px] border-2 border-slate-700 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+          <table className="w-full min-w-[1040px] text-[15px]">
+            <thead className="bg-[linear-gradient(180deg,#1f2937_0%,#334155_100%)] text-white">
               <tr>
-                <th className="text-left p-4 font-semibold text-base w-40 border-b-2 border-slate-500">Employee</th>
+                <th className="sticky left-0 z-10 text-left p-4 font-semibold text-base w-44 border-b-2 border-slate-700 bg-[linear-gradient(180deg,#111827_0%,#1f2937_100%)]">Employee</th>
                 {days.map(d => (
-                  <th key={d.toISOString()} className="text-center p-4 font-semibold text-base border-b-2 border-l border-slate-400 border-slate-500 min-w-32">
-                    <div>{getDayName(d)}</div>
-                    <div className="text-sm text-slate-600 font-normal">{formatDisplayDate(d)}</div>
+                  <th key={d.toISOString()} className="text-center p-4 font-semibold text-base border-b-2 border-l border-slate-500 min-w-32">
+                    <div className="text-[15px] font-semibold">{getDayName(d)}</div>
+                    <div className="mt-1 text-sm font-normal text-slate-200">{formatDisplayDate(d)}</div>
                   </th>
                 ))}
               </tr>
@@ -249,10 +283,10 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
             <tbody>
               {employees.map(emp => {
                 return (
-                  <tr key={emp.id} className="border-b border-slate-300 hover:bg-slate-50">
-                    <td className="p-4 align-top">
-                      <div className="font-semibold text-base">{employeeNamesById.get(emp.id) ?? emp.name}</div>
-                      <div className="text-sm text-slate-600 capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
+                  <tr key={emp.id} className="border-b border-slate-300 odd:bg-white even:bg-[#f6f1e8] hover:bg-[#ebe3d2]">
+                    <td className="sticky left-0 z-[1] p-4 align-top border-r border-slate-300 bg-inherit">
+                      <div className="font-semibold text-base text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">{emp.role.replace('_', ' ')}{!emp.is_active ? ' • archived' : ''}</div>
                     </td>
                     {days.map(d => {
                       const dateStr = formatDate(d)
@@ -260,13 +294,19 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
                       return (
                         <td key={d.toISOString()} className="border-l border-slate-300 p-3 align-top">
                           {shifts.length === 0 ? (
-                            <div className="text-center text-slate-300 text-xl">—</div>
+                            <div className="flex min-h-[76px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/70 text-sm font-medium uppercase tracking-[0.18em] text-slate-400">
+                              Off
+                            </div>
                           ) : (
                             shifts.map((s, i) => (
-                              <div key={i} className="mb-2 rounded-lg border-2 border-slate-400 bg-slate-100 p-2.5 text-sm">
-                                <div className="font-semibold text-slate-900">
+                              <div key={i} className="mb-2 rounded-2xl border-2 border-slate-700 bg-[linear-gradient(180deg,#faf7f2_0%,#efe7d7_100%)] p-3 text-sm shadow-sm">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                                  Shift
+                                </div>
+                                <div className="mt-1 font-semibold text-[15px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>
+                                <div className="mt-1 text-sm text-slate-600">{formatHours(calcHours(s.start_time, s.end_time))}</div>
                               </div>
                             ))
                           )}
@@ -285,11 +325,11 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
               )}
             </tbody>
             {employees.length > 0 && (
-              <tfoot className="bg-slate-200">
+              <tfoot className="bg-[linear-gradient(180deg,#d6d3d1_0%,#e7e5e4_100%)]">
                 <tr>
-                  <td className="p-4 text-base font-semibold border-t-2 border-slate-500">Daily Total Hours</td>
+                  <td className="sticky left-0 z-10 p-4 text-base font-semibold border-t-2 border-slate-700 bg-[linear-gradient(180deg,#d6d3d1_0%,#e7e5e4_100%)]">Daily Total Hours</td>
                   {days.map(d => (
-                    <td key={`total-${d.toISOString()}`} className="border-t-2 border-l border-slate-400 border-slate-500 p-4 text-center">
+                    <td key={`total-${d.toISOString()}`} className="border-t-2 border-l border-slate-500 p-4 text-center">
                       <div className="text-xl font-semibold text-slate-900">{formatHours(getDayTotal(formatDate(d)))}</div>
                     </td>
                   ))}
