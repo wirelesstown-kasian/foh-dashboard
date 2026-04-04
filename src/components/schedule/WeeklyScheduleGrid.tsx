@@ -156,14 +156,14 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
           <style>
             @page { size: A4 landscape; margin: 10mm; }
             body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; margin: 0; padding: 18px; color: #111827; }
-            h1 { margin: 0 0 4px 0; font-size: 28px; }
-            .sub { margin-bottom: 14px; color: #475569; font-size: 14px; }
+            h1 { margin: 0 0 4px 0; font-size: 24px; }
+            .sub { margin-bottom: 12px; color: #475569; font-size: 13px; }
             table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            th, td { border: 1.5px solid #475569; vertical-align: top; padding: 10px; font-size: 13px; }
-            th { background: #dbe4ee; font-weight: 700; }
-            .employee-name { font-weight: 800; font-size: 14px; margin-bottom: 2px; }
+            th, td { border: 1.5px solid #475569; vertical-align: top; padding: 8px; font-size: 14px; }
+            th { background: #edf1f5; font-weight: 700; }
+            .employee-name { font-weight: 800; font-size: 15px; margin-bottom: 2px; }
             .muted { color: #475569; font-size: 12px; }
-            .shift { background: #e2e8f0; border: 1.5px solid #64748b; border-radius: 10px; padding: 7px; margin-bottom: 6px; }
+            .shift { background: #f7f7f5; border: 1.5px solid #64748b; border-radius: 8px; padding: 6px; margin-bottom: 5px; }
             .totals-row td { background: #e5e7eb; text-align: center; vertical-align: middle; }
             .totals-label { font-weight: 700; text-align: left; }
             @media print {
@@ -207,55 +207,55 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-[28px] border border-slate-300 bg-[linear-gradient(180deg,#f7f3ea_0%,#ffffff_78%)] p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)]">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-3">
-            <div className="inline-flex items-center rounded-full border border-slate-300 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600">
+    <div className="space-y-3">
+      <div className="rounded-[20px] border border-slate-300 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
               {department === 'boh' ? 'Back Of House' : 'Front Of House'}
             </div>
-            <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold tracking-tight text-slate-900">
                 {department === 'boh' ? 'BOH Weekly Schedule' : 'FOH Weekly Schedule'}
               </h1>
-              <p className="mt-1 text-sm text-slate-600">
+              <p className="mt-0.5 text-[12px] text-slate-600">
                 {department === 'boh'
                   ? 'Kitchen and manager coverage for the week.'
                   : 'Front-of-house lineup and shift coverage for the week.'}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+            <div className="flex flex-wrap gap-2 xl:ml-2">
+              <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Staff</div>
-                <div className="mt-1 text-2xl font-semibold text-slate-900">{employees.length}</div>
+                <div className="mt-0.5 text-lg font-semibold text-slate-900">{employees.length}</div>
               </div>
-              <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+              <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Shifts</div>
-                <div className="mt-1 text-2xl font-semibold text-slate-900">{totalShifts}</div>
+                <div className="mt-0.5 text-lg font-semibold text-slate-900">{totalShifts}</div>
               </div>
-              <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+              <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Week Hours</div>
-                <div className="mt-1 text-2xl font-semibold text-slate-900">{formatHours(totalWeekHours)}</div>
+                <div className="mt-0.5 text-lg font-semibold text-slate-900">{formatHours(totalWeekHours)}</div>
               </div>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-300 bg-white/90 p-3 shadow-sm">
+          <div className="rounded-xl border border-slate-300 bg-slate-50 p-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" className="h-11 w-11 rounded-2xl" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
+              <Button variant="outline" size="sm" className="h-9 w-9 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
                 <ChevronLeft className="w-4 h-4" />
               </Button>
-              <div className="min-w-56 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-center">
+              <div className="min-w-48 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center">
                 <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Week Of</div>
-                <div className="mt-1 text-base font-semibold text-slate-900">{formatWeekRange(weekRef)}</div>
+                <div className="mt-0.5 text-[14px] font-semibold text-slate-900">{formatWeekRange(weekRef)}</div>
               </div>
-              <Button variant="outline" size="sm" className="h-11 w-11 rounded-2xl" onClick={() => setWeekRef(getNextWeek(weekRef))}>
+              <Button variant="outline" size="sm" className="h-9 w-9 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
                 <ChevronRight className="w-4 h-4" />
               </Button>
-              <Button variant="outline" size="sm" className="h-11 rounded-2xl px-4" onClick={() => setWeekRef(new Date())}>
+              <Button variant="outline" size="sm" className="h-9 rounded-lg px-3.5" onClick={() => setWeekRef(new Date())}>
                 Today&apos;s Week
               </Button>
-              <Button variant="outline" size="sm" className="h-11 rounded-2xl px-4" onClick={exportDepartmentPdf}>
+              <Button variant="outline" size="sm" className="h-9 rounded-lg px-3.5" onClick={exportDepartmentPdf}>
                 <Download className="w-4 h-4 mr-2" />
                 Export PDF
               </Button>
@@ -267,15 +267,15 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
       {loading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-[30px] border-2 border-slate-700 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <table className="w-full min-w-[1040px] text-[15px]">
-            <thead className="bg-[linear-gradient(180deg,#1f2937_0%,#334155_100%)] text-white">
+        <div className="overflow-x-auto rounded-[24px] border border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
+          <table className="w-full min-w-[980px] text-[16px]">
+            <thead className="bg-slate-800 text-white">
               <tr>
-                <th className="sticky left-0 z-10 text-left p-4 font-semibold text-base w-44 border-b-2 border-slate-700 bg-[linear-gradient(180deg,#111827_0%,#1f2937_100%)]">Employee</th>
+                <th className="sticky left-0 z-10 text-left p-3.5 font-semibold text-[15px] w-40 border-b border-slate-700 bg-slate-900">Employee</th>
                 {days.map(d => (
-                  <th key={d.toISOString()} className="text-center p-4 font-semibold text-base border-b-2 border-l border-slate-500 min-w-32">
+                  <th key={d.toISOString()} className="text-center p-3.5 font-semibold text-[15px] border-b border-l border-slate-600 min-w-28">
                     <div className="text-[15px] font-semibold">{getDayName(d)}</div>
-                    <div className="mt-1 text-sm font-normal text-slate-200">{formatDisplayDate(d)}</div>
+                    <div className="mt-0.5 text-[12px] font-normal text-slate-200">{formatDisplayDate(d)}</div>
                   </th>
                 ))}
               </tr>
@@ -283,30 +283,30 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
             <tbody>
               {employees.map(emp => {
                 return (
-                  <tr key={emp.id} className="border-b border-slate-300 odd:bg-white even:bg-[#f6f1e8] hover:bg-[#ebe3d2]">
-                    <td className="sticky left-0 z-[1] p-4 align-top border-r border-slate-300 bg-inherit">
-                      <div className="font-semibold text-base text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
+                  <tr key={emp.id} className="border-b border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-slate-100">
+                    <td className="sticky left-0 z-[1] p-3.5 align-top border-r border-slate-200 bg-inherit">
+                      <div className="font-semibold text-[15px] text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
                       <div className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">{emp.role.replace('_', ' ')}{!emp.is_active ? ' • archived' : ''}</div>
                     </td>
                     {days.map(d => {
                       const dateStr = formatDate(d)
                       const shifts = getShifts(emp.id, dateStr)
                       return (
-                        <td key={d.toISOString()} className="border-l border-slate-300 p-3 align-top">
+                        <td key={d.toISOString()} className="border-l border-slate-200 p-2.5 align-top">
                           {shifts.length === 0 ? (
-                            <div className="flex min-h-[76px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white/70 text-sm font-medium uppercase tracking-[0.18em] text-slate-400">
+                            <div className="flex min-h-[66px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-[13px] font-medium uppercase tracking-[0.16em] text-slate-400">
                               Off
                             </div>
                           ) : (
                             shifts.map((s, i) => (
-                              <div key={i} className="mb-2 rounded-2xl border-2 border-slate-700 bg-[linear-gradient(180deg,#faf7f2_0%,#efe7d7_100%)] p-3 text-sm shadow-sm">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                              <div key={i} className="mb-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5 text-sm">
+                                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                                   Shift
                                 </div>
-                                <div className="mt-1 font-semibold text-[15px] text-slate-900">
+                                <div className="mt-1 font-semibold text-[16px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>
-                                <div className="mt-1 text-sm text-slate-600">{formatHours(calcHours(s.start_time, s.end_time))}</div>
+                                <div className="mt-1 text-[13px] text-slate-600">{formatHours(calcHours(s.start_time, s.end_time))}</div>
                               </div>
                             ))
                           )}
@@ -325,12 +325,12 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
               )}
             </tbody>
             {employees.length > 0 && (
-              <tfoot className="bg-[linear-gradient(180deg,#d6d3d1_0%,#e7e5e4_100%)]">
+              <tfoot className="bg-slate-100">
                 <tr>
-                  <td className="sticky left-0 z-10 p-4 text-base font-semibold border-t-2 border-slate-700 bg-[linear-gradient(180deg,#d6d3d1_0%,#e7e5e4_100%)]">Daily Total Hours</td>
+                  <td className="sticky left-0 z-10 p-3.5 text-[15px] font-semibold border-t border-slate-300 bg-slate-100">Daily Total Hours</td>
                   {days.map(d => (
-                    <td key={`total-${d.toISOString()}`} className="border-t-2 border-l border-slate-500 p-4 text-center">
-                      <div className="text-xl font-semibold text-slate-900">{formatHours(getDayTotal(formatDate(d)))}</div>
+                    <td key={`total-${d.toISOString()}`} className="border-t border-l border-slate-300 p-3.5 text-center">
+                      <div className="text-[18px] font-semibold text-slate-900">{formatHours(getDayTotal(formatDate(d)))}</div>
                     </td>
                   ))}
                 </tr>

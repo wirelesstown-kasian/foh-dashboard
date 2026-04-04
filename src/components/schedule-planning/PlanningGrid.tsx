@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown, Ellipsis } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown } from 'lucide-react'
 
 type ShiftDraft = {
   id?: string
@@ -150,6 +150,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
   const [serverDraftsReady, setServerDraftsReady] = useState(true)
   const [draftSavedMessage, setDraftSavedMessage] = useState<string | null>(null)
   const [shiftActionTarget, setShiftActionTarget] = useState<{ draftIndex: number; employeeId: string; date: string } | null>(null)
+  const [staffRemovalTarget, setStaffRemovalTarget] = useState<Employee | null>(null)
   const allowedTimeOptions = getAllowedTimeOptions()
 
   useEffect(() => {
@@ -677,23 +678,23 @@ export function PlanningGrid({ department }: PlanningGridProps) {
         <p className="text-muted-foreground">Loading…</p>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-sm">
-          <table className="min-w-[1080px] w-full text-[15px]">
+          <table className="min-w-[1020px] w-full text-[16px]">
             <thead className="bg-slate-100">
               <tr>
-                <th className="text-left p-4 font-semibold w-48 border-b border-slate-300">Employee</th>
+                <th className="text-left p-3.5 font-semibold w-44 border-b border-slate-300">Employee</th>
                 {days.map(d => (
-                  <th key={d.toISOString()} className="text-center p-4 font-semibold border-b border-slate-300 min-w-36">
+                  <th key={d.toISOString()} className="text-center p-3.5 font-semibold border-b border-slate-300 min-w-32">
                     <div>{getDayName(d)}</div>
-                    <div className="text-xs text-muted-foreground font-normal">{formatDisplayDate(d)}</div>
+                    <div className="text-[12px] text-muted-foreground font-normal">{formatDisplayDate(d)}</div>
                   </th>
                 ))}
-                <th className="text-center p-4 font-semibold border-b border-slate-300 w-28">Total</th>
+                <th className="text-center p-3.5 font-semibold border-b border-slate-300 w-24">Total</th>
               </tr>
             </thead>
             <tbody>
               {displayedEmployees.map((emp, rowIndex) => (
                 <tr key={emp.id} className="border-b border-slate-200 hover:bg-slate-50/70">
-                  <td className="p-4 align-top">
+                  <td className="p-3.5 align-top">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <div className="flex flex-col gap-2">
@@ -713,15 +714,15 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                           </button>
                         </div>
                         <div>
-                          <div className="font-semibold text-base">{employeeNamesById.get(emp.id) ?? emp.name}</div>
-                          <div className="text-sm text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
+                          <div className="font-semibold text-[15px]">{employeeNamesById.get(emp.id) ?? emp.name}</div>
+                          <div className="text-[13px] text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 pt-1">
                         <button
                           className="rounded-md border border-red-200 p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:text-gray-300"
                           disabled={!isEditableWeek}
-                          onClick={() => removeStaffRow(emp.id)}
+                          onClick={() => setStaffRemovalTarget(emp)}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -732,46 +733,46 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                     const dateStr = formatDate(d)
                     const shifts = getShifts(emp.id, dateStr)
                     return (
-                      <td key={d.toISOString()} className="p-3 align-top">
+                      <td key={d.toISOString()} className="p-2.5 align-top">
                         {shifts.map((sh, idx) => {
                           const globalIdx = drafts.indexOf(sh)
                           return sh.is_off ? (
-                            <div key={idx} className="mb-2 rounded-xl border border-slate-300 bg-slate-100 p-2.5 text-center text-sm font-semibold text-slate-600">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="mx-auto">Off</span>
-                                {isEditableWeek && (
-                                  <button
-                                    className="rounded-md border border-slate-300 bg-white p-1 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-                                    onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
-                                  >
-                                    <Ellipsis className="w-4 h-4" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <div key={idx} className="mb-2 rounded-xl border border-slate-400 bg-white p-2.5 text-sm shadow-sm">
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <div className="font-semibold text-slate-900">
-                                    {formatTime(sh.start_time)} – {formatTime(sh.end_time)}
-                                  </div>
-                                  <div className="mt-1 text-sm text-slate-600">{formatHours(calcHours(sh.start_time, sh.end_time))}</div>
+                            <button
+                              key={idx}
+                              type="button"
+                              className="mb-2 block w-full rounded-xl border border-slate-300 bg-slate-100 p-2 text-center text-[15px] font-semibold text-slate-600 transition-colors hover:border-slate-500 hover:bg-slate-200"
+                              disabled={!isEditableWeek}
+                              onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
+                            >
+                              <div>Off</div>
+                              {isEditableWeek && (
+                                <div className="mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
+                                  Tap to edit
                                 </div>
-                                {isEditableWeek && (
-                                  <button
-                                    className="rounded-md border border-slate-300 bg-slate-50 p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
-                                    onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
-                                  >
-                                    <Ellipsis className="w-4 h-4" />
-                                  </button>
-                                )}
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              key={idx}
+                              type="button"
+                              className="mb-2 block w-full rounded-xl border border-slate-300 bg-white p-2 text-left text-sm shadow-sm transition-colors hover:border-slate-700 hover:bg-slate-50"
+                              disabled={!isEditableWeek}
+                              onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
+                            >
+                              <div className="font-semibold text-[16px] text-slate-900">
+                                {formatTime(sh.start_time)} – {formatTime(sh.end_time)}
                               </div>
-                            </div>
+                              <div className="mt-1 text-[13px] text-slate-600">{formatHours(calcHours(sh.start_time, sh.end_time))}</div>
+                              {isEditableWeek && (
+                                <div className="mt-2 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">
+                                  Tap to edit
+                                </div>
+                              )}
+                            </button>
                           )
                         })}
                         <button
-                          className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-slate-400 p-2.5 text-sm text-slate-500 transition-colors hover:border-slate-700 hover:text-slate-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:border-gray-200 disabled:hover:text-gray-300"
+                          className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-slate-400 p-2 text-[14px] text-slate-500 transition-colors hover:border-slate-700 hover:text-slate-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:border-gray-200 disabled:hover:text-gray-300"
                           disabled={!isEditableWeek}
                           onClick={() => openAddDialog(dateStr, emp.id)}
                         >
@@ -780,7 +781,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                       </td>
                     )
                   })}
-                  <td className="p-4 text-center font-semibold text-base">
+                  <td className="p-3.5 text-center font-semibold text-[15px]">
                     {formatHours(getWeeklyHours(emp.id))}
                   </td>
                 </tr>
@@ -792,18 +793,18 @@ export function PlanningGrid({ department }: PlanningGridProps) {
             {displayedEmployees.length > 0 && (
               <tfoot className="bg-slate-100">
                 <tr>
-                  <td className="p-4 text-base font-semibold border-t">Daily Total Hours</td>
+                  <td className="p-3.5 text-[15px] font-semibold border-t">Daily Total Hours</td>
                   {days.map(d => (
-                    <td key={`total-${d.toISOString()}`} className="border-t p-4 text-center">
-                      <div className="text-lg font-semibold text-slate-900">{formatHours(getDayTotal(formatDate(d)))}</div>
-                      <div className="text-xs text-muted-foreground mt-1">{formatDisplayDate(d)}</div>
+                    <td key={`total-${d.toISOString()}`} className="border-t p-3.5 text-center">
+                      <div className="text-[18px] font-semibold text-slate-900">{formatHours(getDayTotal(formatDate(d)))}</div>
+                      <div className="text-[11px] text-muted-foreground mt-1">{formatDisplayDate(d)}</div>
                     </td>
                   ))}
-                  <td className="border-t p-4 text-center">
-                    <div className="text-lg font-semibold text-slate-900">
+                  <td className="border-t p-3.5 text-center">
+                    <div className="text-[18px] font-semibold text-slate-900">
                       {formatHours(displayedEmployees.reduce((sum, employee) => sum + getWeeklyHours(employee.id), 0))}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">Week Total</div>
+                    <div className="text-[11px] text-muted-foreground mt-1">Week Total</div>
                   </td>
                 </tr>
               </tfoot>
@@ -1014,6 +1015,37 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                 </Button>
                 <Button variant="ghost" className="h-10" onClick={() => setShiftActionTarget(null)}>
                   Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!staffRemovalTarget} onOpenChange={open => !open && setStaffRemovalTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remove Staff Line</DialogTitle>
+          </DialogHeader>
+          {staffRemovalTarget && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Remove <span className="font-semibold text-slate-900">{staffRemovalTarget.name}</span> from this weekly planner?
+                This will also remove all unpublished shifts for this staff line in the current week.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => setStaffRemovalTarget(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1"
+                  variant="destructive"
+                  onClick={() => {
+                    removeStaffRow(staffRemovalTarget.id)
+                    setStaffRemovalTarget(null)
+                  }}
+                >
+                  Remove Line
                 </Button>
               </div>
             </div>
