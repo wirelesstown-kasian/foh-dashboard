@@ -335,10 +335,14 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     }
   }, [currentDraftKey, drafts, isEditableWeek])
 
+  useEffect(() => {
+    if (!addDialog) return
+    const defaults = getDefaultTimes(addDialog.date)
+    setAddForm({ start_time: defaults.start, end_time: defaults.end, is_off: defaults.isOff })
+  }, [addDialog])
+
   const openAddDialog = (date: string, employee_id: string) => {
     if (!isEditableWeek) return
-    const defaults = getDefaultTimes(date)
-    setAddForm({ start_time: defaults.start, end_time: defaults.end, is_off: defaults.isOff })
     setAddDialog({ date, employee_id })
   }
 
