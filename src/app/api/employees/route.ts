@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, role, birth_date, pin } = await req.json()
+  const { name, phone, email, role, birth_date, pin, hourly_wage, guaranteed_hourly } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
@@ -51,12 +51,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'PIN must be 4 digits' }, { status: 400 })
   }
 
+  const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
+  const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
+  if (hourlyWage !== null && Number.isNaN(hourlyWage)) {
+    return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
+  }
+  if (guaranteedHourly !== null && Number.isNaN(guaranteedHourly)) {
+    return NextResponse.json({ error: 'Invalid guaranteed hourly amount' }, { status: 400 })
+  }
+
   const pin_hash = await hashPin(pin)
   const { error } = await supabaseAdmin.from('employees').insert({
     name: name.trim(),
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim() : null,
     role,
+    hourly_wage: hourlyWage,
+    guaranteed_hourly: role === 'server' ? guaranteedHourly : null,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     pin_hash,
   })
@@ -73,7 +84,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, role, birth_date, pin } = await req.json()
+  const { id, name, phone, email, role, birth_date, pin, hourly_wage, guaranteed_hourly } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -84,11 +95,22 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   }
 
+  const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
+  const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
+  if (hourlyWage !== null && Number.isNaN(hourlyWage)) {
+    return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
+  }
+  if (guaranteedHourly !== null && Number.isNaN(guaranteedHourly)) {
+    return NextResponse.json({ error: 'Invalid guaranteed hourly amount' }, { status: 400 })
+  }
+
   const update: {
     name: string
     phone: string | null
     email: string | null
     role: EmployeeRole
+    hourly_wage: number | null
+    guaranteed_hourly: number | null
     birth_date: string | null
     pin_hash?: string
   } = {
@@ -96,6 +118,8 @@ export async function PATCH(req: NextRequest) {
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim() : null,
     role,
+    hourly_wage: hourlyWage,
+    guaranteed_hourly: role === 'server' ? guaranteedHourly : null,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
   }
 

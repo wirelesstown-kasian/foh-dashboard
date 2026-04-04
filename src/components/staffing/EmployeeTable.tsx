@@ -44,13 +44,15 @@ interface FormState {
   phone: string
   email: string
   role: EmployeeRole
+  hourly_wage: string
+  guaranteed_hourly: string
   birth_date: string
   pin: string
 }
 
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', birth_date: '', pin: '' }
+const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '' }
 const ROLE_LABELS: Record<EmployeeRole, string> = {
   manager: 'Manager',
   server: 'Server',
@@ -98,6 +100,8 @@ export function EmployeeTable() {
       phone: emp.phone ?? '',
       email: emp.email ?? '',
       role: emp.role,
+      hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
+      guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       birth_date: emp.birth_date ?? '',
       pin: '',
     })
@@ -215,6 +219,8 @@ export function EmployeeTable() {
               <TableHead>Role</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Email</TableHead>
+              <TableHead>Hourly Wage</TableHead>
+              <TableHead>Guaranteed / Hr</TableHead>
               <TableHead>Birthday</TableHead>
               <TableHead>PIN</TableHead>
               <TableHead className="w-24">Actions</TableHead>
@@ -238,6 +244,8 @@ export function EmployeeTable() {
                 </TableCell>
                 <TableCell>{emp.phone ?? '—'}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{emp.email ?? '—'}</TableCell>
+                <TableCell>{emp.hourly_wage !== null ? `$${emp.hourly_wage.toFixed(2)}` : '—'}</TableCell>
+                <TableCell>{emp.guaranteed_hourly !== null ? `$${emp.guaranteed_hourly.toFixed(2)}` : '—'}</TableCell>
                 <TableCell>
                   {emp.birth_date ? format(new Date(emp.birth_date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
                 </TableCell>
@@ -258,7 +266,7 @@ export function EmployeeTable() {
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                   No employees found
                 </TableCell>
               </TableRow>
@@ -299,6 +307,32 @@ export function EmployeeTable() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Hourly Wage</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={form.hourly_wage}
+                  onChange={e => setForm(f => ({ ...f, hourly_wage: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <Label>Guaranteed / Hr</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={form.guaranteed_hourly}
+                  onChange={e => setForm(f => ({ ...f, guaranteed_hourly: e.target.value }))}
+                  placeholder={form.role === 'server' ? '0.00' : 'Servers only'}
+                  disabled={form.role !== 'server'}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              If a server&apos;s wages plus tips do not reach the guaranteed amount per hour, the difference is paid as a guarantee top-up.
+            </p>
             <div>
               <Label>Birth Date</Label>
               <Input type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))} />

@@ -37,6 +37,8 @@ import * as XLSX from 'xlsx'
 
 type Period = 'daily' | 'weekly' | 'monthly'
 type ReportDepartment = 'foh' | 'boh'
+type TipReportPeriod = 'weekly' | 'monthly'
+type TipReportView = 'earnings' | 'tips'
 type TipDetail = {
   date: string
   amount: number | null
@@ -67,6 +69,18 @@ type RankingCard = {
   rank: number
   value: string
   accentClass: string
+}
+
+type TipSummaryRow = {
+  emp: Employee
+  hours: number
+  tips: number
+  baseWages: number
+  guaranteedTarget: number
+  guaranteeTopUp: number
+  totalEarnings: number
+  tipRate: number | null
+  effectiveRate: number | null
 }
 
 function formatCurrency(value: number) {
@@ -107,6 +121,8 @@ export default function ReportingPage() {
   const [period, setPeriod] = useState<Period>('weekly')
   const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [refDate, setRefDate] = useState(new Date())
+  const [tipReportPeriod, setTipReportPeriod] = useState<TipReportPeriod>('weekly')
+  const [tipReportView, setTipReportView] = useState<TipReportView>('earnings')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
   const isCompletedTask = (completion: TaskCompletion) => completion.status !== 'incomplete'
@@ -240,30 +256,6 @@ export default function ReportingPage() {
     end: endOfWeek(refDate, { weekStartsOn: 1 }),
   })
   const weeklyEodReports = eodReports.filter(r => r.session_date >= tipWeekStart && r.session_date <= tipWeekEnd)
-  const totalHoursByDay = new Map<string, number>()
-  const totalTipsByDay = new Map<string, number>()
-  const totalHouseByDay = new Map<string, number>()
-
-  for (const report of weeklyEodReports) {
-    totalHoursByDay.set(
-      report.session_date,
-      (report.tip_distributions ?? []).reduce((sum, dist) => (
-        filteredEmployeeIds.has(dist.employee_id) ? sum + Number(dist.hours_worked) : sum
-      ), 0)
-    )
-    totalTipsByDay.set(
-      report.session_date,
-      (report.tip_distributions ?? []).reduce((sum, dist) => (
-        filteredEmployeeIds.has(dist.employee_id) ? sum + Number(dist.net_tip) : sum
-      ), 0)
-    )
-    totalHouseByDay.set(
-      report.session_date,
-      (report.tip_distributions ?? []).reduce((sum, dist) => (
-        filteredEmployeeIds.has(dist.employee_id) ? sum + Number(dist.house_deduction) : sum
-      ), 0)
-    )
-  }
 
   const tipByEmployee = filteredEmployees.map(emp => {
     const daily: TipDetail[] = weekDays.map(day => {
@@ -287,23 +279,34 @@ export default function ReportingPage() {
     return { emp, daily, total, totalHours, totalHouse, totalRate }
   }).filter(x => x.total > 0)
 
-  const tipDailyTotals = weekDays.map(day => {
-    const dateKey = format(day, 'yyyy-MM-dd')
-    const totalHours = totalHoursByDay.get(dateKey) ?? 0
-    const totalTips = totalTipsByDay.get(dateKey) ?? 0
-    const totalHouse = totalHouseByDay.get(dateKey) ?? 0
+  const [tipRangeStart, tipRangeEnd] = tipReportPeriod === 'weekly'
+    ? [tipWeekStart, tipWeekEnd]
+    : [monthStart, monthEnd]
+  const tipRangeReports = eodReports.filter(r => r.session_date >= tipRangeStart && r.session_date <= tipRangeEnd)
+  const tipSummaryRows: TipSummaryRow[] = filteredEmployees.map(emp => {
+    const distributions = tipRangeReports.flatMap(report =>
+      (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
+    )
+    const hours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
+    const tips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
+    const baseWages = hours * (emp.hourly_wage ?? 0)
+    const guaranteedTarget = hours * (emp.guaranteed_hourly ?? 0)
+    const guaranteeTopUp = Math.max(0, guaranteedTarget - (baseWages + tips))
+    const totalEarnings = baseWages + tips + guaranteeTopUp
+
     return {
-      date: dateKey,
-      totalHours,
-      totalTips,
-      totalHouse,
-      totalRate: totalHours > 0 ? totalTips / totalHours : null,
+      emp,
+      hours,
+      tips,
+      baseWages,
+      guaranteedTarget,
+      guaranteeTopUp,
+      totalEarnings,
+      tipRate: hours > 0 ? tips / hours : null,
+      effectiveRate: hours > 0 ? totalEarnings / hours : null,
     }
-  })
-  const weekTotalHours = tipDailyTotals.reduce((sum, item) => sum + item.totalHours, 0)
-  const weekTotalTips = tipDailyTotals.reduce((sum, item) => sum + item.totalTips, 0)
-  const weekTotalHouse = tipDailyTotals.reduce((sum, item) => sum + item.totalHouse, 0)
-  const weekTotalRate = weekTotalHours > 0 ? weekTotalTips / weekTotalHours : null
+  }).filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
+    .sort((a, b) => b.totalEarnings - a.totalEarnings)
 
   const selectedEmployeeStats = employeeMonthStats.find(item => item.emp.id === selectedEmployeeId) ?? null
   const selectedWeekTips = tipByEmployee.find(item => item.emp.id === selectedEmployeeId) ?? null
@@ -336,30 +339,23 @@ export default function ReportingPage() {
   ] : []
 
   const exportTips = () => {
-    const rows = tipByEmployee.flatMap(({ emp, daily, total, totalHours, totalHouse, totalRate }) => [
-      ...daily.map(d => ({
-        Name: emp.name,
-        Role: emp.role,
-        Date: d.date,
-        Hours: d.hours.toFixed(2),
-        'Tip Amount': d.amount !== null ? `$${d.amount.toFixed(2)}` : '—',
-        'Tip / Hr': d.rate !== null ? `$${d.rate.toFixed(2)}` : '—',
-        'House 15%': d.houseDeduction ? `$${d.houseDeduction.toFixed(2)}` : '—',
-      })),
-      {
-        Name: emp.name,
-        Role: '',
-        Date: 'TOTAL',
-        Hours: totalHours.toFixed(2),
-        'Tip Amount': `$${total.toFixed(2)}`,
-        'Tip / Hr': totalRate !== null ? `$${totalRate.toFixed(2)}` : '—',
-        'House 15%': `$${totalHouse.toFixed(2)}`,
-      },
-    ])
+    const rows = tipSummaryRows.map(row => ({
+      Name: row.emp.name,
+      Role: row.emp.role,
+      Hours: row.hours.toFixed(2),
+      Tips: formatCurrency(row.tips),
+      'Tip / Hr': row.tipRate !== null ? formatCurrency(row.tipRate) : '—',
+      'Hourly Wage': row.emp.hourly_wage !== null ? formatCurrency(row.emp.hourly_wage) : '—',
+      'Base Wages': formatCurrency(row.baseWages),
+      'Guaranteed / Hr': row.emp.guaranteed_hourly !== null ? formatCurrency(row.emp.guaranteed_hourly) : '—',
+      'Guarantee Top-Up': formatCurrency(row.guaranteeTopUp),
+      'Total Earnings': formatCurrency(row.totalEarnings),
+      'Effective / Hr': row.effectiveRate !== null ? formatCurrency(row.effectiveRate) : '—',
+    }))
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Tip Report')
-    XLSX.writeFile(wb, `tip-report-${tipWeekStart}.xlsx`)
+    XLSX.writeFile(wb, `tip-report-${tipRangeStart}.xlsx`)
   }
 
   const exportPerformance = () => {
@@ -739,86 +735,105 @@ export default function ReportingPage() {
         <TabsContent value="tips">
           <div className="bg-white rounded-xl border p-5">
             <div className="flex items-center gap-3 mb-4">
-              <Button variant="outline" size="sm" onClick={() => setRefDate(d => subWeeks(d, 1))}>←</Button>
-              <span className="font-medium text-sm min-w-48 text-center">
-                Week of {format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}
+              <Select value={tipReportPeriod} onValueChange={(v: string | null) => v && setTipReportPeriod(v as TipReportPeriod)}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={tipReportView} onValueChange={(v: string | null) => v && setTipReportView(v as TipReportView)}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="earnings">Earnings</SelectItem>
+                  <SelectItem value="tips">Tip Only</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'weekly' ? subWeeks(d, 1) : subMonths(d, 1))}>←</Button>
+              <span className="font-medium text-sm min-w-56 text-center">
+                {tipReportPeriod === 'weekly'
+                  ? `Week of ${format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
+                  : format(refDate, 'MMMM yyyy')}
               </span>
-              <Button variant="outline" size="sm" onClick={() => setRefDate(d => addWeeks(d, 1))}>→</Button>
+              <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'weekly' ? addWeeks(d, 1) : addMonths(d, 1))}>→</Button>
               <Button variant="outline" size="sm" className="ml-auto" onClick={exportTips}>
                 <Download className="w-4 h-4 mr-2" /> Export Excel
               </Button>
+            </div>
+            <div className="mb-4 grid gap-4 md:grid-cols-4">
+              <div className="rounded-xl border bg-green-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-green-700">Tips</div>
+                <div className="mt-2 text-2xl font-bold text-green-950">{formatCurrency(tipSummaryRows.reduce((sum, row) => sum + row.tips, 0))}</div>
+              </div>
+              <div className="rounded-xl border bg-sky-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-sky-700">Hours</div>
+                <div className="mt-2 text-2xl font-bold text-sky-950">{tipSummaryRows.reduce((sum, row) => sum + row.hours, 0).toFixed(1)}h</div>
+              </div>
+              <div className="rounded-xl border bg-amber-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-amber-700">Base Wages</div>
+                <div className="mt-2 text-2xl font-bold text-amber-950">{formatCurrency(tipSummaryRows.reduce((sum, row) => sum + row.baseWages, 0))}</div>
+              </div>
+              <div className="rounded-xl border bg-violet-50 p-4">
+                <div className="text-xs font-medium uppercase tracking-wide text-violet-700">Guarantee Top-Up</div>
+                <div className="mt-2 text-2xl font-bold text-violet-950">{formatCurrency(tipSummaryRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0))}</div>
+              </div>
             </div>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  {weekDays.map(d => (
-                    <TableHead key={d.toISOString()} className="text-center">
-                      <div>{format(d, 'EEE')}</div>
-                      <div className="text-xs font-normal text-muted-foreground">{format(d, 'M/d')}</div>
-                      <div className="text-[11px] font-normal text-muted-foreground mt-1">
-                        {totalHoursByDay.get(format(d, 'yyyy-MM-dd'))?.toFixed(1) ?? '0.0'}h total
-                      </div>
-                    </TableHead>
-                  ))}
-                  <TableHead className="text-right">Weekly Hours</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead className="text-right">Hours</TableHead>
+                  <TableHead className="text-right">Tips</TableHead>
                   <TableHead className="text-right">Tip / Hr</TableHead>
-                  <TableHead className="text-right">House 15%</TableHead>
-                    <TableHead className="text-right">Weekly Total</TableHead>
+                  {tipReportView === 'earnings' && (
+                    <>
+                      <TableHead className="text-right">Hourly Wage</TableHead>
+                      <TableHead className="text-right">Base Wages</TableHead>
+                      <TableHead className="text-right">Guaranteed / Hr</TableHead>
+                      <TableHead className="text-right">Guarantee Top-Up</TableHead>
+                      <TableHead className="text-right">Total Earnings</TableHead>
+                      <TableHead className="text-right">Effective / Hr</TableHead>
+                    </>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tipByEmployee.map(({ emp, daily, total, totalHours, totalRate, totalHouse }) => (
-                  <TableRow key={emp.id}>
+                {tipSummaryRows.map(row => (
+                  <TableRow key={row.emp.id}>
                     <TableCell>
-                      <button className="font-medium text-left hover:underline" onClick={() => setSelectedEmployeeId(emp.id)}>
-                        {emp.name}
+                      <button className="font-medium text-left hover:underline" onClick={() => setSelectedEmployeeId(row.emp.id)}>
+                        {row.emp.name}
                       </button>
                     </TableCell>
-                    {daily.map((d, i) => (
-                      <TableCell key={i} className="text-center text-xs leading-5">
-                        {d.amount !== null ? (
-                          <div>
-                            <div className="font-semibold text-green-700">${d.amount.toFixed(2)}</div>
-                            <div className="text-muted-foreground">{d.hours.toFixed(1)}h worked</div>
-                            <div className="text-muted-foreground">{d.rate !== null ? `$${d.rate.toFixed(2)}/hr` : '—/hr'}</div>
-                            <div className="text-amber-700">House: ${d.houseDeduction.toFixed(2)}</div>
-                          </div>
-                        ) : (
-                          <span className="text-gray-300">—</span>
-                        )}
-                      </TableCell>
-                    ))}
-                    <TableCell className="text-right text-sm text-muted-foreground">{totalHours.toFixed(1)}h</TableCell>
-                    <TableCell className="text-right text-sm">{totalRate !== null ? `$${totalRate.toFixed(2)}` : '—'}</TableCell>
-                    <TableCell className="text-right text-sm text-amber-700">${totalHouse.toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-bold text-green-700">${total.toFixed(2)}</TableCell>
+                    <TableCell className="capitalize text-muted-foreground">{row.emp.role}</TableCell>
+                    <TableCell className="text-right">{row.hours.toFixed(1)}h</TableCell>
+                    <TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
+                    <TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
+                    {tipReportView === 'earnings' && (
+                      <>
+                        <TableCell className="text-right">{row.emp.hourly_wage !== null ? formatCurrency(row.emp.hourly_wage) : '—'}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(row.baseWages)}</TableCell>
+                        <TableCell className="text-right">{row.emp.guaranteed_hourly !== null ? formatCurrency(row.emp.guaranteed_hourly) : '—'}</TableCell>
+                        <TableCell className="text-right text-violet-700">{formatCurrency(row.guaranteeTopUp)}</TableCell>
+                        <TableCell className="text-right font-bold text-slate-900">{formatCurrency(row.totalEarnings)}</TableCell>
+                        <TableCell className="text-right">{row.effectiveRate !== null ? formatCurrency(row.effectiveRate) : '—'}</TableCell>
+                      </>
+                    )}
                   </TableRow>
                 ))}
-                {tipByEmployee.length > 0 && (
-                  <TableRow className="bg-amber-50/70">
-                    <TableCell className="font-semibold">Daily Total</TableCell>
-                    {tipDailyTotals.map(day => (
-                      <TableCell key={day.date} className="text-center text-xs leading-5">
-                        <div className="font-semibold text-amber-900">${day.totalTips.toFixed(2)}</div>
-                        <div className="text-muted-foreground">{day.totalHours.toFixed(1)}h worked</div>
-                        <div className="text-muted-foreground">{day.totalRate !== null ? `$${day.totalRate.toFixed(2)}/hr` : '—/hr'}</div>
-                        <div className="text-amber-700">House: ${day.totalHouse.toFixed(2)}</div>
-                      </TableCell>
-                    ))}
-                    <TableCell className="text-right text-sm font-medium text-amber-900">{weekTotalHours.toFixed(1)}h</TableCell>
-                    <TableCell className="text-right text-sm font-medium">{weekTotalRate !== null ? `$${weekTotalRate.toFixed(2)}` : '—'}</TableCell>
-                    <TableCell className="text-right text-sm font-medium text-amber-700">${weekTotalHouse.toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-bold text-green-700">${weekTotalTips.toFixed(2)}</TableCell>
-                  </TableRow>
-                )}
-                {tipByEmployee.length === 0 && (
+                {tipSummaryRows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center text-muted-foreground py-6">No tip data for this week</TableCell>
+                    <TableCell colSpan={tipReportView === 'earnings' ? 11 : 5} className="text-center text-muted-foreground py-6">
+                      No tip or wage data for this {tipReportPeriod}
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
+            <p className="mt-4 text-xs text-muted-foreground">
+              Guarantee means if wages plus tips do not reach the guaranteed amount per worked hour, the remaining difference is paid as a guarantee top-up.
+            </p>
           </div>
         </TabsContent>
 

@@ -11,6 +11,8 @@ export interface Employee {
   email: string | null
   pin_hash: string
   role: EmployeeRole
+  hourly_wage: number | null
+  guaranteed_hourly: number | null
   birth_date: string | null
   is_active: boolean
   created_at: string
