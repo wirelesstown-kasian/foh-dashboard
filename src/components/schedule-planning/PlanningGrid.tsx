@@ -788,8 +788,27 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap items-center gap-2 md:gap-3">
+      <div className="mb-4 overflow-x-auto rounded-[18px] border border-slate-300 bg-white px-3.5 py-2 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
+        <div className="flex min-w-max items-center gap-3 whitespace-nowrap">
+          {/* 1. FOH / BOH */}
+          {rightSlot}
+          {/* 2. Today's Week */}
+          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
+            Today&apos;s Week
+          </Button>
+          {/* 3. Date navigation */}
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <span className="min-w-48 text-center text-base font-semibold tracking-tight text-slate-900">
+              {formatWeekRange(weekRef)}
+            </span>
+            <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+          {/* 4. Status badges */}
           {isDirty && (
             <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
               <CloudOff className="w-3 h-3" /> Unpublished Draft
@@ -803,30 +822,21 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           )}
           {!isEditableWeek && (
             <span className="text-xs text-gray-600 bg-gray-100 border border-gray-300 rounded-full px-2 py-0.5">
-              Archived Week · Only current week and last week can be edited
+              Archived Week
             </span>
           )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {rightSlot}
-          <Button variant="outline" size="sm" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <span className="font-medium text-sm min-w-48 text-center">{formatWeekRange(weekRef)}</span>
-          <Button variant="outline" size="sm" onClick={() => setWeekRef(getNextWeek(weekRef))}>
-            <ChevronRight className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" className="h-11 px-4 text-sm" onClick={() => void copyPreviousWeekForAll()} disabled={!isEditableWeek}>
-            <Copy className="w-4 h-4 mr-2" />
+          {/* 5. Action buttons */}
+          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => void copyPreviousWeekForAll()} disabled={!isEditableWeek}>
+            <Copy className="w-4 h-4 mr-1.5" />
             Copy Previous Week
           </Button>
-          <Button variant="outline" className="h-11 px-4 text-sm" onClick={exportPlannerPdf}>
-            <Download className="w-4 h-4 mr-2" />
+          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportPlannerPdf}>
+            <Download className="w-4 h-4 mr-1.5" />
             Export PDF
           </Button>
-          <Button className="h-11 px-4 text-sm" onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
-            <Send className="w-4 h-4 mr-2" />
-            Publish {department.toUpperCase()} Schedule
+          <Button size="sm" className="h-8 rounded-lg px-3" onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
+            <Send className="w-4 h-4 mr-1.5" />
+            Publish {department.toUpperCase()}
           </Button>
         </div>
       </div>

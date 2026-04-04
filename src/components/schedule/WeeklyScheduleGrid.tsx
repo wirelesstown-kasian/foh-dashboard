@@ -212,45 +212,41 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     <div className="space-y-2">
       <div className="overflow-x-auto rounded-[18px] border border-slate-300 bg-white px-3.5 py-2 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
         <div className="flex min-w-max items-center gap-3 whitespace-nowrap">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <h1 className="pt-0.5 text-base font-semibold tracking-tight text-slate-900">
-                {formatWeekRange(weekRef)}
-              </h1>
-              <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
-                {employees.length} staff
-              </span>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
-                {totalShifts} shifts
-              </span>
-              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
-                {formatHours(totalWeekHours)} total
-              </span>
-            </div>
+          {/* 1. FOH / BOH */}
+          {rightSlot}
+          {/* 2. Today's Week */}
+          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
+            Today&apos;s Week
+          </Button>
+          {/* 3. Date navigation */}
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <h1 className="min-w-48 text-center pt-0.5 text-base font-semibold tracking-tight text-slate-900">
+              {formatWeekRange(weekRef)}
+            </h1>
+            <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
           </div>
-
+          {/* 4. Info badges */}
           <div className="flex items-center gap-2">
-            {rightSlot}
-            <div className="rounded-xl border border-slate-300 bg-slate-50 p-1.5">
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
-                  Today&apos;s Week
-                </Button>
-                <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportDepartmentPdf}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Export PDF
-                </Button>
-              </div>
-            </div>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+              {employees.length} staff
+            </span>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+              {totalShifts} shifts
+            </span>
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+              {formatHours(totalWeekHours)} total
+            </span>
           </div>
+          {/* 5. Export */}
+          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportDepartmentPdf}>
+            <Download className="w-4 h-4 mr-1.5" />
+            Export PDF
+          </Button>
         </div>
       </div>
 
