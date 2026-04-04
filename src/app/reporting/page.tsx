@@ -311,6 +311,8 @@ export default function ReportingPage() {
   const selectedEmployeeStats = employeeMonthStats.find(item => item.emp.id === selectedEmployeeId) ?? null
   const selectedWeekTips = tipByEmployee.find(item => item.emp.id === selectedEmployeeId) ?? null
   const selectedPeriodTasks = perfStats.find(item => item.emp.id === selectedEmployeeId) ?? null
+  const selectedTipSummary = tipSummaryRows.find(item => item.emp.id === selectedEmployeeId) ?? null
+  const showWeeklyPayStub = tipReportView === 'earnings' && tipReportPeriod === 'weekly' && !!selectedTipSummary
   const rankingCards: RankingCard[] = selectedEmployeeStats ? [
     {
       label: 'Task Rank',
@@ -390,12 +392,14 @@ export default function ReportingPage() {
   }
 
   const exportEmployeePdf = () => {
-    if (!employeeReportRef.current || !selectedEmployeeStats) return
+    if (!employeeReportRef.current || (!selectedEmployeeStats && !selectedTipSummary)) return
 
     const printWindow = window.open('', '_blank', 'width=1400,height=900')
     if (!printWindow) return
 
-    const reportTitle = `${selectedEmployeeStats.emp.name} Performance Report`
+    const reportTitle = showWeeklyPayStub
+      ? `${selectedTipSummary?.emp.name ?? 'Employee'} Weekly Pay Stub`
+      : `${selectedEmployeeStats?.emp.name ?? 'Employee'} Performance Report`
     printWindow.document.write(`
       <html>
         <head>
@@ -883,9 +887,11 @@ export default function ReportingPage() {
           <DialogHeader className="border-b px-8 py-5">
             <div className="flex items-center justify-between gap-4">
               <DialogTitle>
-                {selectedEmployeeStats?.emp.name ?? selectedWeekTips?.emp.name ?? selectedPeriodTasks?.emp.name ?? 'Employee'} Performance
+                {showWeeklyPayStub
+                  ? `${selectedTipSummary?.emp.name ?? 'Employee'} Weekly Pay Stub`
+                  : `${selectedEmployeeStats?.emp.name ?? selectedWeekTips?.emp.name ?? selectedPeriodTasks?.emp.name ?? 'Employee'} Performance`}
               </DialogTitle>
-              {selectedEmployeeStats && (
+              {(selectedEmployeeStats || selectedTipSummary) && (
                 <Button variant="outline" size="sm" onClick={exportEmployeePdf}>
                   <Download className="w-4 h-4 mr-2" /> Export PDF
                 </Button>
@@ -893,7 +899,64 @@ export default function ReportingPage() {
             </div>
           </DialogHeader>
           <div className="overflow-y-auto px-8 py-6">
-            {selectedEmployeeStats ? (
+            {showWeeklyPayStub && selectedTipSummary ? (
+              <div ref={employeeReportRef} className="print-page mx-auto w-full max-w-[1080px] space-y-6">
+                <div className="print-header">
+                  <div>
+                    <h1 className="print-title">{selectedTipSummary.emp.name} Weekly Pay Stub</h1>
+                    <div className="print-subtitle">
+                      {format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')} - {format(endOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')} · {selectedTipSummary.emp.role}
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="border-sky-300 bg-sky-50 px-3 py-1 text-sky-800">
+                    Total {formatCurrency(selectedTipSummary.totalEarnings)}
+                  </Badge>
+                </div>
+
+                <div className="metric-grid !grid-cols-4">
+                  <div className="card">
+                    <div className="text-sm text-muted-foreground">Hours Worked</div>
+                    <div className="mt-2 text-3xl font-bold">{selectedTipSummary.hours.toFixed(2)}h</div>
+                  </div>
+                  <div className="card">
+                    <div className="text-sm text-muted-foreground">Tips Earned</div>
+                    <div className="mt-2 text-3xl font-bold text-green-700">{formatCurrency(selectedTipSummary.tips)}</div>
+                  </div>
+                  <div className="card">
+                    <div className="text-sm text-muted-foreground">Base Wages</div>
+                    <div className="mt-2 text-3xl font-bold text-amber-700">{formatCurrency(selectedTipSummary.baseWages)}</div>
+                  </div>
+                  <div className="card">
+                    <div className="text-sm text-muted-foreground">Guarantee Top-Up</div>
+                    <div className="mt-2 text-3xl font-bold text-violet-700">{formatCurrency(selectedTipSummary.guaranteeTopUp)}</div>
+                  </div>
+                </div>
+
+                <div className="detail-grid">
+                  <div className="card">
+                    <h3 className="font-semibold mb-3">Pay Breakdown</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between"><span className="text-muted-foreground">Hourly Wage</span><span className="font-semibold">{selectedTipSummary.emp.hourly_wage !== null ? formatCurrency(selectedTipSummary.emp.hourly_wage) : '—'}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Guaranteed / Hr</span><span className="font-semibold">{selectedTipSummary.emp.guaranteed_hourly !== null ? formatCurrency(selectedTipSummary.emp.guaranteed_hourly) : '—'}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Guaranteed Target</span><span className="font-semibold">{formatCurrency(selectedTipSummary.guaranteedTarget)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Tips</span><span className="font-semibold">{formatCurrency(selectedTipSummary.tips)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Base Wages</span><span className="font-semibold">{formatCurrency(selectedTipSummary.baseWages)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Guarantee Top-Up</span><span className="font-semibold text-violet-700">{formatCurrency(selectedTipSummary.guaranteeTopUp)}</span></div>
+                      <div className="flex justify-between border-t pt-2"><span className="font-medium">Total Earnings</span><span className="font-bold">{formatCurrency(selectedTipSummary.totalEarnings)}</span></div>
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <h3 className="font-semibold mb-3">Notes</h3>
+                    <div className="space-y-3 text-sm text-muted-foreground">
+                      <p>This weekly stub combines base hourly wages and tips.</p>
+                      <p>If wages plus tips did not reach the guaranteed hourly target, the difference is paid as a guarantee top-up.</p>
+                      <p>Effective hourly earnings this week: <span className="font-semibold text-slate-900">{selectedTipSummary.effectiveRate !== null ? formatCurrency(selectedTipSummary.effectiveRate) : '—'}</span></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : selectedEmployeeStats ? (
               <div ref={employeeReportRef} className="print-page mx-auto w-full max-w-[1680px] space-y-6">
               <div className="print-header">
                 <div>
@@ -997,7 +1060,6 @@ export default function ReportingPage() {
                     <div className="flex justify-between"><span className="text-muted-foreground">Weekly Hours</span><span className="font-semibold">{selectedWeekTips?.totalHours.toFixed(1) ?? '0.0'}h</span></div>
                     <div className="flex justify-between"><span className="text-muted-foreground">Weekly Tips</span><span className="font-semibold">{formatCurrency(selectedWeekTips?.total ?? 0)}</span></div>
                     <div className="flex justify-between"><span className="text-muted-foreground">Tip / Hr</span><span className="font-semibold">{selectedWeekTips?.totalRate !== null && selectedWeekTips?.totalRate !== undefined ? formatCurrency(selectedWeekTips.totalRate) : '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">House 15%</span><span className="font-semibold">{formatCurrency(selectedWeekTips?.totalHouse ?? 0)}</span></div>
                   </div>
                 </div>
               </div>
