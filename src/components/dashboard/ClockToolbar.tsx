@@ -99,7 +99,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
     return canvas.toDataURL('image/jpeg', 0.9)
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (skipPhoto = false) => {
     if (!target) return
     setError(null)
 
@@ -108,8 +108,8 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
       return
     }
 
-    const photo = captureFrame()
-    if (!photo) {
+    const photo = skipPhoto ? null : captureFrame()
+    if (!skipPhoto && !photo) {
       setError('Camera preview is not ready yet')
       return
     }
@@ -124,6 +124,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
           pin,
           session_date: today,
           photo_data_url: photo,
+          skip_photo: skipPhoto,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -223,9 +224,19 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
                 {error}
               </div>
             )}
-            <Button className="w-full" onClick={handleSubmit} disabled={submitting || !cameraReady}>
+            <Button className="w-full" onClick={() => void handleSubmit(false)} disabled={submitting || !cameraReady}>
               {submitting ? 'Saving…' : target === 'clock_out' ? CLOCK_OUT_TITLE : CLOCK_IN_TITLE}
             </Button>
+            {target === 'clock_in' && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => void handleSubmit(true)}
+                disabled={submitting}
+              >
+                {submitting ? 'Saving…' : 'Manager Clock In Without Photo'}
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

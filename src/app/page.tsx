@@ -48,11 +48,17 @@ export default function DashboardPage() {
         supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),
         supabase.from('task_completions').select('*, employee:employees(*)').eq('session_date', today),
         supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
-        fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => {
-          const payload = (await res.json().catch(() => ({}))) as { error?: string; records?: ShiftClock[] }
-          if (!res.ok) throw new Error(payload.error ?? 'Failed to load clock records')
-          return payload
-        }),
+        fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' })
+          .then(async res => {
+            const payload = (await res.json().catch(() => ({}))) as { error?: string; records?: ShiftClock[] }
+            return res.ok
+              ? { records: payload.records ?? [], error: null }
+              : { records: [] as ShiftClock[], error: payload.error ?? 'Failed to load clock records' }
+          })
+          .catch((error: unknown) => ({
+            records: [] as ShiftClock[],
+            error: error instanceof Error ? error.message : 'Failed to load clock records',
+          })),
       ])
 
       const loadedTasks = (taskRes.data ?? []).filter(task => !isSystemClockTask(task))
@@ -66,6 +72,9 @@ export default function DashboardPage() {
       setClockRecords(clockRes.records ?? [])
       setSession(loadedSession)
       setNotes(loadedSession?.notes ?? '')
+      if (clockRes.error) {
+        setLoadError(`Clock system offline: ${clockRes.error}`)
+      }
     } catch (error) {
       console.error('Failed to load dashboard data', error)
       setLoadError(error instanceof Error ? error.message : 'Failed to load dashboard data')

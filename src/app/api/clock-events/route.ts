@@ -133,7 +133,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabaseAdmin
     .from('shift_clocks')
-    .select('*, employee:employees(*)')
+    .select('*, employee:employees!shift_clocks_employee_id_fkey(*)')
     .order('session_date', { ascending: false })
     .order('clock_in_at', { ascending: false })
 
@@ -160,15 +160,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   await processOverdueClockRecords()
 
-  const { action, pin, session_date, photo_data_url, task_id } = await req.json() as {
+  const { action, pin, session_date, photo_data_url, task_id, skip_photo } = await req.json() as {
     action?: 'clock_in' | 'clock_out'
     pin?: string
     session_date?: string
     photo_data_url?: string
     task_id?: string
+    skip_photo?: boolean
   }
 
-  if (!action || !session_date || !photo_data_url) {
+  if (!action || !session_date) {
     return NextResponse.json({ error: 'Missing clock payload' }, { status: 400 })
   }
   if (!isValidPin(pin)) {
@@ -193,11 +194,18 @@ export async function POST(req: NextRequest) {
 
   const nowIso = new Date().toISOString()
   const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.jpg`
+  const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
 
-  try {
-    await uploadPhoto(photo_data_url, photoPath)
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to upload photo' }, { status: 500 })
+  if (!allowPhotoSkip && !photo_data_url) {
+    return NextResponse.json({ error: 'Photo is required for clock events' }, { status: 400 })
+  }
+
+  if (photo_data_url) {
+    try {
+      await uploadPhoto(photo_data_url, photoPath)
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to upload photo' }, { status: 500 })
+    }
   }
 
   if (action === 'clock_in') {
@@ -209,8 +217,9 @@ export async function POST(req: NextRequest) {
       session_date,
       employee_id: employee.id,
       clock_in_at: nowIso,
-      clock_in_photo_path: photoPath,
+      clock_in_photo_path: photo_data_url ? photoPath : '',
       approval_status: 'open',
+      manager_note: allowPhotoSkip ? 'Manager clock-in without photo.' : null,
     })
 
     if (error) {
