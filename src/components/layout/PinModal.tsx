@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, type KeyboardEvent } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -26,11 +26,13 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
   const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (open) {
       setPin('')
       setLocalError(null)
+      window.setTimeout(() => inputRef.current?.focus(), 50)
     }
   }, [open])
 
@@ -67,6 +69,38 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
     onClose()
   }
 
+  const handleInputChange = (value: string) => {
+    const digitsOnly = value.replace(/\D/g, '').slice(0, 4)
+    setPin(digitsOnly)
+    setLocalError(null)
+    if (digitsOnly.length === 4) {
+      submit(digitsOnly)
+    }
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && pin.length === 4) {
+      event.preventDefault()
+      void submit(pin)
+      return
+    }
+
+    if (event.key === 'Backspace') {
+      setLocalError(null)
+      return
+    }
+
+    if (/^\d$/.test(event.key)) {
+      event.preventDefault()
+      handleInputChange(pin + event.key)
+      return
+    }
+
+    if (event.key !== 'Tab') {
+      event.preventDefault()
+    }
+  }
+
   const displayError = localError || error
 
   return (
@@ -93,6 +127,19 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
         {displayError && (
           <p className="text-center text-sm text-red-500 -mt-2 mb-2">{displayError}</p>
         )}
+
+        <input
+          ref={inputRef}
+          type="password"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="[0-9]*"
+          value={pin}
+          onChange={event => handleInputChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          className="sr-only"
+          aria-label="PIN input"
+        />
 
         {/* Numpad */}
         <div className="grid grid-cols-3 gap-2">
