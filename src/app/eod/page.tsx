@@ -67,6 +67,10 @@ function isTipEligibleRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
 
+function isEodCloserRole(role: Employee['role']) {
+  return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
+}
+
 function getStepStyles(state: 'saved' | 'dirty' | 'ready' | 'locked') {
   switch (state) {
     case 'saved':
@@ -137,6 +141,7 @@ export default function EodPage() {
   const [tipRows, setTipRows] = useState<TipRow[]>([])
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
   const tipEligibleEmployees = employees.filter(employee => isTipEligibleRole(employee.role))
+  const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
   const allowedTimeOptions = getAllowedTimeOptions()
 
   const load = useCallback(async () => {
@@ -624,7 +629,7 @@ export default function EodPage() {
                         </span>
                       </SelectTrigger>
                       <SelectContent>
-                        {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                        {eodCloserEmployees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
