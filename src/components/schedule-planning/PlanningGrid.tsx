@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown } from 'lucide-react'
 
 type ShiftDraft = {
   id?: string
@@ -427,6 +427,19 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     persistDrafts(nextDrafts)
   }
 
+  const moveStaffRow = (employeeId: string, direction: 'up' | 'down') => {
+    if (!isEditableWeek) return
+    const currentIndex = displayedEmployeeIds.indexOf(employeeId)
+    if (currentIndex === -1) return
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+    if (targetIndex < 0 || targetIndex >= displayedEmployeeIds.length) return
+
+    const nextDisplayedIds = [...displayedEmployeeIds]
+    const [movedId] = nextDisplayedIds.splice(currentIndex, 1)
+    nextDisplayedIds.splice(targetIndex, 0, movedId)
+    persistDisplayedEmployeeIds(nextDisplayedIds)
+  }
+
   const copyPreviousWeekForAll = async () => {
     if (days.length === 0 || !isEditableWeek) return
 
@@ -641,7 +654,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
               </tr>
             </thead>
             <tbody>
-              {displayedEmployees.map(emp => (
+              {displayedEmployees.map((emp, rowIndex) => (
                 <tr key={emp.id} className="border-b hover:bg-gray-50">
                   <td className="p-3">
                     <div className="flex items-start justify-between gap-2">
@@ -649,13 +662,29 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                         <div className="font-medium">{employeeNamesById.get(emp.id) ?? emp.name}</div>
                         <div className="text-xs text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
                       </div>
-                      <button
-                        className="text-red-400 hover:text-red-600 disabled:text-gray-300"
-                        disabled={!isEditableWeek}
-                        onClick={() => removeStaffRow(emp.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          className="text-slate-400 hover:text-slate-600 disabled:text-gray-300"
+                          disabled={!isEditableWeek || rowIndex === 0}
+                          onClick={() => moveStaffRow(emp.id, 'up')}
+                        >
+                          <ChevronUp className="w-4 h-4" />
+                        </button>
+                        <button
+                          className="text-slate-400 hover:text-slate-600 disabled:text-gray-300"
+                          disabled={!isEditableWeek || rowIndex === displayedEmployees.length - 1}
+                          onClick={() => moveStaffRow(emp.id, 'down')}
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                        </button>
+                        <button
+                          className="text-red-400 hover:text-red-600 disabled:text-gray-300"
+                          disabled={!isEditableWeek}
+                          onClick={() => removeStaffRow(emp.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </td>
                   {days.map(d => {
