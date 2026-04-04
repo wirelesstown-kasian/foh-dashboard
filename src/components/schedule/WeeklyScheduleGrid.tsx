@@ -264,7 +264,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
               <tr>
                 <th className="sticky left-0 z-10 text-left p-3.5 font-semibold text-[15px] w-40 border-b border-slate-700 bg-slate-900">Employee</th>
                 {days.map(d => (
-                  <th key={d.toISOString()} className="text-center p-3.5 font-semibold text-[15px] border-b border-l border-slate-600 min-w-28">
+                  <th key={d.toISOString()} className="text-center p-3.5 font-semibold text-[15px] border-b border-l border-slate-600 min-w-32">
                     <div className="text-[15px] font-semibold">{getDayName(d)}</div>
                     <div className="mt-0.5 text-[12px] font-normal text-slate-200">{formatDisplayDate(d)}</div>
                   </th>
@@ -291,7 +291,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                           ) : (
                             shifts.map((s, i) => (
                               <div key={i} className="mb-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5 text-sm">
-                                <div className="font-semibold text-[16px] text-slate-900">
+                                <div className="whitespace-nowrap font-semibold text-[14px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>
                                 <div className="mt-1 text-[13px] text-slate-600">{formatHours(calcHours(s.start_time, s.end_time))}</div>
