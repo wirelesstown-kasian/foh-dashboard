@@ -140,17 +140,19 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
         <head>
           <title>${title} PDF</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; margin: 24px; color: #111827; }
+            @page { size: A4 landscape; margin: 10mm; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; margin: 0; padding: 18px; color: #111827; }
             h1 { margin: 0 0 4px 0; font-size: 26px; }
-            .sub { margin-bottom: 20px; color: #6b7280; font-size: 13px; }
+            .sub { margin-bottom: 12px; color: #6b7280; font-size: 13px; }
             table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            th, td { border: 1px solid #d1d5db; vertical-align: top; padding: 10px; font-size: 12px; }
+            th, td { border: 1px solid #d1d5db; vertical-align: top; padding: 8px; font-size: 11px; }
             th { background: #f8fafc; font-weight: 700; }
             .employee-name { font-weight: 700; margin-bottom: 2px; }
             .muted { color: #6b7280; font-size: 11px; }
-            .shift { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 6px; margin-bottom: 6px; }
-            .daily-total { display: block; margin-top: 4px; color: #92400e; font-size: 11px; }
+            .shift { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 5px; margin-bottom: 5px; }
             .weekly-total { font-weight: 700; text-align: center; }
+            .totals-row td { background: #fff7ed; text-align: center; vertical-align: middle; }
+            .totals-label { font-weight: 700; text-align: left; }
             @media print {
               body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             }
@@ -167,13 +169,26 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
                   <th>
                     <div>${getDayName(day)}</div>
                     <div class="muted">${formatDisplayDate(day)}</div>
-                    <span class="daily-total">${formatHours(getDayTotal(formatDate(day)))} total</span>
                   </th>
                 `).join('')}
                 <th style="width: 80px;">Weekly</th>
               </tr>
             </thead>
-            <tbody>${tableRows}</tbody>
+            <tbody>
+              ${tableRows}
+              <tr class="totals-row">
+                <td class="totals-label">Daily Total Hours</td>
+                ${days.map(day => `
+                  <td>
+                    <div style="font-weight:700">${formatHours(getDayTotal(formatDate(day)))}</div>
+                    <div class="muted">${formatDisplayDate(day)}</div>
+                  </td>
+                `).join('')}
+                <td class="weekly-total">
+                  ${formatHours(employees.reduce((sum, employee) => sum + getWeeklyHours(employee.id), 0))}
+                </td>
+              </tr>
+            </tbody>
           </table>
         </body>
       </html>
@@ -222,9 +237,6 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
                   <th key={d.toISOString()} className="text-center p-3 font-semibold border-b min-w-32">
                     <div>{getDayName(d)}</div>
                     <div className="text-xs text-muted-foreground font-normal">{formatDisplayDate(d)}</div>
-                    <div className="text-xs font-medium text-amber-700 mt-0.5">
-                      {formatHours(getDayTotal(formatDate(d)))} total
-                    </div>
                   </th>
                 ))}
                 <th className="text-center p-3 font-semibold border-b w-24">Weekly</th>
@@ -275,6 +287,25 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
                 </tr>
               )}
             </tbody>
+            {employees.length > 0 && (
+              <tfoot className="bg-amber-50/60">
+                <tr>
+                  <td className="p-4 text-base font-semibold border-t">Daily Total Hours</td>
+                  {days.map(d => (
+                    <td key={`total-${d.toISOString()}`} className="border-t p-4 text-center">
+                      <div className="text-lg font-semibold text-slate-900">{formatHours(getDayTotal(formatDate(d)))}</div>
+                      <div className="text-xs text-muted-foreground mt-1">{formatDisplayDate(d)}</div>
+                    </td>
+                  ))}
+                  <td className="border-t p-4 text-center">
+                    <div className="text-lg font-semibold text-slate-900">
+                      {formatHours(employees.reduce((sum, employee) => sum + getWeeklyHours(employee.id), 0))}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Week Total</div>
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       )}

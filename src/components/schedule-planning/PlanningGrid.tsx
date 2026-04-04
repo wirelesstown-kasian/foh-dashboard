@@ -60,6 +60,20 @@ function isMondayDate(dateStr: string) {
   return new Date(dateStr + 'T12:00:00').getDay() === 1
 }
 
+function normalizePublishedShifts(drafts: ShiftDraft[]) {
+  return drafts
+    .filter(draft => !draft.is_off)
+    .map(draft => `${draft.employee_id}|${draft.date}|${draft.start_time}|${draft.end_time}`)
+    .sort()
+}
+
+function matchesPublishedSchedule(drafts: ShiftDraft[], published: ShiftDraft[]) {
+  const left = normalizePublishedShifts(drafts)
+  const right = normalizePublishedShifts(published)
+  if (left.length !== right.length) return false
+  return left.every((value, index) => value === right[index])
+}
+
 function draftKey(weekRef: Date) {
   const days = getWeekDays(weekRef)
   return `schedule_draft_${formatDate(days[0])}`
@@ -295,15 +309,14 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       setDrafts(serverDrafts)
       setIsDirty(true)
       localStorage.setItem(key, JSON.stringify(serverDrafts))
-    } else if (saved && isEditableWeek && published.length === 0) {
+    } else if (saved && isEditableWeek) {
       nextDrafts = JSON.parse(saved) as ShiftDraft[]
       setDrafts(nextDrafts)
-      setIsDirty(true)
+      setIsDirty(!matchesPublishedSchedule(nextDrafts, published))
     } else {
       nextDrafts = published
       setDrafts(published)
       setIsDirty(false)
-      localStorage.removeItem(key)
     }
 
     const autoShownIds = nextDrafts.map(draft => draft.employee_id)
@@ -495,7 +508,6 @@ export function PlanningGrid({ department }: PlanningGridProps) {
         await saveServerDrafts(formatDate(days[0]), department, drafts)
       }
       setDraftSavedMessage('Draft saved')
-      setIsDirty(false)
     } catch (error) {
       console.error('Failed to save draft', error)
       setDraftSavedMessage('Draft saved locally')
@@ -568,8 +580,8 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     await clearServerDrafts(startDate, department).catch(error => {
       console.error('Failed to clear schedule drafts after publish', error)
     })
-    localStorage.removeItem(key)
-    localStorage.removeItem(currentRowsKey)
+    localStorage.setItem(key, JSON.stringify(drafts))
+    localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
     await loadData()
     setIsDirty(false)
     setPublishDialogOpen(false)
