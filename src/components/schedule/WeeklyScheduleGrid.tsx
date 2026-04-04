@@ -115,6 +115,8 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
       .filter(s => s.date === date)
       .reduce((sum, s) => sum + calcHours(s.start_time, s.end_time), 0)
 
+  const visibleDays = days.filter(day => getDayTotal(formatDate(day)) > 0)
+  const renderedDays = visibleDays.length > 0 ? visibleDays : days
   const totalWeekHours = days.reduce((sum, day) => sum + getDayTotal(formatDate(day)), 0)
   const totalShifts = schedules.length
 
@@ -124,7 +126,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     const title = `${department.toUpperCase()} Schedule`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = employees.map(employee => {
-      const dayCells = days.map(day => {
+      const dayCells = renderedDays.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
           <td>
@@ -181,7 +183,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             <thead>
               <tr>
                 <th style="width: 150px;">Employee</th>
-                ${days.map(day => `
+                ${renderedDays.map(day => `
                   <th>
                     <div>${getDayName(day)}</div>
                     <div class="muted">${formatDisplayDate(day)}</div>
@@ -193,7 +195,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
               ${tableRows}
               <tr class="totals-row">
                 <td class="totals-label">Daily Total Hours</td>
-                ${days.map(day => `
+                ${renderedDays.map(day => `
                   <td>
                     <div style="font-weight:800;font-size:16px;">${formatHours(getDayTotal(formatDate(day)))}</div>
                   </td>
@@ -263,7 +265,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             <thead className="bg-slate-800 text-white">
               <tr>
                 <th className="sticky left-0 z-10 text-left p-3.5 font-semibold text-[15px] w-40 border-b border-slate-700 bg-slate-900">Employee</th>
-                {days.map(d => (
+                {renderedDays.map(d => (
                   <th key={d.toISOString()} className="text-center p-3.5 font-semibold text-[15px] border-b border-l border-slate-600 min-w-32">
                     <div className="text-[15px] font-semibold">{getDayName(d)}</div>
                     <div className="mt-0.5 text-[12px] font-normal text-slate-200">{formatDisplayDate(d)}</div>
@@ -279,7 +281,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                       <div className="font-semibold text-[15px] text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
                       <div className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">{emp.role.replace('_', ' ')}{!emp.is_active ? ' • archived' : ''}</div>
                     </td>
-                    {days.map(d => {
+                    {renderedDays.map(d => {
                       const dateStr = formatDate(d)
                       const shifts = getShifts(emp.id, dateStr)
                       return (
@@ -316,7 +318,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
               <tfoot className="bg-slate-100">
                 <tr>
                   <td className="sticky left-0 z-10 p-3.5 text-[15px] font-semibold border-t border-slate-300 bg-slate-100">Daily Total Hours</td>
-                  {days.map(d => (
+                  {renderedDays.map(d => (
                     <td key={`total-${d.toISOString()}`} className="border-t border-l border-slate-300 p-3.5 text-center">
                       <div className="text-[18px] font-semibold text-slate-900">{formatHours(getDayTotal(formatDate(d)))}</div>
                     </td>
