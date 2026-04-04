@@ -30,12 +30,13 @@ import { Plus, Pencil, Trash2, Gift } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
 
-const ROLES: EmployeeRole[] = ['manager', 'server', 'busser', 'runner']
+const ROLES: EmployeeRole[] = ['manager', 'server', 'busser', 'runner', 'kitchen_staff']
 const ROLE_COLORS: Record<EmployeeRole, string> = {
   manager: 'bg-purple-100 text-purple-800',
   server: 'bg-blue-100 text-blue-800',
   busser: 'bg-green-100 text-green-800',
   runner: 'bg-orange-100 text-orange-800',
+  kitchen_staff: 'bg-rose-100 text-rose-800',
 }
 
 interface FormState {
@@ -53,6 +54,7 @@ const ROLE_LABELS: Record<EmployeeRole, string> = {
   server: 'Server',
   busser: 'Busser',
   runner: 'Runner',
+  kitchen_staff: 'Kitchen Staff',
 }
 
 export function EmployeeTable() {

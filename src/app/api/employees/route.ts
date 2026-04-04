@@ -5,7 +5,7 @@ import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { EmployeeRole } from '@/lib/types'
 
-const VALID_ROLES: EmployeeRole[] = ['manager', 'server', 'busser', 'runner']
+const VALID_ROLES: EmployeeRole[] = ['manager', 'server', 'busser', 'runner', 'kitchen_staff']
 
 async function requireAdmin() {
   const cookieStore = await cookies()

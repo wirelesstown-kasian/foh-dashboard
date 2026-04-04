@@ -1,6 +1,7 @@
-export type EmployeeRole = 'manager' | 'server' | 'busser' | 'runner'
+export type EmployeeRole = 'manager' | 'server' | 'busser' | 'runner' | 'kitchen_staff'
 export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
 export type SessionPhase = 'pre_shift' | 'operation' | 'closing' | 'complete'
+export type ScheduleDepartment = 'foh' | 'boh'
 
 export interface Employee {
   id: string

@@ -2,15 +2,23 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, Schedule } from '@/lib/types'
+import { Employee, Schedule, ScheduleDepartment } from '@/lib/types'
 import {
   getWeekDays, getPrevWeek, getNextWeek, formatDate,
   formatDisplayDate, formatWeekRange, getDayName, calcHours, formatHours, formatTime
 } from '@/lib/dateUtils'
 import { Button } from '@/components/ui/button'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 
-export function WeeklyScheduleGrid() {
+function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartment) {
+  return department === 'boh' ? employee.role === 'kitchen_staff' : employee.role !== 'kitchen_staff'
+}
+
+interface WeeklyScheduleGridProps {
+  department: ScheduleDepartment
+}
+
+export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -33,14 +41,18 @@ export function WeeklyScheduleGrid() {
       supabase.from('schedules').select('*, employee:employees(id, name, role, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate),
     ])
 
-    const activeEmployees = empRes.data ?? []
+    const activeEmployees = (empRes.data ?? []).filter(employee => isEmployeeInDepartment(employee, department))
     const loadedSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
+    const departmentSchedules = loadedSchedules.filter(schedule => {
+      const role = schedule.employee?.role ?? 'server'
+      return department === 'boh' ? role === 'kitchen_staff' : role !== 'kitchen_staff'
+    })
     const namesById = new Map<string, string>()
 
     for (const employee of activeEmployees) {
       namesById.set(employee.id, employee.name)
     }
-    for (const schedule of loadedSchedules) {
+    for (const schedule of departmentSchedules) {
       if (schedule.employee?.name) {
         namesById.set(schedule.employee_id, schedule.employee.name)
       }
@@ -48,14 +60,14 @@ export function WeeklyScheduleGrid() {
 
     const scheduledOnlyEmployees = Array.from(
       new Map(
-        loadedSchedules
+        departmentSchedules
           .filter(schedule => !activeEmployees.some(employee => employee.id === schedule.employee_id))
           .map(schedule => [
             schedule.employee_id,
             schedule.employee ?? {
               id: schedule.employee_id,
               name: namesById.get(schedule.employee_id) ?? `Staff ${schedule.employee_id.slice(0, 6)}`,
-              role: 'server',
+              role: department === 'boh' ? 'kitchen_staff' : 'server',
               phone: null,
               email: null,
               pin_hash: '',
@@ -69,9 +81,9 @@ export function WeeklyScheduleGrid() {
 
     setEmployeeNamesById(namesById)
     setEmployees([...activeEmployees, ...scheduledOnlyEmployees].sort((a, b) => a.name.localeCompare(b.name)))
-    setSchedules(loadedSchedules)
+    setSchedules(departmentSchedules)
     setLoading(false)
-  }, [days])
+  }, [days, department])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -88,10 +100,98 @@ export function WeeklyScheduleGrid() {
       .filter(s => s.date === date)
       .reduce((sum, s) => sum + calcHours(s.start_time, s.end_time), 0)
 
+  const exportDepartmentPdf = () => {
+    if (days.length === 0) return
+
+    const title = `${department.toUpperCase()} Schedule`
+    const weekLabel = formatWeekRange(weekRef)
+    const tableRows = employees.map(employee => {
+      const dayCells = days.map(day => {
+        const shifts = getShifts(employee.id, formatDate(day))
+        return `
+          <td>
+            ${shifts.length === 0 ? '<div class="muted">Off</div>' : shifts.map(shift => `
+              <div class="shift">
+                <div>${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}</div>
+                <div class="muted">${formatHours(calcHours(shift.start_time, shift.end_time))}</div>
+              </div>
+            `).join('')}
+          </td>
+        `
+      }).join('')
+
+      return `
+        <tr>
+          <td>
+            <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
+            <div class="muted">${employee.role.replace('_', ' ')}</div>
+          </td>
+          ${dayCells}
+          <td class="weekly-total">${formatHours(getWeeklyHours(employee.id))}</td>
+        </tr>
+      `
+    }).join('')
+
+    const printWindow = window.open('', '_blank', 'width=1400,height=900')
+    if (!printWindow) return
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${title} PDF</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; margin: 24px; color: #111827; }
+            h1 { margin: 0 0 4px 0; font-size: 26px; }
+            .sub { margin-bottom: 20px; color: #6b7280; font-size: 13px; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { border: 1px solid #d1d5db; vertical-align: top; padding: 10px; font-size: 12px; }
+            th { background: #f8fafc; font-weight: 700; }
+            .employee-name { font-weight: 700; margin-bottom: 2px; }
+            .muted { color: #6b7280; font-size: 11px; }
+            .shift { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 6px; margin-bottom: 6px; }
+            .daily-total { display: block; margin-top: 4px; color: #92400e; font-size: 11px; }
+            .weekly-total { font-weight: 700; text-align: center; }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${title}</h1>
+          <div class="sub">${weekLabel}</div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 150px;">Employee</th>
+                ${days.map(day => `
+                  <th>
+                    <div>${getDayName(day)}</div>
+                    <div class="muted">${formatDisplayDate(day)}</div>
+                    <span class="daily-total">${formatHours(getDayTotal(formatDate(day)))} total</span>
+                  </th>
+                `).join('')}
+                <th style="width: 80px;">Weekly</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+  }
+
   return (
-    <div className="p-6">
+    <div>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">Schedule</h1>
+        <div>
+          <h1 className="text-2xl font-bold">{department === 'boh' ? 'BOH Schedule' : 'FOH Schedule'}</h1>
+          <p className="text-sm text-muted-foreground">
+            {department === 'boh' ? 'Kitchen staff schedule view.' : 'Front-of-house weekly schedule view.'}
+          </p>
+        </div>
         <div className="flex items-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
             <ChevronLeft className="w-4 h-4" />
@@ -102,6 +202,10 @@ export function WeeklyScheduleGrid() {
           </Button>
           <Button variant="outline" size="sm" onClick={() => setWeekRef(new Date())}>
             Today&apos;s Week
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportDepartmentPdf}>
+            <Download className="w-4 h-4 mr-2" />
+            Export PDF
           </Button>
         </div>
       </div>

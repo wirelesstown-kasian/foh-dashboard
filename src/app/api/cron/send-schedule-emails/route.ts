@@ -1,0 +1,54 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { sendWeeklyScheduleEmails } from '@/lib/scheduleEmail'
+
+export async function GET(req: NextRequest) {
+  const authHeader = req.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+  const today = new Date().toISOString().slice(0, 10)
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+
+  const { data: pendingPublications, error } = await supabase
+    .from('schedule_publications')
+    .select('week_start, week_end')
+    .lte('scheduled_send_date', today)
+    .is('email_sent_at', null)
+    .order('week_start')
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  if (!pendingPublications || pendingPublications.length === 0) {
+    return NextResponse.json({ success: true, sentWeeks: 0 })
+  }
+
+  const results = []
+
+  for (const publication of pendingPublications) {
+    const result = await sendWeeklyScheduleEmails({
+      weekStart: publication.week_start,
+      weekEnd: publication.week_end,
+      appUrl,
+    })
+
+    if (result.success) {
+      await supabase
+        .from('schedule_publications')
+        .update({ email_sent_at: new Date().toISOString() })
+        .eq('week_start', publication.week_start)
+    }
+
+    results.push({ week_start: publication.week_start, ...result })
+  }
+
+  const hasErrors = results.some(result => !result.success)
+  return NextResponse.json({ success: !hasErrors, results }, { status: hasErrors ? 207 : 200 })
+}
