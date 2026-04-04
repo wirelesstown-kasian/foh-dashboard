@@ -36,6 +36,7 @@ import {
 import * as XLSX from 'xlsx'
 
 type Period = 'daily' | 'weekly' | 'monthly'
+type ReportDepartment = 'foh' | 'boh'
 type TipDetail = {
   date: string
   amount: number | null
@@ -93,11 +94,18 @@ function formatDateRangeLabel(startDate: string, endDate: string) {
   return `${format(start, 'MMM d, yyyy')} - ${format(end, 'MMM d, yyyy')}`
 }
 
+function isEmployeeInDepartment(employee: Employee, department: ReportDepartment) {
+  return department === 'boh'
+    ? employee.role === 'kitchen_staff' || employee.role === 'manager'
+    : employee.role !== 'kitchen_staff'
+}
+
 export default function ReportingPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [completions, setCompletions] = useState<TaskCompletion[]>([])
   const [eodReports, setEodReports] = useState<(EodReport & { tip_distributions: (TipDistribution & { employee: Employee })[] })[]>([])
   const [period, setPeriod] = useState<Period>('weekly')
+  const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [refDate, setRefDate] = useState(new Date())
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
@@ -142,9 +150,16 @@ export default function ReportingPage() {
   }
 
   const [startDate, endDate] = getRange()
-  const filteredCompletions = completions.filter(c => c.session_date >= startDate && c.session_date <= endDate)
+  const filteredEmployees = employees.filter(employee => isEmployeeInDepartment(employee, department))
+  const filteredEmployeeIds = new Set(filteredEmployees.map(employee => employee.id))
+  const filteredCompletions = completions.filter(
+    completion =>
+      completion.session_date >= startDate &&
+      completion.session_date <= endDate &&
+      filteredEmployeeIds.has(completion.employee_id)
+  )
 
-  const perfStats = employees.map(emp => {
+  const perfStats = filteredEmployees.map(emp => {
     const done = filteredCompletions.filter(c => c.employee_id === emp.id).length
     const allTime = completions.filter(c => c.employee_id === emp.id).length
     return { emp, done, allTime }
@@ -159,12 +174,13 @@ export default function ReportingPage() {
   const monthTipsByEmp = new Map<string, number>()
   for (const eod of monthEods) {
     for (const dist of (eod.tip_distributions ?? [])) {
+      if (!filteredEmployeeIds.has(dist.employee_id)) continue
       monthHoursByEmp.set(dist.employee_id, (monthHoursByEmp.get(dist.employee_id) ?? 0) + Number(dist.hours_worked))
       monthTipsByEmp.set(dist.employee_id, (monthTipsByEmp.get(dist.employee_id) ?? 0) + Number(dist.net_tip))
     }
   }
 
-  const baseMonthlyStats = employees.map(emp => {
+  const baseMonthlyStats = filteredEmployees.map(emp => {
     const tasks = monthCompletions.filter(c => c.employee_id === emp.id).length
     const hours = monthHoursByEmp.get(emp.id) ?? 0
     const totalTips = monthTipsByEmp.get(emp.id) ?? 0
@@ -229,19 +245,25 @@ export default function ReportingPage() {
   for (const report of weeklyEodReports) {
     totalHoursByDay.set(
       report.session_date,
-      (report.tip_distributions ?? []).reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
+      (report.tip_distributions ?? []).reduce((sum, dist) => (
+        filteredEmployeeIds.has(dist.employee_id) ? sum + Number(dist.hours_worked) : sum
+      ), 0)
     )
     totalTipsByDay.set(
       report.session_date,
-      (report.tip_distributions ?? []).reduce((sum, dist) => sum + Number(dist.net_tip), 0)
+      (report.tip_distributions ?? []).reduce((sum, dist) => (
+        filteredEmployeeIds.has(dist.employee_id) ? sum + Number(dist.net_tip) : sum
+      ), 0)
     )
     totalHouseByDay.set(
       report.session_date,
-      (report.tip_distributions ?? []).reduce((sum, dist) => sum + Number(dist.house_deduction), 0)
+      (report.tip_distributions ?? []).reduce((sum, dist) => (
+        filteredEmployeeIds.has(dist.employee_id) ? sum + Number(dist.house_deduction) : sum
+      ), 0)
     )
   }
 
-  const tipByEmployee = employees.map(emp => {
+  const tipByEmployee = filteredEmployees.map(emp => {
     const daily: TipDetail[] = weekDays.map(day => {
       const dateStr = format(day, 'yyyy-MM-dd')
       const report = weeklyEodReports.find(r => r.session_date === dateStr)
@@ -510,6 +532,19 @@ export default function ReportingPage() {
         rightSlot={<Badge variant="outline" className="text-green-700 border-green-300">Manager Access</Badge>}
       />
 
+      <Tabs
+        value={department}
+        onValueChange={(value: string | null) => {
+          if (!value) return
+          setDepartment(value as ReportDepartment)
+          setSelectedEmployeeId(null)
+        }}
+      >
+        <TabsList className="mb-4">
+          <TabsTrigger value="foh">FOH Reports</TabsTrigger>
+          <TabsTrigger value="boh">BOH Reports</TabsTrigger>
+        </TabsList>
+
       <Tabs defaultValue="performance">
         <TabsList className="mb-4">
           <TabsTrigger value="performance">Task Performance</TabsTrigger>
@@ -549,7 +584,7 @@ export default function ReportingPage() {
               <div className="rounded-xl border bg-green-50 p-4">
                 <div className="text-xs font-medium uppercase tracking-wide text-green-700">Active Staff</div>
                 <div className="mt-2 text-2xl font-bold text-green-950">{activePerformanceCount}</div>
-                <div className="text-sm text-green-800">Staff with completed tasks in this view</div>
+                <div className="text-sm text-green-800">Staff with completed tasks in this {department.toUpperCase()} view</div>
               </div>
               <div className="rounded-xl border bg-violet-50 p-4">
                 <div className="text-xs font-medium uppercase tracking-wide text-violet-700">Quick Read</div>
@@ -727,7 +762,7 @@ export default function ReportingPage() {
                   <TableHead className="text-right">Weekly Hours</TableHead>
                   <TableHead className="text-right">Tip / Hr</TableHead>
                   <TableHead className="text-right">House 15%</TableHead>
-                  <TableHead className="text-right">Weekly Total</TableHead>
+                    <TableHead className="text-right">Weekly Total</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -818,8 +853,12 @@ export default function ReportingPage() {
                 )}
               </TableBody>
             </Table>
+            <p className="mt-4 text-xs text-muted-foreground">
+              EOD History stays store-wide. FOH / BOH filtering applies to task and tip analytics above.
+            </p>
           </div>
         </TabsContent>
+      </Tabs>
       </Tabs>
 
       <Dialog open={!!selectedEmployeeId} onOpenChange={open => { if (!open) setSelectedEmployeeId(null) }}>
