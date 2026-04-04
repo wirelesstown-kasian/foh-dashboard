@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, TaskCompletion, EodReport, TipDistribution } from '@/lib/types'
+import { Employee, TaskCompletion, EodReport, ShiftClock, TipDistribution } from '@/lib/types'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -34,12 +35,13 @@ import {
   subWeeks, addWeeks, eachDayOfInterval, subMonths, addMonths
 } from 'date-fns'
 import * as XLSX from 'xlsx'
+import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 
 type Period = 'daily' | 'weekly' | 'monthly'
 type ReportDepartment = 'foh' | 'boh'
 type TipReportPeriod = 'daily' | 'weekly' | 'monthly'
 type TipReportView = 'earnings' | 'tips'
-type ReportTab = 'performance' | 'wages' | 'eod'
+type ReportTab = 'performance' | 'wages' | 'eod' | 'attendance'
 type TipDetail = {
   date: string
   amount: number | null
@@ -118,6 +120,7 @@ export default function ReportingPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [completions, setCompletions] = useState<TaskCompletion[]>([])
   const [eodReports, setEodReports] = useState<(EodReport & { tip_distributions: (TipDistribution & { employee: Employee })[] })[]>([])
+  const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [period, setPeriod] = useState<Period>('weekly')
   const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [refDate, setRefDate] = useState(new Date())
@@ -129,6 +132,10 @@ export default function ReportingPage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [sendingReportEmail, setSendingReportEmail] = useState(false)
   const [reportEmailStatus, setReportEmailStatus] = useState<string | null>(null)
+  const [attendancePeriod, setAttendancePeriod] = useState<Period>('daily')
+  const [attendanceEdits, setAttendanceEdits] = useState<Record<string, { hours: string; note: string }>>({})
+  const [savingAttendanceId, setSavingAttendanceId] = useState<string | null>(null)
+  const [attendanceStatus, setAttendanceStatus] = useState<string | null>(null)
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
   const isCompletedTask = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
@@ -141,12 +148,15 @@ export default function ReportingPage() {
         supabase.from('task_completions').select('*'),
         supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').order('session_date', { ascending: false }),
       ])
+      const clockRes = await fetch('/api/clock-events', { cache: 'no-store' })
+      const clockJson = (await clockRes.json().catch(() => ({}))) as { records?: ShiftClock[] }
 
       if (!mounted) return
 
       setEmployees(empRes.data ?? [])
       setCompletions(compRes.data ?? [])
       setEodReports(eodRes.data ?? [])
+      setClockRecords(clockJson.records ?? [])
     })()
 
     return () => {
@@ -261,6 +271,11 @@ export default function ReportingPage() {
     end: endOfWeek(refDate, { weekStartsOn: 1 }),
   })
   const weeklyEodReports = eodReports.filter(r => r.session_date >= tipWeekStart && r.session_date <= tipWeekEnd)
+  const getClockHoursForEmployeeDate = (employeeId: string, date: string, fallbackHours: number) => {
+    const records = clockRecords.filter(record => record.employee_id === employeeId && record.session_date === date)
+    if (records.length === 0) return fallbackHours
+    return records.reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+  }
 
   const tipByEmployee = filteredEmployees.map(emp => {
     const daily: TipDetail[] = weekDays.map(day => {
@@ -268,7 +283,8 @@ export default function ReportingPage() {
       const report = weeklyEodReports.find(r => r.session_date === dateStr)
       const dist = report?.tip_distributions.find(d => d.employee_id === emp.id)
       const amount = dist?.net_tip !== undefined ? Number(dist.net_tip) : null
-      const hours = dist ? Number(dist.hours_worked) : 0
+      const fallbackHours = dist ? Number(dist.hours_worked) : 0
+      const hours = getClockHoursForEmployeeDate(emp.id, dateStr, fallbackHours)
       return {
         date: dateStr,
         amount,
@@ -291,19 +307,25 @@ export default function ReportingPage() {
       : [format(refDate, 'yyyy-MM-dd'), format(refDate, 'yyyy-MM-dd')]
   const tipRangeReports = eodReports.filter(r => r.session_date >= tipRangeStart && r.session_date <= tipRangeEnd)
   const tipSummaryRows: TipSummaryRow[] = filteredEmployees.map(emp => {
-    const distributions = tipRangeReports.flatMap(report =>
-      (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
-    )
-    const hours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
-    const tips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
-    const baseWages = hours * (emp.hourly_wage ?? 0)
-    const guaranteeTopUp = distributions.reduce((sum, dist) => {
-      const shiftHours = Number(dist.hours_worked)
-      const shiftTips = Number(dist.net_tip)
-      const shiftBaseWages = shiftHours * (emp.hourly_wage ?? 0)
-      const shiftGuaranteedTarget = shiftHours * (emp.guaranteed_hourly ?? 0)
-      return sum + Math.max(0, shiftGuaranteedTarget - (shiftBaseWages + shiftTips))
-    }, 0)
+    let hours = 0
+    let tips = 0
+    let baseWages = 0
+    let guaranteeTopUp = 0
+
+    for (const report of tipRangeReports) {
+      const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
+      const dailyTips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
+      const fallbackHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
+      const dailyHours = getClockHoursForEmployeeDate(emp.id, report.session_date, fallbackHours)
+      const dailyBaseWages = dailyHours * (emp.hourly_wage ?? 0)
+      const dailyGuaranteedTarget = dailyHours * (emp.guaranteed_hourly ?? 0)
+
+      hours += dailyHours
+      tips += dailyTips
+      baseWages += dailyBaseWages
+      guaranteeTopUp += Math.max(0, dailyGuaranteedTarget - (dailyBaseWages + dailyTips))
+    }
+
     const totalEarnings = baseWages + tips + guaranteeTopUp
 
     return {
@@ -339,6 +361,24 @@ export default function ReportingPage() {
   }
   const [historyStart, historyEnd] = getHistoryRange()
   const filteredEodReports = eodReports.filter(report => report.session_date >= historyStart && report.session_date <= historyEnd)
+  const getAttendanceRange = (): [string, string] => {
+    if (attendancePeriod === 'daily') {
+      const d = format(refDate, 'yyyy-MM-dd')
+      return [d, d]
+    }
+    if (attendancePeriod === 'weekly') {
+      return [tipWeekStart, tipWeekEnd]
+    }
+    return [monthStart, monthEnd]
+  }
+  const [attendanceStart, attendanceEnd] = getAttendanceRange()
+  const filteredAttendanceRecords = clockRecords
+    .filter(record => record.session_date >= attendanceStart && record.session_date <= attendanceEnd)
+    .filter(record => {
+      const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
+      return employee ? isEmployeeInDepartment(employee, department) : false
+    })
+    .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at))
   const rankingCards: RankingCard[] = selectedEmployeeStats ? [
     {
       label: 'Task Rank',
@@ -577,6 +617,35 @@ export default function ReportingPage() {
     }
   }
 
+  const saveAttendanceAdjustment = async (record: ShiftClock) => {
+    const edit = attendanceEdits[record.id]
+    setSavingAttendanceId(record.id)
+    setAttendanceStatus(null)
+    try {
+      const res = await fetch('/api/clock-events', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: record.id,
+          approved_hours: edit?.hours ?? record.approved_hours ?? '',
+          manager_note: edit?.note ?? record.manager_note ?? '',
+          action: edit?.hours && Number(edit.hours) !== Number(record.approved_hours ?? 0) ? 'adjust' : 'approve',
+        }),
+      })
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'Failed to save attendance adjustment')
+
+      const clockRes = await fetch('/api/clock-events', { cache: 'no-store' })
+      const clockJson = (await clockRes.json().catch(() => ({}))) as { records?: ShiftClock[] }
+      setClockRecords(clockJson.records ?? [])
+      setAttendanceStatus('Attendance report updated')
+    } catch (error) {
+      setAttendanceStatus(error instanceof Error ? error.message : 'Failed to save attendance adjustment')
+    } finally {
+      setSavingAttendanceId(null)
+    }
+  }
+
   return (
     <div className="p-6">
       <AdminSubpageHeader
@@ -604,6 +673,7 @@ export default function ReportingPage() {
           <TabsTrigger value="performance">Task Performance</TabsTrigger>
           <TabsTrigger value="wages">Wage Report</TabsTrigger>
           <TabsTrigger value="eod">EOD History</TabsTrigger>
+          <TabsTrigger value="attendance">Attendance</TabsTrigger>
         </TabsList>
 
         <TabsContent value="performance">
@@ -984,6 +1054,140 @@ export default function ReportingPage() {
             <p className="mt-4 text-xs text-muted-foreground">
               EOD History stays store-wide. FOH / BOH filtering applies to task and tip analytics above.
             </p>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="attendance">
+          <div className="bg-white rounded-xl border p-5">
+            <div className="mb-4 flex items-center gap-3">
+              <Select value={attendancePeriod} onValueChange={(v: string | null) => v && setAttendancePeriod(v as Period)}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (attendancePeriod === 'daily') setRefDate(d => new Date(d.getTime() - 86400000))
+                  else if (attendancePeriod === 'weekly') setRefDate(d => subWeeks(d, 1))
+                  else setRefDate(d => subMonths(d, 1))
+                }}
+              >
+                ←
+              </Button>
+              <span className="font-medium text-sm min-w-56 text-center">
+                {attendancePeriod === 'daily'
+                  ? format(refDate, 'MMM d, yyyy')
+                  : attendancePeriod === 'weekly'
+                    ? `Week of ${format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
+                    : format(refDate, 'MMMM yyyy')}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (attendancePeriod === 'daily') setRefDate(d => new Date(d.getTime() + 86400000))
+                  else if (attendancePeriod === 'weekly') setRefDate(d => addWeeks(d, 1))
+                  else setRefDate(d => addMonths(d, 1))
+                }}
+              >
+                →
+              </Button>
+              <div className="ml-auto flex items-center gap-2">
+                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+                  Pending {filteredAttendanceRecords.filter(record => isClockPending(record)).length}
+                </Badge>
+              </div>
+            </div>
+            {attendanceStatus && (
+              <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
+                {attendanceStatus}
+              </div>
+            )}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Clock In</TableHead>
+                  <TableHead className="text-right">Clock Out</TableHead>
+                  <TableHead className="text-right">Approved Hrs</TableHead>
+                  <TableHead>Manager Note</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredAttendanceRecords.map(record => {
+                  const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
+                  const currentEdit = attendanceEdits[record.id] ?? {
+                    hours: record.approved_hours !== null ? String(record.approved_hours) : '',
+                    note: record.manager_note ?? '',
+                  }
+                  return (
+                    <TableRow key={record.id}>
+                      <TableCell className="font-medium">{format(new Date(record.session_date + 'T12:00:00'), 'MMM d, yyyy')}</TableCell>
+                      <TableCell>{employee?.name ?? 'Unknown Staff'}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={
+                          record.approval_status === 'pending_review'
+                            ? 'border-amber-300 bg-amber-50 text-amber-800'
+                            : record.approval_status === 'adjusted'
+                              ? 'border-sky-300 bg-sky-50 text-sky-800'
+                              : record.approval_status === 'approved'
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                : 'border-slate-300 bg-slate-50 text-slate-700'
+                        }>
+                          {record.approval_status}
+                        </Badge>
+                        {record.auto_clock_out && (
+                          <div className="mt-1 text-xs text-amber-700">Auto clock-out warning</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
+                      <TableCell className="text-right">{record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}</TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          value={currentEdit.hours}
+                          onChange={event => setAttendanceEdits(prev => ({
+                            ...prev,
+                            [record.id]: { ...currentEdit, hours: event.target.value },
+                          }))}
+                          className="ml-auto h-8 w-24 text-right"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          value={currentEdit.note}
+                          onChange={event => setAttendanceEdits(prev => ({
+                            ...prev,
+                            [record.id]: { ...currentEdit, note: event.target.value },
+                          }))}
+                          className="h-8 min-w-40"
+                          placeholder="Approval note"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="outline" onClick={() => saveAttendanceAdjustment(record)} disabled={savingAttendanceId === record.id}>
+                          {savingAttendanceId === record.id ? 'Saving…' : 'Approve'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+                {filteredAttendanceRecords.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
+                      No attendance records for this range
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
           </div>
         </TabsContent>
       </Tabs>

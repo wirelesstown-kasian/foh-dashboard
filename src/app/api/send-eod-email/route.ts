@@ -94,6 +94,24 @@ export async function POST(req: NextRequest) {
   })
   const emailPromises: Promise<void>[] = []
 
+  const { data: shiftClocks } = await supabase
+    .from('shift_clocks')
+    .select('employee:employees(name), auto_clock_out, approval_status')
+    .eq('session_date', report.session_date)
+
+  const attendanceWarnings = ((shiftClocks ?? []) as Array<{ employee?: { name?: string } | null; auto_clock_out: boolean; approval_status: string }>)
+    .filter(clock => clock.auto_clock_out || clock.approval_status === 'pending_review' || clock.approval_status === 'open')
+  const attendanceWarningHtml = attendanceWarnings.length > 0
+    ? `
+      <div style="margin:0 0 18px;padding:14px 16px;border:2px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:12px">
+        <div style="font-size:18px;font-weight:700;margin-bottom:8px">ATTENDANCE WARNING</div>
+        <div style="font-size:13px;line-height:1.6">
+          ${attendanceWarnings.length} clock record(s) need manager review. Auto clock-out hours are excluded from wage reporting until approved.
+        </div>
+      </div>
+    `
+    : ''
+
   const employeeIds = Array.from(new Set(tipDists.map(dist => dist.employee_id)))
   const { weekStart, weekEnd } = getWeekRange(report.session_date)
   const { monthStart, monthEnd } = getMonthRange(report.session_date)
@@ -259,6 +277,7 @@ export async function POST(req: NextRequest) {
   ).join('')
 
   const adminEodHtml = renderEmailShell(logoUrl, `
+      ${attendanceWarningHtml}
       <h2 style="color:#1a1a1a">FOH End of Day Report — ${report.session_date}</h2>
       <p><strong>Closed by:</strong> ${closedByName}</p>
       <h3>Revenue</h3>

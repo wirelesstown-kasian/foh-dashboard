@@ -1,20 +1,22 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { ChangeEvent, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Task, TaskCategory, TaskCompletion, DailySession, Employee, Schedule, SessionPhase, TaskCompletionStatus } from '@/lib/types'
+import { Task, TaskCategory, TaskCompletion, DailySession, Employee, Schedule, SessionPhase, ShiftClock, TaskCompletionStatus } from '@/lib/types'
 import { PinModal } from '@/components/layout/PinModal'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { CheckCircle2, Circle, ChevronRight, ArrowRight, RotateCcw, ChevronLeft } from 'lucide-react'
+import { CheckCircle2, Circle, ChevronRight, ArrowRight, RotateCcw, ChevronLeft, Camera } from 'lucide-react'
 import { formatTime, getBusinessDate, getBusinessDateTime } from '@/lib/dateUtils'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 
 interface Props {
   categories: TaskCategory[]
   tasks: Task[]
   schedules: Schedule[]
   completions: TaskCompletion[]
+  clockRecords: ShiftClock[]
   session: DailySession | null
   employees: Employee[]
   today: string
@@ -34,12 +36,18 @@ const CLOCK_IN_TITLE = 'Clock In'
 const CLOCK_OUT_TITLE = 'Clock Out'
 const REMINDER_WINDOW_MINUTES = 30
 
-export function TaskFlow({ categories, tasks, schedules, completions, session, employees, today, now, onRefresh }: Props) {
+export function TaskFlow({ categories, tasks, schedules, completions, clockRecords, session, employees, today, now, onRefresh }: Props) {
   const router = useRouter()
   const [taskActionTarget, setTaskActionTarget] = useState<Task | null>(null)
   const [pinTarget, setPinTarget] = useState<{ task: Task; status: TaskCompletionStatus } | null>(null)
   const [statusTarget, setStatusTarget] = useState<{ task: Task; completionId: string; status: TaskCompletionStatus } | null>(null)
   const [transferTarget, setTransferTarget] = useState<{ task: Task; completionId: string } | null>(null)
+  const [clockCaptureTarget, setClockCaptureTarget] = useState<{ task: Task; action: 'clock_in' | 'clock_out' } | null>(null)
+  const [clockCapturePin, setClockCapturePin] = useState('')
+  const [clockCapturePhoto, setClockCapturePhoto] = useState<string | null>(null)
+  const [clockCapturePreview, setClockCapturePreview] = useState<string | null>(null)
+  const [clockCaptureError, setClockCaptureError] = useState<string | null>(null)
+  const [clockCaptureSubmitting, setClockCaptureSubmitting] = useState(false)
   const [pinError, setPinError] = useState<string | null>(null)
   const [statusPinError, setStatusPinError] = useState<string | null>(null)
   const [transferPinError, setTransferPinError] = useState<string | null>(null)
@@ -52,6 +60,7 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
 
   const todayDow = getBusinessDate().getDay() // 0=Sun, 1=Mon, ...
   const currentPhase: SessionPhase = session?.current_phase ?? 'pre_shift'
+  const openClockCount = clockRecords.filter(record => !record.clock_out_at).length
 
   const phaseCategory = (phase: SessionPhase) => {
     const typeMap: Record<SessionPhase, string> = {
@@ -104,6 +113,65 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
       return `Last shift ends at ${formatTime(lastShift.schedule.end_time)}`
     }
     return task.deadline_time ? `by ${formatTime(task.deadline_time)}` : null
+  }
+
+  const isClockTask = (task: Task | null | undefined) => {
+    const title = task?.title.trim().toLowerCase()
+    return title === CLOCK_IN_TITLE.toLowerCase() || title === CLOCK_OUT_TITLE.toLowerCase()
+  }
+
+  const handleClockPhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : null
+      setClockCapturePhoto(result)
+      setClockCapturePreview(result)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleClockCaptureSubmit = async () => {
+    if (!clockCaptureTarget) return
+    setClockCaptureError(null)
+
+    if (!/^\d{4}$/.test(clockCapturePin)) {
+      setClockCaptureError('Enter a valid 4-digit PIN')
+      return
+    }
+    if (!clockCapturePhoto) {
+      setClockCaptureError('Take or upload a photo before continuing')
+      return
+    }
+
+    setClockCaptureSubmitting(true)
+    try {
+      const res = await fetch('/api/clock-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: clockCaptureTarget.action,
+          pin: clockCapturePin,
+          session_date: today,
+          photo_data_url: clockCapturePhoto,
+          task_id: clockCaptureTarget.task.id,
+        }),
+      })
+
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'Failed to save clock event')
+
+      setClockCaptureTarget(null)
+      setClockCapturePin('')
+      setClockCapturePhoto(null)
+      setClockCapturePreview(null)
+      await onRefresh()
+    } catch (error) {
+      setClockCaptureError(error instanceof Error ? error.message : 'Failed to save clock event')
+    } finally {
+      setClockCaptureSubmitting(false)
+    }
   }
 
   useEffect(() => {
@@ -406,6 +474,11 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
             <span className="text-sm text-muted-foreground">
               {currentTasks.filter(t => isResolved(t.id)).length} / {currentTasks.length} resolved
             </span>
+            {openClockCount > 0 && (
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-700">
+                {openClockCount} clocked in
+              </span>
+            )}
             {currentPhase !== 'pre_shift' && (
               <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-400 hover:text-red-600" onClick={() => setShowPhaseResetPin(true)}>
                 <RotateCcw className="w-3 h-3 mr-1" /> Reset
@@ -538,6 +611,7 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
             const completion = getCompletion(taskActionTarget.id)
             const assignedEmployee = completion ? employees.find(e => e.id === completion.employee_id) : null
             const taskStatus = completion?.status ?? 'complete'
+            const isClockActionTask = isClockTask(taskActionTarget)
 
             return completion ? (
               <div className="space-y-3">
@@ -550,61 +624,142 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
                 }`}>
                   {taskStatus === 'incomplete' ? 'Marked incomplete for this phase' : 'Completed for this phase'}
                 </div>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={() => {
-                    setTaskActionTarget(null)
-                    setTransferTarget({ task: taskActionTarget, completionId: completion.id })
-                  }}
-                >
-                  Transfer
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={() => {
-                    setTaskActionTarget(null)
-                    setStatusTarget({
-                      task: taskActionTarget,
-                      completionId: completion.id,
-                      status: taskStatus === 'incomplete' ? 'complete' : 'incomplete',
-                    })
-                  }}
-                >
-                  {taskStatus === 'incomplete' ? 'Mark Complete' : 'Mark Incomplete'}
-                </Button>
+                {!isClockActionTask && (
+                  <>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start"
+                      onClick={() => {
+                        setTaskActionTarget(null)
+                        setTransferTarget({ task: taskActionTarget, completionId: completion.id })
+                      }}
+                    >
+                      Transfer
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start"
+                      onClick={() => {
+                        setTaskActionTarget(null)
+                        setStatusTarget({
+                          task: taskActionTarget,
+                          completionId: completion.id,
+                          status: taskStatus === 'incomplete' ? 'complete' : 'incomplete',
+                        })
+                      }}
+                    >
+                      {taskStatus === 'incomplete' ? 'Mark Complete' : 'Mark Incomplete'}
+                    </Button>
+                  </>
+                )}
                 <Button variant="ghost" className="w-full" onClick={() => setTaskActionTarget(null)}>
-                  Cancel
+                  Close
                 </Button>
               </div>
             ) : (
               <div className="space-y-3">
-                <Button
-                  className="w-full justify-start"
-                  onClick={() => {
-                    setTaskActionTarget(null)
-                    setPinTarget({ task: taskActionTarget, status: 'complete' })
-                  }}
-                >
-                  Complete
-                </Button>
-                <Button
-                  variant="destructive"
-                  className="w-full justify-start"
-                  onClick={() => {
-                    setTaskActionTarget(null)
-                    setPinTarget({ task: taskActionTarget, status: 'incomplete' })
-                  }}
-                >
-                  Incomplete
-                </Button>
+                {isClockActionTask ? (
+                  <Button
+                    className="w-full justify-start"
+                    onClick={() => {
+                      setTaskActionTarget(null)
+                      setClockCaptureError(null)
+                      setClockCapturePin('')
+                      setClockCapturePhoto(null)
+                      setClockCapturePreview(null)
+                      setClockCaptureTarget({
+                        task: taskActionTarget,
+                        action: taskActionTarget.title.trim().toLowerCase() === CLOCK_IN_TITLE.toLowerCase() ? 'clock_in' : 'clock_out',
+                      })
+                    }}
+                  >
+                    <Camera className="mr-2 h-4 w-4" />
+                    {taskActionTarget.title}
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      className="w-full justify-start"
+                      onClick={() => {
+                        setTaskActionTarget(null)
+                        setPinTarget({ task: taskActionTarget, status: 'complete' })
+                      }}
+                    >
+                      Complete
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      className="w-full justify-start"
+                      onClick={() => {
+                        setTaskActionTarget(null)
+                        setPinTarget({ task: taskActionTarget, status: 'incomplete' })
+                      }}
+                    >
+                      Incomplete
+                    </Button>
+                  </>
+                )}
                 <Button variant="ghost" className="w-full" onClick={() => setTaskActionTarget(null)}>
                   Cancel
                 </Button>
               </div>
             )
           })()}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!clockCaptureTarget} onOpenChange={open => {
+        if (!open) {
+          setClockCaptureTarget(null)
+          setClockCapturePin('')
+          setClockCapturePhoto(null)
+          setClockCapturePreview(null)
+          setClockCaptureError(null)
+        }
+      }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{clockCaptureTarget?.action === 'clock_out' ? 'Clock Out With Photo' : 'Clock In With Photo'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <label className="block cursor-pointer rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-600">
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleClockPhotoChange}
+              />
+              {clockCapturePreview ? (
+                <Image src={clockCapturePreview} alt="Clock photo preview" width={320} height={192} unoptimized className="mx-auto max-h-48 rounded-lg object-cover" />
+              ) : (
+                <div className="space-y-2">
+                  <Camera className="mx-auto h-6 w-6 text-slate-400" />
+                  <p>Take or upload a photo</p>
+                </div>
+              )}
+            </label>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">PIN</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={clockCapturePin}
+                onChange={event => setClockCapturePin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                className="w-full rounded-md border border-input px-3 py-2 text-center font-mono tracking-[0.35em]"
+                placeholder="••••"
+              />
+            </div>
+            {clockCaptureError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {clockCaptureError}
+              </div>
+            )}
+            <Button className="w-full" onClick={handleClockCaptureSubmit} disabled={clockCaptureSubmitting}>
+              {clockCaptureSubmitting ? 'Saving…' : (clockCaptureTarget?.action === 'clock_out' ? 'Clock Out' : 'Clock In')}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

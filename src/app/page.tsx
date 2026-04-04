@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, Schedule, TaskCategory, Task, TaskCompletion, DailySession } from '@/lib/types'
+import { Employee, Schedule, TaskCategory, Task, TaskCompletion, DailySession, ShiftClock } from '@/lib/types'
 import { getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
 import { ensureDefaultClockTasks } from '@/lib/defaultTasks'
 import { StaffSidebar } from '@/components/dashboard/StaffSidebar'
@@ -22,19 +22,23 @@ export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [completions, setCompletions] = useState<TaskCompletion[]>([])
   const [session, setSession] = useState<DailySession | null>(null)
+  const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [notes, setNotes] = useState('')
   const [notesSaved, setNotesSaved] = useState(false)
   const isResolvedCompletion = (completion: TaskCompletion) => completion.status === 'incomplete' || completion.status === 'complete' || !completion.status
   const isCompletedCompletion = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
   const load = useCallback(async () => {
-    const [empRes, schRes, catRes, taskRes, compRes, sessRes] = await Promise.all([
+    const [empRes, schRes, catRes, taskRes, compRes, sessRes, clockRes] = await Promise.all([
       supabase.from('employees').select('*').eq('is_active', true),
       supabase.from('schedules').select('*').eq('date', today),
       supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
       supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),
       supabase.from('task_completions').select('*, employee:employees(*)').eq('session_date', today),
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
+      fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
+        (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
+      )),
     ])
 
     const loadedCategories = catRes.data ?? []
@@ -55,6 +59,7 @@ export default function DashboardPage() {
     setCategories(loadedCategories)
     setTasks(loadedTasks)
     setCompletions(compRes.data ?? [])
+    setClockRecords(clockRes.records ?? [])
     const loadedSession = sessRes.data ?? null
     setSession(loadedSession)
     setNotes(loadedSession?.notes ?? '')
@@ -156,13 +161,14 @@ export default function DashboardPage() {
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        <StaffSidebar schedules={schedules} employees={employees} />
+        <StaffSidebar schedules={schedules} employees={employees} clockRecords={clockRecords} />
         <TaskFlow
           key={today}
           categories={categories}
           tasks={tasks}
           schedules={schedules}
           completions={completions}
+          clockRecords={clockRecords}
           session={session}
           employees={employees}
           today={today}

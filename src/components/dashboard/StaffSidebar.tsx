@@ -1,19 +1,20 @@
 'use client'
 
-import { Employee, Schedule } from '@/lib/types'
+import { Employee, Schedule, ShiftClock } from '@/lib/types'
 import { formatTime, calcHours, formatHours, getBusinessDate, isBirthdayToday } from '@/lib/dateUtils'
 import { Gift, Phone } from 'lucide-react'
 
 interface Props {
   schedules: Schedule[]
   employees: Employee[]
+  clockRecords: ShiftClock[]
 }
 
 function isBohRole(role: Employee['role']) {
   return role === 'kitchen_staff' || role === 'manager'
 }
 
-export function StaffSidebar({ schedules, employees }: Props) {
+export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
   // schedules are already filtered to today by the parent — use directly
   const businessDate = getBusinessDate()
   const staffOnToday = schedules.map(s => ({
@@ -57,6 +58,30 @@ export function StaffSidebar({ schedules, employees }: Props) {
               )}
               {entries.map(({ schedule, employee }) => (
                 <div key={schedule.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  {(() => {
+                    const record = clockRecords.find(item => item.employee_id === employee!.id)
+                    const statusLabel = !record
+                      ? 'Not clocked in'
+                      : record.approval_status === 'pending_review'
+                        ? 'Pending review'
+                        : record.clock_out_at
+                          ? 'Clocked out'
+                          : 'Clocked in'
+                    const statusClass = !record
+                      ? 'bg-slate-200 text-slate-700'
+                      : record.approval_status === 'pending_review'
+                        ? 'bg-amber-100 text-amber-700'
+                        : record.clock_out_at
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-emerald-100 text-emerald-700'
+                    return (
+                      <div className="mb-2 flex justify-end">
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusClass}`}>
+                          {statusLabel}
+                        </span>
+                      </div>
+                    )
+                  })()}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
                       <span className="font-medium text-sm">{employee!.name}</span>

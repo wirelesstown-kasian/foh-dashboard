@@ -37,6 +37,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
   }
 
+  const { data: task, error: taskError } = await supabaseAdmin
+    .from('tasks')
+    .select('title')
+    .eq('id', task_id)
+    .single()
+
+  if (taskError || !task) {
+    return NextResponse.json({ error: taskError?.message ?? 'Task not found' }, { status: 404 })
+  }
+
+  const title = String(task.title).trim().toLowerCase()
+  if (title !== 'clock in') {
+    const { data: clockRecord, error: clockError } = await supabaseAdmin
+      .from('shift_clocks')
+      .select('clock_in_at, clock_out_at')
+      .eq('employee_id', employeeId)
+      .eq('session_date', session_date)
+      .maybeSingle()
+
+    if (clockError) {
+      return NextResponse.json({ error: clockError.message }, { status: 500 })
+    }
+    if (!clockRecord?.clock_in_at) {
+      return NextResponse.json({ error: 'Clock in with photo before using your PIN for tasks' }, { status: 403 })
+    }
+    if (title !== 'clock out' && clockRecord.clock_out_at) {
+      return NextResponse.json({ error: 'You are already clocked out for this shift' }, { status: 403 })
+    }
+  }
+
   const { error } = await supabaseAdmin.from('task_completions').insert({
     task_id,
     employee_id: employeeId,
@@ -80,6 +110,27 @@ export async function DELETE(req: NextRequest) {
 
   if (!employeeId) {
     return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
+  }
+
+  const { data: completion, error: completionError } = await supabaseAdmin
+    .from('task_completions')
+    .select('task_id, session_date')
+    .eq('id', completion_id)
+    .single()
+
+  if (completionError || !completion) {
+    return NextResponse.json({ error: completionError?.message ?? 'Completion not found' }, { status: 404 })
+  }
+
+  const { data: clockRecord } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('clock_in_at, clock_out_at')
+    .eq('employee_id', employeeId)
+    .eq('session_date', completion.session_date)
+    .maybeSingle()
+
+  if (!clockRecord?.clock_in_at) {
+    return NextResponse.json({ error: 'Clock in with photo before using your PIN for tasks' }, { status: 403 })
   }
 
   const { error } = await supabaseAdmin
@@ -126,6 +177,27 @@ export async function PATCH(req: NextRequest) {
 
   if (!employeeId) {
     return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
+  }
+
+  const { data: completion, error: completionError } = await supabaseAdmin
+    .from('task_completions')
+    .select('task_id, session_date')
+    .eq('id', completion_id)
+    .single()
+
+  if (completionError || !completion) {
+    return NextResponse.json({ error: completionError?.message ?? 'Completion not found' }, { status: 404 })
+  }
+
+  const { data: clockRecord } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('clock_in_at, clock_out_at')
+    .eq('employee_id', employeeId)
+    .eq('session_date', completion.session_date)
+    .maybeSingle()
+
+  if (!clockRecord?.clock_in_at) {
+    return NextResponse.json({ error: 'Clock in with photo before using your PIN for tasks' }, { status: 403 })
   }
 
   const payload = status ? { employee_id: employeeId, status } : { employee_id: employeeId }

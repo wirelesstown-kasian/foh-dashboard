@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, Schedule, DailySession, EodReport, TipDistribution } from '@/lib/types'
+import { Employee, Schedule, DailySession, EodReport, TipDistribution, ShiftClock } from '@/lib/types'
 import { calcHours, formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,15 @@ interface TipRow {
   start_time: string
   end_time: string
   name: string
+}
+
+function isoToTimeValue(value: string | null) {
+  if (!value) return '00:00:00'
+  const date = new Date(value)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${hours}:${minutes}:${seconds}`
 }
 
 function snapTimeToHalfHour(value: string) {
@@ -114,6 +123,7 @@ export default function EodPage() {
   const [session, setSession] = useState<DailySession | null>(null)
   const [employees, setEmployees] = useState<Employee[]>([])
   const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [existing, setExisting] = useState<EodReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -145,15 +155,19 @@ export default function EodPage() {
   const allowedTimeOptions = getAllowedTimeOptions()
 
   const load = useCallback(async () => {
-    const [sessRes, empRes, schRes, eodRes] = await Promise.all([
+    const [sessRes, empRes, schRes, eodRes, clockRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
       supabase.from('employees').select('*').eq('is_active', true).order('name'),
       supabase.from('schedules').select('*').eq('date', today),
       supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
+      fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
+        (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
+      )),
     ])
     setSession(sessRes.data ?? null)
     setEmployees(empRes.data ?? [])
     setSchedules(schRes.data ?? [])
+    setClockRecords(clockRes.records ?? [])
 
     const eod = eodRes.data as EodReport | null
     setExisting(eod)
@@ -185,20 +199,38 @@ export default function EodPage() {
       setFinancialsSaved(true)
       setTipDistributionSaved(true)
     } else {
-      const rows: TipRow[] = (schRes.data ?? [])
-        .filter((s: Schedule) => {
-          const emp = (empRes.data ?? []).find((e: Employee) => e.id === s.employee_id)
+      const clockBasedRows: TipRow[] = ((clockRes.records ?? []) as ShiftClock[])
+        .filter(record => {
+          const emp = (empRes.data ?? []).find((employee: Employee) => employee.id === record.employee_id)
           return !!emp && isTipEligibleRole(emp.role)
         })
-        .map((s: Schedule) => {
-        const emp = (empRes.data ?? []).find((e: Employee) => e.id === s.employee_id)
-        return {
-          employee_id: s.employee_id,
-          start_time: s.start_time,
-          end_time: s.end_time,
-          name: emp?.name ?? '',
-        }
-      })
+        .map(record => {
+          const emp = (empRes.data ?? []).find((employee: Employee) => employee.id === record.employee_id)
+          const sched = (schRes.data ?? []).find((schedule: Schedule) => schedule.employee_id === record.employee_id)
+          return {
+            employee_id: record.employee_id,
+            start_time: isoToTimeValue(record.clock_in_at),
+            end_time: record.clock_out_at ? isoToTimeValue(record.clock_out_at) : (sched?.end_time ?? isoToTimeValue(record.clock_in_at)),
+            name: emp?.name ?? '',
+          }
+        })
+
+      const scheduleRows: TipRow[] = (schRes.data ?? [])
+        .filter((schedule: Schedule) => {
+          const emp = (empRes.data ?? []).find((employee: Employee) => employee.id === schedule.employee_id)
+          return !!emp && isTipEligibleRole(emp.role) && !clockBasedRows.some(row => row.employee_id === schedule.employee_id)
+        })
+        .map((schedule: Schedule) => {
+          const emp = (empRes.data ?? []).find((employee: Employee) => employee.id === schedule.employee_id)
+          return {
+            employee_id: schedule.employee_id,
+            start_time: schedule.start_time,
+            end_time: schedule.end_time,
+            name: emp?.name ?? '',
+          }
+        })
+
+      const rows: TipRow[] = [...clockBasedRows, ...scheduleRows]
       setTipRows(rows)
       setFinancialsSaved(false)
       setTipDistributionSaved(false)
@@ -238,7 +270,10 @@ export default function EodPage() {
     }
   }, [existing, loading, today])
 
-  const isLocked = !managerOverride && (!!existing || !session || session.current_phase !== 'complete')
+  const openClockRecords = clockRecords.filter(record => !record.clock_out_at)
+  const pendingApprovalRecords = clockRecords.filter(record => record.approval_status === 'pending_review')
+  const hasAttendanceBlockingIssue = openClockRecords.length > 0
+  const isLocked = !managerOverride && (!!existing || !session || session.current_phase !== 'complete' || hasAttendanceBlockingIssue)
 
   const grossRevenue = (parseFloat(form.cash_total) || 0) + (parseFloat(form.batch_total) || 0)
   const tipTotal = (parseFloat(form.cc_tip) || 0) + (parseFloat(form.cash_tip) || 0)
@@ -556,6 +591,11 @@ export default function EodPage() {
             <p className="max-w-md text-muted-foreground">
               {submitResult?.message ?? 'EOD report and tip emails were sent successfully.'}
             </p>
+            {(openClockRecords.length > 0 || pendingApprovalRecords.length > 0) && (
+              <div className="max-w-lg rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+                Attendance warning: some shift records still need manager review. Pending auto clock-outs do not count toward wage or tip reporting until approved.
+              </div>
+            )}
             <div className="rounded-xl border bg-muted/40 px-6 py-4 text-sm text-muted-foreground">
               This EOD is now locked. Managers can still reopen it with override if needed.
             </div>
@@ -567,12 +607,25 @@ export default function EodPage() {
             <p className="text-muted-foreground max-w-sm">
               {eodAlreadySaved
                 ? "Today's EOD has been saved. Complete tomorrow's tasks to unlock the next EOD."
-                : 'Complete all tasks on the Dashboard (Pre-Shift → Operations → Closing) to unlock EOD.'
+                : hasAttendanceBlockingIssue
+                  ? 'One or more staff are still clocked in. Closing is pending until they clock out or a manager overrides the close.'
+                  : 'Complete all tasks on the Dashboard (Pre-Shift → Operations → Closing) to unlock EOD.'
               }
             </p>
+            {(openClockRecords.length > 0 || pendingApprovalRecords.length > 0) && (
+              <div className="max-w-md rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {openClockRecords.length > 0 && <p>{openClockRecords.length} open clock-out{openClockRecords.length > 1 ? 's' : ''} still need attention.</p>}
+                {pendingApprovalRecords.length > 0 && <p className="mt-1">{pendingApprovalRecords.length} auto clock-out{pendingApprovalRecords.length > 1 ? 's are' : ' is'} pending manager approval.</p>}
+              </div>
+            )}
             {eodAlreadySaved && (
               <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
                 Manager Edit Override
+              </Button>
+            )}
+            {!eodAlreadySaved && hasAttendanceBlockingIssue && (
+              <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
+                Manager Override Pending Close
               </Button>
             )}
           </div>
@@ -581,6 +634,18 @@ export default function EodPage() {
             <div className="mb-6">
               <h1 className="text-2xl font-bold">End of Day — {format(businessDate, 'MMM d, yyyy')}</h1>
             </div>
+
+            {(openClockRecords.length > 0 || pendingApprovalRecords.length > 0) && (
+              <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+                <p className="font-semibold">Attendance Warning</p>
+                {openClockRecords.length > 0 && (
+                  <p className="mt-1">{openClockRecords.length} staff member{openClockRecords.length > 1 ? 's are' : ' is'} still clocked in. A manager override is required to save a pending close.</p>
+                )}
+                {pendingApprovalRecords.length > 0 && (
+                  <p className="mt-1">{pendingApprovalRecords.length} auto clock-out record{pendingApprovalRecords.length > 1 ? 's are' : ' is'} pending manager approval. Those hours are excluded from reports until approved.</p>
+                )}
+              </div>
+            )}
 
             <div className="mb-6 grid gap-3 md:grid-cols-3">
               <div className={`rounded-xl border p-4 text-center ${financialStyles.card}`}>
@@ -850,7 +915,7 @@ export default function EodPage() {
             <div className="mt-4 flex justify-center">
               <Button
                 onClick={handleSave}
-                disabled={saving || submitting || !financialsSaved || !tipDistributionSaved}
+                disabled={saving || submitting || !financialsSaved || !tipDistributionSaved || (hasAttendanceBlockingIssue && !managerOverride)}
                 className={`h-12 min-w-64 text-base font-semibold ${
                   eodAlreadySaved && !managerOverride ? 'bg-emerald-600 hover:bg-emerald-700' : ''
                 }`}

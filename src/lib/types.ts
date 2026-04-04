@@ -3,6 +3,7 @@ export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
 export type SessionPhase = 'pre_shift' | 'operation' | 'closing' | 'complete'
 export type ScheduleDepartment = 'foh' | 'boh'
 export type TaskCompletionStatus = 'complete' | 'incomplete'
+export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
 
 export interface Employee {
   id: string
@@ -99,4 +100,25 @@ export interface TipDistribution {
   house_deduction: number
   net_tip: number
   employee?: Employee
+}
+
+export interface ShiftClock {
+  id: string
+  session_date: string
+  employee_id: string
+  clock_in_at: string
+  clock_out_at: string | null
+  clock_in_photo_path: string
+  clock_out_photo_path: string | null
+  auto_clock_out: boolean
+  approval_status: ShiftClockApprovalStatus
+  approved_hours: number | null
+  manager_approved_by: string | null
+  manager_approved_at: string | null
+  manager_note: string | null
+  created_at: string
+  updated_at: string
+  employee?: Employee
+  clock_in_photo_url?: string | null
+  clock_out_photo_url?: string | null
 }
