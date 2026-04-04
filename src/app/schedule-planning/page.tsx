@@ -7,17 +7,17 @@ export default function SchedulePlanningPage() {
     <div className="p-6">
       <AdminSubpageHeader title="Schedule Planning" subtitle="Build, adjust, and publish the weekly schedule." />
       <Tabs defaultValue="foh">
-        <TabsList className="mb-5 grid w-full max-w-2xl grid-cols-2 gap-3 bg-transparent p-0">
-          <TabsTrigger value="foh" className="h-auto rounded-2xl border bg-white px-5 py-4 text-left data-active:border-blue-500 data-active:bg-blue-50">
+        <TabsList className="mb-6 mt-3 grid w-full max-w-xl grid-cols-2 gap-2 bg-transparent p-0">
+          <TabsTrigger value="foh" className="h-auto min-h-0 rounded-xl border bg-white px-4 py-3 text-left data-active:border-blue-500 data-active:bg-blue-50">
             <span className="flex flex-col items-start">
-              <span className="text-base font-semibold">FOH Planning</span>
-              <span className="text-xs text-muted-foreground">Servers, bussers, runners, and managers</span>
+              <span className="text-sm font-semibold">FOH Planning</span>
+              <span className="text-[11px] text-muted-foreground">Servers, bussers, runners, managers</span>
             </span>
           </TabsTrigger>
-          <TabsTrigger value="boh" className="h-auto rounded-2xl border bg-white px-5 py-4 text-left data-active:border-emerald-500 data-active:bg-emerald-50">
+          <TabsTrigger value="boh" className="h-auto min-h-0 rounded-xl border bg-white px-4 py-3 text-left data-active:border-emerald-500 data-active:bg-emerald-50">
             <span className="flex flex-col items-start">
-              <span className="text-base font-semibold">BOH Planning</span>
-              <span className="text-xs text-muted-foreground">Kitchen staff only</span>
+              <span className="text-sm font-semibold">BOH Planning</span>
+              <span className="text-[11px] text-muted-foreground">Kitchen staff only</span>
             </span>
           </TabsTrigger>
         </TabsList>
