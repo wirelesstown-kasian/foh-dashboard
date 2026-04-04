@@ -56,6 +56,10 @@ function getDefaultTimes(dateStr: string): { start: string; end: string; isOff: 
   return { start: '15:30', end: '01:00', isOff: false }                               // Tue-Thu
 }
 
+function isMondayDate(dateStr: string) {
+  return new Date(dateStr + 'T12:00:00').getDay() === 1
+}
+
 function draftKey(weekRef: Date) {
   const days = getWeekDays(weekRef)
   return `schedule_draft_${formatDate(days[0])}`
@@ -160,6 +164,30 @@ export function PlanningGrid({ department }: PlanningGridProps) {
   const isEditableWeek = viewedWeekStart >= previousWeekStart
   const currentDraftKey = `${draftKey(weekRef)}_${department}`
   const currentRowsKey = `${currentDraftKey}_rows`
+  const mondayDate = days[0] ? formatDate(days[0]) : null
+
+  const ensureMondayOffDrafts = useCallback((baseDrafts: ShiftDraft[], employeeIds: string[]) => {
+    if (!mondayDate) return baseDrafts
+
+    const nextDrafts = [...baseDrafts]
+    for (const employeeId of employeeIds) {
+      const hasMondayEntry = nextDrafts.some(draft => draft.employee_id === employeeId && draft.date === mondayDate)
+      if (hasMondayEntry) continue
+      nextDrafts.push({
+        employee_id: employeeId,
+        date: mondayDate,
+        start_time: '00:00:00',
+        end_time: '00:00:00',
+        is_off: true,
+      })
+    }
+
+    return nextDrafts.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date)
+      if (a.employee_id !== b.employee_id) return a.employee_id.localeCompare(b.employee_id)
+      return a.start_time.localeCompare(b.start_time)
+    })
+  }, [mondayDate])
 
   const persistDrafts = useCallback((nextDrafts: ShiftDraft[], nextDirty = true) => {
     if (!isEditableWeek) return
@@ -283,9 +311,12 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     const validRowIds = [...restoredRowIds, ...autoShownIds].filter(employeeId =>
       [...activeEmployees, ...scheduledOnlyEmployees].some(employee => employee.id === employeeId)
     )
-    setDisplayedEmployeeIds(Array.from(new Set(validRowIds)))
+    const normalizedRowIds = Array.from(new Set(validRowIds))
+    const draftsWithMondayDefaults = ensureMondayOffDrafts(nextDrafts, normalizedRowIds)
+    setDrafts(draftsWithMondayDefaults)
+    setDisplayedEmployeeIds(normalizedRowIds)
     setLoading(false)
-  }, [days, department, isEditableWeek])
+  }, [days, department, ensureMondayOffDrafts, isEditableWeek])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -389,7 +420,9 @@ export function PlanningGrid({ department }: PlanningGridProps) {
 
   const addStaffRow = () => {
     if (staffToAdd.length === 0) return
-    persistDisplayedEmployeeIds([...displayedEmployeeIds, ...staffToAdd])
+    const nextDisplayedIds = [...displayedEmployeeIds, ...staffToAdd]
+    persistDisplayedEmployeeIds(nextDisplayedIds)
+    persistDrafts(ensureMondayOffDrafts(drafts, nextDisplayedIds))
     setStaffToAdd([])
     setAddStaffDialogOpen(false)
   }
@@ -800,6 +833,31 @@ export function PlanningGrid({ department }: PlanningGridProps) {
               <p className="text-sm text-muted-foreground">
                 {employeeNamesById.get(addDialog.employee_id) ?? employees.find(e => e.id === addDialog.employee_id)?.name} — {addDialog.date}
               </p>
+
+              {!isMondayDate(addDialog.date) && (
+                <div className="flex gap-2">
+                  <button
+                    className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      !addForm.is_off
+                        ? 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setAddForm(f => ({ ...f, is_off: false }))}
+                  >
+                    Working
+                  </button>
+                  <button
+                    className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                      addForm.is_off
+                        ? 'bg-gray-500 text-white border-gray-500'
+                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                    }`}
+                    onClick={() => setAddForm(f => ({ ...f, is_off: true }))}
+                  >
+                    Off
+                  </button>
+                </div>
+              )}
 
               {!addForm.is_off && (
                 <>
