@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { TaskCategory, Task, TaskType } from '@/lib/types'
-import { ensureDefaultClockTasks } from '@/lib/defaultTasks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,6 +35,10 @@ const TYPE_COLORS: Record<TaskType, string> = {
   custom: 'bg-purple-100 text-purple-800',
 }
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const isSystemClockTask = (task: Task) => {
+  const title = task.title.trim().toLowerCase()
+  return title === 'clock in' || title === 'clock out'
+}
 
 function normalizeDays(days: unknown): number[] | null {
   if (days == null) return null
@@ -96,17 +99,7 @@ export function TaskCategoryEditor() {
     ])
     setErrorMessage(null)
     const loadedCategories = catRes.data ?? []
-    let loadedTasks = taskRes.data ?? []
-
-    try {
-      const insertedDefaults = await ensureDefaultClockTasks(supabase, loadedCategories, loadedTasks)
-      if (insertedDefaults) {
-        const refreshedTasks = await supabase.from('tasks').select('*').eq('is_active', true).order('display_order')
-        loadedTasks = refreshedTasks.data ?? loadedTasks
-      }
-    } catch (error) {
-      console.error('Failed to ensure default clock tasks', error)
-    }
+    const loadedTasks = (taskRes.data ?? []).filter(task => !isSystemClockTask(task))
 
     setCategories(loadedCategories)
     setTasks(loadedTasks)

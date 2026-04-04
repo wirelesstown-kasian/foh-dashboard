@@ -3,11 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ShiftClock, Task, Schedule } from '@/lib/types'
+import { ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
 
 interface Props {
-  tasks: Task[]
   schedules: Schedule[]
   clockRecords: ShiftClock[]
   today: string
@@ -17,17 +16,14 @@ interface Props {
 const CLOCK_IN_TITLE = 'Clock In'
 const CLOCK_OUT_TITLE = 'Clock Out'
 
-export function ClockToolbar({ tasks, schedules, clockRecords, today, onRefresh }: Props) {
-  const [target, setTarget] = useState<{ task: Task; action: 'clock_in' | 'clock_out' } | null>(null)
+export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Props) {
+  const [target, setTarget] = useState<'clock_in' | 'clock_out' | null>(null)
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-
-  const clockInTask = tasks.find(task => task.title.trim().toLowerCase() === CLOCK_IN_TITLE.toLowerCase()) ?? null
-  const clockOutTask = tasks.find(task => task.title.trim().toLowerCase() === CLOCK_OUT_TITLE.toLowerCase()) ?? null
 
   const firstShift = useMemo(() => {
     return schedules
@@ -106,10 +102,12 @@ export function ClockToolbar({ tasks, schedules, clockRecords, today, onRefresh 
   const handleSubmit = async () => {
     if (!target) return
     setError(null)
+
     if (!/^\d{4}$/.test(pin)) {
       setError('Enter a valid 4-digit PIN')
       return
     }
+
     const photo = captureFrame()
     if (!photo) {
       setError('Camera preview is not ready yet')
@@ -122,11 +120,10 @@ export function ClockToolbar({ tasks, schedules, clockRecords, today, onRefresh 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: target.action,
+          action: target,
           pin,
           session_date: today,
           photo_data_url: photo,
-          task_id: target.task.id,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -145,33 +142,29 @@ export function ClockToolbar({ tasks, schedules, clockRecords, today, onRefresh 
   return (
     <>
       <div className="flex items-center gap-2">
-        {clockInTask && (
-          <Button
-            size="sm"
-            className="h-9 bg-emerald-600 px-4 text-sm font-semibold hover:bg-emerald-700"
-            onClick={() => {
-              setTarget({ task: clockInTask, action: 'clock_in' })
-              setError(null)
-              setPin('')
-            }}
-          >
-            Clock In
-          </Button>
-        )}
-        {clockOutTask && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-9 px-4 text-sm font-semibold"
-            onClick={() => {
-              setTarget({ task: clockOutTask, action: 'clock_out' })
-              setError(null)
-              setPin('')
-            }}
-          >
-            Clock Out
-          </Button>
-        )}
+        <Button
+          size="sm"
+          className="h-9 bg-emerald-600 px-4 text-sm font-semibold hover:bg-emerald-700"
+          onClick={() => {
+            setTarget('clock_in')
+            setError(null)
+            setPin('')
+          }}
+        >
+          {CLOCK_IN_TITLE}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-9 px-4 text-sm font-semibold"
+          onClick={() => {
+            setTarget('clock_out')
+            setError(null)
+            setPin('')
+          }}
+        >
+          {CLOCK_OUT_TITLE}
+        </Button>
         {openClockCount > 0 && (
           <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
             {openClockCount} clocked in
@@ -179,20 +172,23 @@ export function ClockToolbar({ tasks, schedules, clockRecords, today, onRefresh 
         )}
       </div>
 
-      <Dialog open={!!target} onOpenChange={open => {
-        if (!open) {
-          setTarget(null)
-          setError(null)
-          setPin('')
-        }
-      }}>
+      <Dialog
+        open={!!target}
+        onOpenChange={open => {
+          if (!open) {
+            setTarget(null)
+            setError(null)
+            setPin('')
+          }
+        }}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{target?.action === 'clock_out' ? 'Clock Out With Photo' : 'Clock In With Photo'}</DialogTitle>
+            <DialogTitle>{target === 'clock_out' ? 'Clock Out With Photo' : 'Clock In With Photo'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              {target?.action === 'clock_in'
+              {target === 'clock_in'
                 ? `First shift starts at ${firstShift ? formatTime(firstShift.schedule.start_time) : '—'}`
                 : `Final shift ends at ${lastShift ? formatTime(lastShift.schedule.end_time) : '—'}`}
             </div>
@@ -228,7 +224,7 @@ export function ClockToolbar({ tasks, schedules, clockRecords, today, onRefresh 
               </div>
             )}
             <Button className="w-full" onClick={handleSubmit} disabled={submitting || !cameraReady}>
-              {submitting ? 'Saving…' : (target?.action === 'clock_out' ? 'Clock Out' : 'Clock In')}
+              {submitting ? 'Saving…' : target === 'clock_out' ? CLOCK_OUT_TITLE : CLOCK_IN_TITLE}
             </Button>
           </div>
         </DialogContent>
