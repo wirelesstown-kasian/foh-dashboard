@@ -28,7 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Trophy, Download, Star } from 'lucide-react'
+import { Trophy, Download, Star, Mail } from 'lucide-react'
 import {
   format, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
   subWeeks, addWeeks, eachDayOfInterval, subMonths, addMonths
@@ -37,7 +37,7 @@ import * as XLSX from 'xlsx'
 
 type Period = 'daily' | 'weekly' | 'monthly'
 type ReportDepartment = 'foh' | 'boh'
-type TipReportPeriod = 'weekly' | 'monthly'
+type TipReportPeriod = 'daily' | 'weekly' | 'monthly'
 type TipReportView = 'earnings' | 'tips'
 type ReportTab = 'performance' | 'wages' | 'eod'
 type TipDetail = {
@@ -77,7 +77,6 @@ type TipSummaryRow = {
   hours: number
   tips: number
   baseWages: number
-  guaranteedTarget: number
   guaranteeTopUp: number
   totalEarnings: number
   tipRate: number | null
@@ -126,7 +125,10 @@ export default function ReportingPage() {
   const [tipReportView, setTipReportView] = useState<TipReportView>('earnings')
   const [reportTab, setReportTab] = useState<ReportTab>('performance')
   const [tipEmployeeFilter, setTipEmployeeFilter] = useState<string>('all')
+  const [eodHistoryPeriod, setEodHistoryPeriod] = useState<Period>('weekly')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
+  const [sendingReportEmail, setSendingReportEmail] = useState(false)
+  const [reportEmailStatus, setReportEmailStatus] = useState<string | null>(null)
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
   const isCompletedTask = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
@@ -284,7 +286,9 @@ export default function ReportingPage() {
 
   const [tipRangeStart, tipRangeEnd] = tipReportPeriod === 'weekly'
     ? [tipWeekStart, tipWeekEnd]
-    : [monthStart, monthEnd]
+    : tipReportPeriod === 'monthly'
+      ? [monthStart, monthEnd]
+      : [format(refDate, 'yyyy-MM-dd'), format(refDate, 'yyyy-MM-dd')]
   const tipRangeReports = eodReports.filter(r => r.session_date >= tipRangeStart && r.session_date <= tipRangeEnd)
   const tipSummaryRows: TipSummaryRow[] = filteredEmployees.map(emp => {
     const distributions = tipRangeReports.flatMap(report =>
@@ -293,8 +297,13 @@ export default function ReportingPage() {
     const hours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
     const tips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
     const baseWages = hours * (emp.hourly_wage ?? 0)
-    const guaranteedTarget = hours * (emp.guaranteed_hourly ?? 0)
-    const guaranteeTopUp = Math.max(0, guaranteedTarget - (baseWages + tips))
+    const guaranteeTopUp = distributions.reduce((sum, dist) => {
+      const shiftHours = Number(dist.hours_worked)
+      const shiftTips = Number(dist.net_tip)
+      const shiftBaseWages = shiftHours * (emp.hourly_wage ?? 0)
+      const shiftGuaranteedTarget = shiftHours * (emp.guaranteed_hourly ?? 0)
+      return sum + Math.max(0, shiftGuaranteedTarget - (shiftBaseWages + shiftTips))
+    }, 0)
     const totalEarnings = baseWages + tips + guaranteeTopUp
 
     return {
@@ -302,7 +311,6 @@ export default function ReportingPage() {
       hours,
       tips,
       baseWages,
-      guaranteedTarget,
       guaranteeTopUp,
       totalEarnings,
       tipRate: hours > 0 ? tips / hours : null,
@@ -319,6 +327,18 @@ export default function ReportingPage() {
   const selectedPeriodTasks = perfStats.find(item => item.emp.id === selectedEmployeeId) ?? null
   const selectedTipSummary = tipSummaryRows.find(item => item.emp.id === selectedEmployeeId) ?? null
   const showEarningsReport = reportTab === 'wages' && !!selectedTipSummary
+  const getHistoryRange = (): [string, string] => {
+    if (eodHistoryPeriod === 'daily') {
+      const d = format(refDate, 'yyyy-MM-dd')
+      return [d, d]
+    }
+    if (eodHistoryPeriod === 'weekly') {
+      return [tipWeekStart, tipWeekEnd]
+    }
+    return [monthStart, monthEnd]
+  }
+  const [historyStart, historyEnd] = getHistoryRange()
+  const filteredEodReports = eodReports.filter(report => report.session_date >= historyStart && report.session_date <= historyEnd)
   const rankingCards: RankingCard[] = selectedEmployeeStats ? [
     {
       label: 'Task Rank',
@@ -356,7 +376,7 @@ export default function ReportingPage() {
       'Hourly Wage': row.emp.hourly_wage !== null ? formatCurrency(row.emp.hourly_wage) : '—',
       'Base Wages': formatCurrency(row.baseWages),
       'Guaranteed / Hr': row.emp.guaranteed_hourly !== null ? formatCurrency(row.emp.guaranteed_hourly) : '—',
-      'Guarantee Top-Up': formatCurrency(row.guaranteeTopUp),
+      'Guaranteed Top-Up': formatCurrency(row.guaranteeTopUp),
       'Total Earnings': formatCurrency(row.totalEarnings),
       'Effective / Hr': row.effectiveRate !== null ? formatCurrency(row.effectiveRate) : '—',
     }))
@@ -530,6 +550,31 @@ export default function ReportingPage() {
     printWindow.document.close()
     printWindow.focus()
     printWindow.print()
+  }
+
+  const sendSelectedReportEmail = async () => {
+    if (!selectedTipSummary) return
+    setSendingReportEmail(true)
+    setReportEmailStatus(null)
+    try {
+      const res = await fetch('/api/send-wage-report-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id: selectedTipSummary.emp.id,
+          ref_date: format(refDate, 'yyyy-MM-dd'),
+          period: tipReportPeriod,
+          view: tipReportView,
+        }),
+      })
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? 'Failed to send report email')
+      setReportEmailStatus('Report email sent')
+    } catch (error) {
+      setReportEmailStatus(error instanceof Error ? error.message : 'Failed to send report email')
+    } finally {
+      setSendingReportEmail(false)
+    }
   }
 
   return (
@@ -758,6 +803,7 @@ export default function ReportingPage() {
               <Select value={tipReportPeriod} onValueChange={(v: string | null) => v && setTipReportPeriod(v as TipReportPeriod)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
                   <SelectItem value="weekly">Weekly</SelectItem>
                   <SelectItem value="monthly">Monthly</SelectItem>
                 </SelectContent>
@@ -771,13 +817,15 @@ export default function ReportingPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'weekly' ? subWeeks(d, 1) : subMonths(d, 1))}>←</Button>
+              <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'daily' ? new Date(d.getTime() - 86400000) : tipReportPeriod === 'weekly' ? subWeeks(d, 1) : subMonths(d, 1))}>←</Button>
               <span className="font-medium text-sm min-w-56 text-center">
-                {tipReportPeriod === 'weekly'
+                {tipReportPeriod === 'daily'
+                  ? format(refDate, 'MMM d, yyyy')
+                  : tipReportPeriod === 'weekly'
                   ? `Week of ${format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
                   : format(refDate, 'MMMM yyyy')}
               </span>
-              <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'weekly' ? addWeeks(d, 1) : addMonths(d, 1))}>→</Button>
+              <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'daily' ? new Date(d.getTime() + 86400000) : tipReportPeriod === 'weekly' ? addWeeks(d, 1) : addMonths(d, 1))}>→</Button>
               <Button variant="outline" size="sm" className="ml-auto" onClick={exportTips}>
                 <Download className="w-4 h-4 mr-2" /> Export Excel
               </Button>
@@ -796,7 +844,7 @@ export default function ReportingPage() {
                 <div className="mt-2 text-2xl font-bold text-amber-950">{formatCurrency(displayedTipSummaryRows.reduce((sum, row) => sum + row.baseWages, 0))}</div>
               </div>
               <div className="rounded-xl border bg-violet-50 p-4">
-                <div className="text-xs font-medium uppercase tracking-wide text-violet-700">Minimum Wage Top-Up</div>
+                <div className="text-xs font-medium uppercase tracking-wide text-violet-700">Guaranteed Top-Up</div>
                 <div className="mt-2 text-2xl font-bold text-violet-950">{formatCurrency(displayedTipSummaryRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0))}</div>
               </div>
             </div>
@@ -813,7 +861,7 @@ export default function ReportingPage() {
                       <TableHead className="text-right">Hourly Wage</TableHead>
                       <TableHead className="text-right">Base Wages</TableHead>
                       <TableHead className="text-right">Guaranteed / Hr</TableHead>
-                      <TableHead className="text-right">Min Wage Top-Up</TableHead>
+                      <TableHead className="text-right">Guaranteed Top-Up</TableHead>
                       <TableHead className="text-right">Total Earnings</TableHead>
                       <TableHead className="text-right">Effective / Hr</TableHead>
                     </>
@@ -856,13 +904,52 @@ export default function ReportingPage() {
               </TableBody>
             </Table>
             <p className="mt-4 text-xs text-muted-foreground">
-              Minimum wage top-up means we compare `hourly wage + tips` against the guaranteed hourly minimum. If the shift falls short, the difference is added so final hourly earnings reach the guaranteed amount.
+              Guaranteed top-up is calculated from verified tip distribution hours. Each day is checked separately: if hourly wage plus tips falls below the guaranteed hourly minimum, the difference is added for that day.
             </p>
           </div>
         </TabsContent>
 
         <TabsContent value="eod">
           <div className="bg-white rounded-xl border p-5">
+            <div className="mb-4 flex items-center gap-3">
+              <Select value={eodHistoryPeriod} onValueChange={(v: string | null) => v && setEodHistoryPeriod(v as Period)}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (eodHistoryPeriod === 'daily') setRefDate(d => new Date(d.getTime() - 86400000))
+                  else if (eodHistoryPeriod === 'weekly') setRefDate(d => subWeeks(d, 1))
+                  else setRefDate(d => subMonths(d, 1))
+                }}
+              >
+                ←
+              </Button>
+              <span className="font-medium text-sm min-w-56 text-center">
+                {eodHistoryPeriod === 'daily'
+                  ? format(refDate, 'MMM d, yyyy')
+                  : eodHistoryPeriod === 'weekly'
+                    ? `Week of ${format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
+                    : format(refDate, 'MMMM yyyy')}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (eodHistoryPeriod === 'daily') setRefDate(d => new Date(d.getTime() + 86400000))
+                  else if (eodHistoryPeriod === 'weekly') setRefDate(d => addWeeks(d, 1))
+                  else setRefDate(d => addMonths(d, 1))
+                }}
+              >
+                →
+              </Button>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -876,7 +963,7 @@ export default function ReportingPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {eodReports.map(r => (
+                {filteredEodReports.map(r => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{format(new Date(r.session_date), 'MMM d, yyyy')}</TableCell>
                     <TableCell className="text-right">${r.cash_total.toFixed(2)}</TableCell>
@@ -887,7 +974,7 @@ export default function ReportingPage() {
                     <TableCell className="text-muted-foreground text-sm max-w-xs truncate">{r.memo ?? '—'}</TableCell>
                   </TableRow>
                 ))}
-                {eodReports.length === 0 && (
+                {filteredEodReports.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-muted-foreground py-6">No EOD reports yet</TableCell>
                   </TableRow>
@@ -912,13 +999,25 @@ export default function ReportingPage() {
                   : `${selectedEmployeeStats?.emp.name ?? selectedWeekTips?.emp.name ?? selectedPeriodTasks?.emp.name ?? 'Employee'} Performance`}
               </DialogTitle>
               {(selectedEmployeeStats || selectedTipSummary) && (
-                <Button variant="outline" size="sm" onClick={exportEmployeePdf}>
-                  <Download className="w-4 h-4 mr-2" /> Export PDF
-                </Button>
+                <div className="flex items-center gap-2">
+                  {showEarningsReport && (
+                    <Button variant="outline" size="sm" onClick={sendSelectedReportEmail} disabled={sendingReportEmail}>
+                      <Mail className="w-4 h-4 mr-2" /> {sendingReportEmail ? 'Sending…' : 'Send Email'}
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={exportEmployeePdf}>
+                    <Download className="w-4 h-4 mr-2" /> Export PDF
+                  </Button>
+                </div>
               )}
             </div>
           </DialogHeader>
           <div className="overflow-y-auto px-8 py-6">
+            {reportEmailStatus && (
+              <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
+                {reportEmailStatus}
+              </div>
+            )}
             {showEarningsReport && selectedTipSummary ? (
               <div ref={employeeReportRef} className="print-page mx-auto w-full max-w-[1080px] space-y-6">
                 <div className="print-header">
@@ -943,13 +1042,14 @@ export default function ReportingPage() {
                   <div className="card">
                     <div className="text-sm text-muted-foreground">Tips Earned</div>
                     <div className="mt-2 text-3xl font-bold text-green-700">{formatCurrency(selectedTipSummary.tips)}</div>
+                    <div className="mt-2 text-xs text-muted-foreground">Tips / Hr {selectedTipSummary.tipRate !== null ? formatCurrency(selectedTipSummary.tipRate) : '—'}</div>
                   </div>
                   <div className="card">
                     <div className="text-sm text-muted-foreground">Base Wages</div>
                     <div className="mt-2 text-3xl font-bold text-amber-700">{formatCurrency(selectedTipSummary.baseWages)}</div>
                   </div>
                   <div className="card">
-                    <div className="text-sm text-muted-foreground">Minimum Wage Top-Up</div>
+                    <div className="text-sm text-muted-foreground">Guaranteed Top-Up</div>
                     <div className="mt-2 text-3xl font-bold text-violet-700">{formatCurrency(selectedTipSummary.guaranteeTopUp)}</div>
                   </div>
                 </div>
@@ -960,10 +1060,10 @@ export default function ReportingPage() {
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between"><span className="text-muted-foreground">Hourly Wage</span><span className="font-semibold">{selectedTipSummary.emp.hourly_wage !== null ? formatCurrency(selectedTipSummary.emp.hourly_wage) : '—'}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Guaranteed / Hr</span><span className="font-semibold">{selectedTipSummary.emp.guaranteed_hourly !== null ? formatCurrency(selectedTipSummary.emp.guaranteed_hourly) : '—'}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Minimum Guaranteed Total</span><span className="font-semibold">{formatCurrency(selectedTipSummary.guaranteedTarget)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Tips / Hr</span><span className="font-semibold">{selectedTipSummary.tipRate !== null ? formatCurrency(selectedTipSummary.tipRate) : '—'}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Tips</span><span className="font-semibold">{formatCurrency(selectedTipSummary.tips)}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Base Wages</span><span className="font-semibold">{formatCurrency(selectedTipSummary.baseWages)}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Minimum Wage Top-Up</span><span className="font-semibold text-violet-700">{formatCurrency(selectedTipSummary.guaranteeTopUp)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Guaranteed Top-Up</span><span className="font-semibold text-violet-700">{formatCurrency(selectedTipSummary.guaranteeTopUp)}</span></div>
                       <div className="flex justify-between border-t pt-2"><span className="font-medium">Total Earnings</span><span className="font-bold">{formatCurrency(selectedTipSummary.totalEarnings)}</span></div>
                     </div>
                   </div>
@@ -971,8 +1071,8 @@ export default function ReportingPage() {
                   <div className="card">
                     <h3 className="font-semibold mb-3">Notes</h3>
                     <div className="space-y-3 text-sm text-muted-foreground">
-                      <p>This weekly stub combines base hourly wages and tips.</p>
-                      <p>If hourly wages plus tips did not reach the guaranteed minimum, the difference is paid as a minimum wage top-up.</p>
+                      <p>This report is based on verified tip distribution hours, not the original schedule.</p>
+                      <p>If hourly wages plus tips did not reach the guaranteed minimum for a worked day, the difference is paid as a guaranteed top-up.</p>
                       <p>Effective hourly earnings this week: <span className="font-semibold text-slate-900">{selectedTipSummary.effectiveRate !== null ? formatCurrency(selectedTipSummary.effectiveRate) : '—'}</span></p>
                     </div>
                   </div>

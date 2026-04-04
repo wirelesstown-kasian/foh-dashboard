@@ -1,0 +1,134 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { renderEmailShell, sendEmail } from '@/lib/emailUtils'
+
+type WageReportPeriod = 'daily' | 'weekly' | 'monthly'
+type WageReportView = 'earnings' | 'tips'
+
+function formatCurrency(value: number) {
+  return `$${value.toFixed(2)}`
+}
+
+function getRange(refDate: string, period: WageReportPeriod) {
+  const date = new Date(refDate + 'T12:00:00')
+  if (period === 'daily') {
+    return { start: refDate, end: refDate, label: refDate }
+  }
+
+  if (period === 'weekly') {
+    const start = new Date(date)
+    const day = start.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    start.setDate(start.getDate() + diff)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+      label: `${start.toISOString().split('T')[0]} - ${end.toISOString().split('T')[0]}`,
+    }
+  }
+
+  const start = new Date(date.getFullYear(), date.getMonth(), 1)
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0)
+  return {
+    start: start.toISOString().split('T')[0],
+    end: end.toISOString().split('T')[0],
+    label: `${start.toISOString().split('T')[0]} - ${end.toISOString().split('T')[0]}`,
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co',
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder'
+  )
+
+  const { employee_id, ref_date, period, view } = await req.json() as {
+    employee_id?: string
+    ref_date?: string
+    period?: WageReportPeriod
+    view?: WageReportView
+  }
+
+  if (!employee_id || !ref_date || !period || !view) {
+    return NextResponse.json({ error: 'Missing wage report email payload' }, { status: 400 })
+  }
+
+  const resendKey = process.env.RESEND_API_KEY
+  if (!resendKey) return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+  const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
+  const { start, end, label } = getRange(ref_date, period)
+
+  const { data: employee, error: employeeError } = await supabase
+    .from('employees')
+    .select('*')
+    .eq('id', employee_id)
+    .single()
+
+  if (employeeError || !employee?.email) {
+    return NextResponse.json({ error: 'Employee email not available' }, { status: 400 })
+  }
+
+  const { data: reports, error: reportsError } = await supabase
+    .from('eod_reports')
+    .select('id, session_date, tip_distributions(*)')
+    .gte('session_date', start)
+    .lte('session_date', end)
+    .order('session_date')
+
+  if (reportsError) {
+    return NextResponse.json({ error: reportsError.message }, { status: 500 })
+  }
+
+  const distributions = (reports ?? []).flatMap(report =>
+    (report.tip_distributions ?? [])
+      .filter((dist: { employee_id: string }) => dist.employee_id === employee_id)
+      .map((dist: { hours_worked: number; net_tip: number }) => ({
+        hours: Number(dist.hours_worked),
+        tips: Number(dist.net_tip),
+      }))
+  )
+
+  const hours = distributions.reduce((sum, dist) => sum + dist.hours, 0)
+  const tips = distributions.reduce((sum, dist) => sum + dist.tips, 0)
+  const baseWages = hours * Number(employee.hourly_wage ?? 0)
+  const guaranteedTopUp = distributions.reduce((sum, dist) => {
+    const guaranteedTarget = dist.hours * Number(employee.guaranteed_hourly ?? 0)
+    const shiftBaseWage = dist.hours * Number(employee.hourly_wage ?? 0)
+    return sum + Math.max(0, guaranteedTarget - (shiftBaseWage + dist.tips))
+  }, 0)
+  const totalEarnings = baseWages + tips + guaranteedTopUp
+  const tipsPerHour = hours > 0 ? tips / hours : null
+  const effectiveRate = hours > 0 ? totalEarnings / hours : null
+
+  const html = renderEmailShell(logoUrl, `
+    <h2 style="color:#1a1a1a">${view === 'earnings' ? 'Earnings Report' : 'Tip Report'} — ${label}</h2>
+    <p>Hi ${employee.name},</p>
+    <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
+      <tr><td><strong>Period</strong></td><td>${label}</td></tr>
+      <tr><td><strong>Hours Worked</strong></td><td>${hours.toFixed(2)} hrs</td></tr>
+      <tr><td><strong>Tips Earned</strong></td><td>${formatCurrency(tips)}</td></tr>
+      <tr><td><strong>Tips per Hour</strong></td><td>${tipsPerHour !== null ? formatCurrency(tipsPerHour) : '—'}</td></tr>
+      ${view === 'earnings' ? `
+        <tr><td><strong>Hourly Wage</strong></td><td>${employee.hourly_wage !== null ? formatCurrency(Number(employee.hourly_wage)) : '—'}</td></tr>
+        <tr><td><strong>Base Wages</strong></td><td>${formatCurrency(baseWages)}</td></tr>
+        <tr><td><strong>Guaranteed / Hr</strong></td><td>${employee.guaranteed_hourly !== null ? formatCurrency(Number(employee.guaranteed_hourly)) : '—'}</td></tr>
+        <tr><td><strong>Guaranteed Top-Up</strong></td><td>${formatCurrency(guaranteedTopUp)}</td></tr>
+        <tr style="background:#eef7ff"><td><strong>Total Earnings</strong></td><td><strong>${formatCurrency(totalEarnings)}</strong></td></tr>
+        <tr><td><strong>Effective / Hr</strong></td><td>${effectiveRate !== null ? formatCurrency(effectiveRate) : '—'}</td></tr>
+      ` : ''}
+    </table>
+  `, 520)
+
+  await sendEmail(
+    resendKey,
+    employee.email,
+    `${view === 'earnings' ? 'Earnings' : 'Tip'} Report — ${label}`,
+    html
+  )
+
+  return NextResponse.json({ success: true })
+}

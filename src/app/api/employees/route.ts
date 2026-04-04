@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     email: typeof email === 'string' && email.trim() ? email.trim() : null,
     role,
     hourly_wage: hourlyWage,
-    guaranteed_hourly: role === 'server' ? guaranteedHourly : null,
+    guaranteed_hourly: guaranteedHourly,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     pin_hash,
   })
@@ -119,7 +119,7 @@ export async function PATCH(req: NextRequest) {
     email: typeof email === 'string' && email.trim() ? email.trim() : null,
     role,
     hourly_wage: hourlyWage,
-    guaranteed_hourly: role === 'server' ? guaranteedHourly : null,
+    guaranteed_hourly: guaranteedHourly,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
   }
 

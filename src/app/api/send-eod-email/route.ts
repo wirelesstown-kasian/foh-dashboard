@@ -210,6 +210,7 @@ export async function POST(req: NextRequest) {
           <tr><td><strong>Scheduled Shift</strong></td><td>${scheduledShiftText}</td></tr>
           <tr style="background:#f5f5f5"><td><strong>Worked Schedule</strong></td><td>${workedShiftText}</td></tr>
           <tr><td><strong>Total Hours</strong></td><td>${Number(dist.hours_worked).toFixed(2)} hrs</td></tr>
+          <tr><td><strong>Tips per Hour</strong></td><td>${Number(dist.hours_worked) > 0 ? `$${(Number(dist.net_tip) / Number(dist.hours_worked)).toFixed(2)}` : '—'}</td></tr>
           <tr style="background:#e8f5e9"><td><strong>Net Tip</strong></td><td><strong>$${Number(dist.net_tip).toFixed(2)}</strong></td></tr>
         </table>
         <p style="margin:18px 0 8px;font-weight:600">This Week So Far</p>

@@ -325,13 +325,12 @@ export function EmployeeTable() {
                   step="0.01"
                   value={form.guaranteed_hourly}
                   onChange={e => setForm(f => ({ ...f, guaranteed_hourly: e.target.value }))}
-                  placeholder={form.role === 'server' ? '0.00' : 'Servers only'}
-                  disabled={form.role !== 'server'}
+                  placeholder="0.00"
                 />
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              If a server&apos;s wages plus tips do not reach the guaranteed amount per hour, the difference is paid as a guarantee top-up.
+              If wages plus tips do not reach the guaranteed amount per hour, the difference is paid as a guaranteed top-up.
             </p>
             <div>
               <Label>Birth Date</Label>
