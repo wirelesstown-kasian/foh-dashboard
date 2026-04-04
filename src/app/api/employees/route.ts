@@ -4,6 +4,7 @@ import { hashPin } from '@/lib/pin'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { EmployeeRole } from '@/lib/types'
+import { isValidPin } from '@/lib/validation'
 
 const VALID_ROLES: EmployeeRole[] = ['manager', 'server', 'busser', 'runner', 'kitchen_staff']
 
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
   if (!isValidRole(role)) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   }
-  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+  if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'PIN must be 4 digits' }, { status: 400 })
   }
 
@@ -98,7 +99,7 @@ export async function PATCH(req: NextRequest) {
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
   }
 
-  if (typeof pin === 'string' && /^\d{4}$/.test(pin)) {
+  if (isValidPin(pin)) {
     update.pin_hash = await hashPin(pin)
   }
 

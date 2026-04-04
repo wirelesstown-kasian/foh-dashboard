@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { isValidPin } from '@/lib/validation'
 
 export async function POST(req: NextRequest) {
   const { pin } = await req.json()
 
-  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+  if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
   }
 

@@ -1,53 +1,12 @@
 import { createClient } from '@supabase/supabase-js'
-
-function formatTime(time: string): string {
-  if (!time) return ''
-  const [h, m] = time.split(':')
-  const hour = parseInt(h, 10)
-  const ampm = hour >= 12 ? 'PM' : 'AM'
-  const displayHour = hour % 12 || 12
-  return `${displayHour}:${m} ${ampm}`
-}
-
-function calcHours(startTime: string, endTime: string): number {
-  const toMinutes = (t: string) => {
-    const [h, m] = t.split(':').map(Number)
-    return h * 60 + m
-  }
-  const start = toMinutes(startTime)
-  let end = toMinutes(endTime)
-  if (end <= start) end += 24 * 60
-  return Math.round(((end - start) / 60) * 100) / 100
-}
-
-function formatHours(hours: number): string {
-  const h = Math.floor(hours)
-  const m = Math.round((hours - h) * 60)
-  return m === 0 ? `${h}h` : `${h}h ${m}m`
-}
-
-function formatDisplayDate(date: string) {
-  return new Date(date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function formatCalendarDay(date: string) {
-  return new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })
-}
-
-function renderEmailShell(logoUrl: string, content: string, maxWidth = 520) {
-  return `
-    <div style="font-family:sans-serif;max-width:${maxWidth}px">
-      <div style="padding:8px 0 18px;text-align:center">
-        <img
-          src="${logoUrl}"
-          alt="New Village Pub logo"
-          style="display:inline-block;max-width:220px;width:100%;height:auto;object-fit:contain"
-        />
-      </div>
-      ${content}
-    </div>
-  `
-}
+import {
+  formatTime,
+  calcHours,
+  formatHours,
+  formatDisplayDate,
+  formatCalendarDay,
+  renderEmailShell,
+} from '@/lib/emailUtils'
 
 export async function sendWeeklyScheduleEmails({
   weekStart,
@@ -58,12 +17,13 @@ export async function sendWeeklyScheduleEmails({
   weekEnd: string
   appUrl: string
 }) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) throw new Error('RESEND_API_KEY not configured')
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co',
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder'
+  )
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
   const { data: schedules } = await supabase

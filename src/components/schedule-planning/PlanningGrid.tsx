@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown, Download } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download } from 'lucide-react'
 
 type ShiftDraft = {
   id?: string
@@ -141,7 +141,6 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [isDirty, setIsDirty] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [savingDraft, setSavingDraft] = useState(false)
   const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string; draftIndex?: number } | null>(null)
   const [addStaffDialogOpen, setAddStaffDialogOpen] = useState(false)
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
@@ -149,9 +148,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [addForm, setAddForm] = useState({ start_time: '15:30', end_time: '01:00', is_off: false })
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
   const [serverDraftsReady, setServerDraftsReady] = useState(true)
-  const [draftSavedMessage, setDraftSavedMessage] = useState<string | null>(null)
   const [shiftActionTarget, setShiftActionTarget] = useState<{ draftIndex: number; employeeId: string; date: string } | null>(null)
   const [staffRemovalTarget, setStaffRemovalTarget] = useState<Employee | null>(null)
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const allowedTimeOptions = getAllowedTimeOptions()
 
   useEffect(() => {
@@ -311,7 +310,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       setIsDirty(false)
     }
 
-    const autoShownIds = nextDrafts.map(draft => draft.employee_id)
+    const autoShownIds = Array.from(new Set(nextDrafts.map(draft => draft.employee_id)))
     const serverOrderedRowIds = Array.from(
       new Set(
         ((draftRes.data ?? []) as Array<ShiftDraft>)
@@ -324,9 +323,21 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       : savedRows
         ? (JSON.parse(savedRows) as string[])
         : []
-    const validRowIds = [...restoredRowIds, ...autoShownIds].filter(employeeId =>
-      [...activeEmployees, ...scheduledOnlyEmployees].some(employee => employee.id === employeeId)
-    )
+
+    // When published schedules exist, show ONLY published employees to avoid
+    // stale draft rows (employees who were drafted but not published) bleeding through.
+    // In draft mode, include restored row order so previously added staff stays visible.
+    const candidateIds = published.length > 0
+      ? autoShownIds
+      : Array.from(new Set([...restoredRowIds, ...autoShownIds]))
+
+    // Sort candidates by saved draft order where available
+    const draftOrderMap = new Map(serverOrderedRowIds.map((id, i) => [id, i]))
+    const validRowIds = candidateIds
+      .filter(employeeId =>
+        [...activeEmployees, ...scheduledOnlyEmployees].some(employee => employee.id === employeeId)
+      )
+      .sort((a, b) => (draftOrderMap.get(a) ?? Infinity) - (draftOrderMap.get(b) ?? Infinity))
     const normalizedRowIds = Array.from(new Set(validRowIds))
     const draftsWithMondayDefaults = ensureMondayOffDrafts(nextDrafts, normalizedRowIds)
     setDrafts(draftsWithMondayDefaults)
@@ -350,11 +361,19 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     if (loading || !isEditableWeek || days.length === 0 || !isDirty || !serverDraftsReady) return
 
     const weekStart = formatDate(days[0])
+    setAutoSaveStatus('idle')
     const timeoutId = window.setTimeout(() => {
-      void saveServerDrafts(weekStart, department, drafts, displayedEmployeeIds).catch(error => {
-        console.error('Failed to save schedule drafts to server', error)
-      })
-    }, 300)
+      setAutoSaveStatus('saving')
+      void saveServerDrafts(weekStart, department, drafts, displayedEmployeeIds)
+        .then(() => {
+          setAutoSaveStatus('saved')
+          window.setTimeout(() => setAutoSaveStatus('idle'), 2000)
+        })
+        .catch(error => {
+          console.error('Failed to save schedule drafts to server', error)
+          setAutoSaveStatus('idle')
+        })
+    }, 800)
 
     return () => window.clearTimeout(timeoutId)
   }, [days, department, displayedEmployeeIds, drafts, isDirty, isEditableWeek, loading, serverDraftsReady])
@@ -585,66 +604,84 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const previousWeekStart = formatDate(previousWeekDays[0])
     const previousWeekEnd = formatDate(previousWeekDays[6])
 
-    const employeeIds = displayedEmployeeIds.length > 0 ? displayedEmployeeIds : employees.map(employee => employee.id)
-    if (employeeIds.length === 0) return
+    // Fetch both the previous week's draft order AND published schedules in parallel
+    const [prevDraftsRes, prevSchedulesRes] = await Promise.all([
+      supabase
+        .from('schedule_drafts')
+        .select('employee_id, display_order')
+        .eq('week_start', previousWeekStart)
+        .eq('department', department)
+        .order('display_order'),
+      supabase
+        .from('schedules')
+        .select('*')
+        .gte('date', previousWeekStart)
+        .lte('date', previousWeekEnd)
+        .order('employee_id')
+        .order('date'),
+    ])
 
-    const { data: previousSchedules, error } = await supabase
-      .from('schedules')
-      .select('*')
-      .in('employee_id', employeeIds)
-      .gte('date', previousWeekStart)
-      .lte('date', previousWeekEnd)
-      .order('employee_id')
-      .order('date')
-
-    if (error || !previousSchedules) {
-      console.error('Failed to load previous week schedules', error)
+    if (prevSchedulesRes.error) {
+      console.error('Failed to load previous week schedules', prevSchedulesRes.error)
       return
     }
 
-    const shiftedDrafts = previousSchedules.map(schedule => {
-      const previousDate = new Date(schedule.date + 'T12:00:00')
-      const nextDate = new Date(previousDate)
-      nextDate.setDate(nextDate.getDate() + 7)
+    const previousSchedules = prevSchedulesRes.data ?? []
+    const previousDraftRows = (prevDraftsRes.data ?? []) as Array<{ employee_id: string; display_order: number | null }>
 
-      return {
-        employee_id: schedule.employee_id,
-        date: formatDate(nextDate),
-        start_time: schedule.start_time,
-        end_time: schedule.end_time,
-        is_off: false,
-      } satisfies ShiftDraft
-    })
+    // Build ordered employee list from previous week's saved display_order
+    const prevDraftOrderedIds = Array.from(
+      new Set(
+        previousDraftRows
+          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+          .map(d => d.employee_id)
+      )
+    )
 
-    const nextDisplayedIds = Array.from(new Set([...displayedEmployeeIds, ...employeeIds]))
-    const employeeDraftsRemoved = drafts.filter(draft => !employeeIds.includes(draft.employee_id))
+    // Fall back to schedule order for anyone not in drafts
+    const prevScheduleEmployeeIds = Array.from(new Set(previousSchedules.map(s => s.employee_id)))
+
+    // Combined ordered list: draft order first, then extras from published schedules
+    const allPrevEmployeeIds = Array.from(
+      new Set([...prevDraftOrderedIds, ...prevScheduleEmployeeIds])
+    ).filter(id => employees.some(emp => emp.id === id)) // must exist in current dept
+
+    if (allPrevEmployeeIds.length === 0 && previousSchedules.length === 0) return
+
+    // Shift previous week's published shifts forward by 7 days
+    const shiftedDrafts = previousSchedules
+      .filter(s => allPrevEmployeeIds.includes(s.employee_id))
+      .map(schedule => {
+        const previousDate = new Date(schedule.date + 'T12:00:00')
+        const nextDate = new Date(previousDate)
+        nextDate.setDate(nextDate.getDate() + 7)
+        return {
+          employee_id: schedule.employee_id,
+          date: formatDate(nextDate),
+          start_time: schedule.start_time,
+          end_time: schedule.end_time,
+          is_off: false,
+        } satisfies ShiftDraft
+      })
+
+    // New row order: previous week's order first, then any current-week-only employees appended
+    const nextDisplayedIds = Array.from(
+      new Set([
+        ...allPrevEmployeeIds,
+        ...displayedEmployeeIds.filter(id => !allPrevEmployeeIds.includes(id)),
+      ])
+    )
+
+    const replacedIds = new Set(allPrevEmployeeIds)
+    const keptDrafts = drafts.filter(draft => !replacedIds.has(draft.employee_id))
     persistDisplayedEmployeeIds(nextDisplayedIds)
-    persistDrafts([...employeeDraftsRemoved, ...shiftedDrafts].sort((a, b) => {
+    persistDrafts([...keptDrafts, ...shiftedDrafts].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date)
       if (a.employee_id !== b.employee_id) return a.employee_id.localeCompare(b.employee_id)
       return a.start_time.localeCompare(b.start_time)
     }))
   }
 
-  const handleSaveDraft = async () => {
-    if (!isEditableWeek || days.length === 0) return
-    setSavingDraft(true)
-    setDraftSavedMessage(null)
-    try {
-      localStorage.setItem(currentDraftKey, JSON.stringify(drafts))
-      localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
-      if (serverDraftsReady) {
-        await saveServerDrafts(formatDate(days[0]), department, drafts, displayedEmployeeIds)
-      }
-      setDraftSavedMessage('Draft saved')
-    } catch (error) {
-      console.error('Failed to save draft', error)
-      setDraftSavedMessage('Draft saved locally')
-    } finally {
-      setSavingDraft(false)
-      window.setTimeout(() => setDraftSavedMessage(null), 2500)
-    }
-  }
 
   const handlePublish = async () => {
     if (days.length === 0 || !isEditableWeek) return
@@ -726,6 +763,12 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               <CloudOff className="w-3 h-3" /> Unpublished Draft
             </span>
           )}
+          {autoSaveStatus === 'saving' && (
+            <span className="text-xs text-slate-500">Saving…</span>
+          )}
+          {autoSaveStatus === 'saved' && (
+            <span className="text-xs text-emerald-600">Draft saved</span>
+          )}
           {!isEditableWeek && (
             <span className="text-xs text-gray-600 bg-gray-100 border border-gray-300 rounded-full px-2 py-0.5">
               Archived Week · Only current week and last week can be edited
@@ -745,10 +788,6 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             <Copy className="w-4 h-4 mr-2" />
             Copy Previous Week
           </Button>
-          <Button variant="outline" className="h-11 px-4 text-sm" onClick={() => void handleSaveDraft()} disabled={savingDraft || !isEditableWeek}>
-            <Save className="w-4 h-4 mr-2" />
-            {savingDraft ? 'Saving…' : 'Save Draft'}
-          </Button>
           <Button variant="outline" className="h-11 px-4 text-sm" onClick={exportPlannerPdf}>
             <Download className="w-4 h-4 mr-2" />
             Export PDF
@@ -759,9 +798,6 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           </Button>
         </div>
       </div>
-      {draftSavedMessage && (
-        <div className="mb-4 text-sm text-emerald-700">{draftSavedMessage}</div>
-      )}
 
       <div className="mb-5 rounded-2xl border bg-slate-50/80 p-4 md:p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">

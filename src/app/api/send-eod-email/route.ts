@@ -1,24 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 
 const ADMIN_EMAIL = 'admin@newvillagepub.com'
-
-async function sendEmail(resendKey: string, to: string, subject: string, html: string) {
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: 'FOH Dashboard <noreply@mail.newvillagepub.com>',
-      to: [to],
-      subject,
-      html,
-    }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-}
 
 type TipDist = {
   employee_id: string
@@ -33,11 +17,7 @@ type TipDist = {
 
 function formatShiftTime(value: string | null) {
   if (!value) return 'N/A'
-  const [hourText = '0', minute = '00'] = value.split(':')
-  const hour = Number(hourText)
-  const suffix = hour >= 12 ? 'PM' : 'AM'
-  const normalizedHour = hour % 12 || 12
-  return `${normalizedHour}:${minute} ${suffix}`
+  return formatTime(value)
 }
 
 function getWeekRange(sessionDate: string) {
@@ -66,25 +46,10 @@ function getRank<T>(items: T[], getValue: (item: T) => number, idKey: keyof T, t
   return rank >= 0 ? rank + 1 : null
 }
 
-function renderEmailShell(logoUrl: string, content: string, maxWidth = 600) {
-  return `
-    <div style="font-family:sans-serif;max-width:${maxWidth}px">
-      <div style="padding:8px 0 18px;text-align:center">
-        <img
-          src="${logoUrl}"
-          alt="New Village Pub logo"
-          style="display:inline-block;max-width:220px;width:100%;height:auto;object-fit:contain"
-        />
-      </div>
-      ${content}
-    </div>
-  `
-}
-
 export async function POST(req: NextRequest) {
   const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co',
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder'
   )
   const { eod_report_id } = await req.json()
   if (!eod_report_id) return NextResponse.json({ error: 'Missing eod_report_id' }, { status: 400 })
@@ -133,59 +98,63 @@ export async function POST(req: NextRequest) {
   const monthlyPerformanceTotals = new Map<string, { tasks: number; hours: number; netTip: number }>()
 
   if (employeeIds.length > 0) {
-    const { data: monthlyTaskCompletions } = await supabase
-      .from('task_completions')
-      .select('employee_id')
-      .gte('session_date', monthStart)
-      .lte('session_date', monthEnd)
-      .in('employee_id', employeeIds)
+    // Batch all date-range queries in parallel
+    const [monthlyTaskRes, monthlyReportsRes, weeklyReportsRes] = await Promise.all([
+      supabase
+        .from('task_completions')
+        .select('employee_id')
+        .gte('session_date', monthStart)
+        .lte('session_date', monthEnd)
+        .in('employee_id', employeeIds),
+      supabase
+        .from('eod_reports')
+        .select('id')
+        .gte('session_date', monthStart)
+        .lte('session_date', monthEnd),
+      supabase
+        .from('eod_reports')
+        .select('id')
+        .gte('session_date', weekStart)
+        .lte('session_date', weekEnd),
+    ])
 
-    for (const completion of (monthlyTaskCompletions ?? []) as Array<{ employee_id: string }>) {
+    for (const completion of (monthlyTaskRes.data ?? []) as Array<{ employee_id: string }>) {
       monthlyTaskTotals.set(completion.employee_id, (monthlyTaskTotals.get(completion.employee_id) ?? 0) + 1)
     }
 
-    const { data: monthlyReports } = await supabase
-      .from('eod_reports')
-      .select('id')
-      .gte('session_date', monthStart)
-      .lte('session_date', monthEnd)
+    const monthlyReportIds = (monthlyReportsRes.data ?? []).map((r: { id: string }) => r.id)
+    const weeklyReportIds = (weeklyReportsRes.data ?? []).map((r: { id: string }) => r.id)
 
-    const monthlyReportIds = (monthlyReports ?? []).map((monthlyReport: { id: string }) => monthlyReport.id)
-    if (monthlyReportIds.length > 0) {
-      const { data: monthlyTipDistributions } = await supabase
-        .from('tip_distributions')
-        .select('employee_id, hours_worked, net_tip')
-        .in('eod_report_id', monthlyReportIds)
-        .in('employee_id', employeeIds)
+    // Batch tip distribution queries in parallel
+    const [monthlyTipRes, weeklyTipRes] = await Promise.all([
+      monthlyReportIds.length > 0
+        ? supabase
+            .from('tip_distributions')
+            .select('employee_id, hours_worked, net_tip')
+            .in('eod_report_id', monthlyReportIds)
+            .in('employee_id', employeeIds)
+        : Promise.resolve({ data: [] }),
+      weeklyReportIds.length > 0
+        ? supabase
+            .from('tip_distributions')
+            .select('employee_id, hours_worked, net_tip')
+            .in('eod_report_id', weeklyReportIds)
+            .in('employee_id', employeeIds)
+        : Promise.resolve({ data: [] }),
+    ])
 
-      for (const distribution of (monthlyTipDistributions ?? []) as Array<{ employee_id: string; hours_worked: number; net_tip: number }>) {
-        const current = monthlyPerformanceTotals.get(distribution.employee_id) ?? { tasks: 0, hours: 0, netTip: 0 }
-        current.hours += Number(distribution.hours_worked)
-        current.netTip += Number(distribution.net_tip)
-        monthlyPerformanceTotals.set(distribution.employee_id, current)
-      }
+    for (const distribution of (monthlyTipRes.data ?? []) as Array<{ employee_id: string; hours_worked: number; net_tip: number }>) {
+      const current = monthlyPerformanceTotals.get(distribution.employee_id) ?? { tasks: 0, hours: 0, netTip: 0 }
+      current.hours += Number(distribution.hours_worked)
+      current.netTip += Number(distribution.net_tip)
+      monthlyPerformanceTotals.set(distribution.employee_id, current)
     }
 
-    const { data: weeklyReports } = await supabase
-      .from('eod_reports')
-      .select('id')
-      .gte('session_date', weekStart)
-      .lte('session_date', weekEnd)
-
-    const weeklyReportIds = (weeklyReports ?? []).map((weeklyReport: { id: string }) => weeklyReport.id)
-    if (weeklyReportIds.length > 0) {
-      const { data: weeklyTipDistributions } = await supabase
-        .from('tip_distributions')
-        .select('employee_id, hours_worked, net_tip')
-        .in('eod_report_id', weeklyReportIds)
-        .in('employee_id', employeeIds)
-
-      for (const distribution of (weeklyTipDistributions ?? []) as Array<{ employee_id: string; hours_worked: number; net_tip: number }>) {
-        const current = weeklyTotals.get(distribution.employee_id) ?? { hours: 0, netTip: 0 }
-        current.hours += Number(distribution.hours_worked)
-        current.netTip += Number(distribution.net_tip)
-        weeklyTotals.set(distribution.employee_id, current)
-      }
+    for (const distribution of (weeklyTipRes.data ?? []) as Array<{ employee_id: string; hours_worked: number; net_tip: number }>) {
+      const current = weeklyTotals.get(distribution.employee_id) ?? { hours: 0, netTip: 0 }
+      current.hours += Number(distribution.hours_worked)
+      current.netTip += Number(distribution.net_tip)
+      weeklyTotals.set(distribution.employee_id, current)
     }
   }
 
@@ -217,9 +186,13 @@ export async function POST(req: NextRequest) {
     const taskRank = getRank(monthlyRankings, item => item.tasks, 'employee_id', dist.employee_id)
     const taskRateRank = getRank(monthlyRankings.filter(item => item.hours > 0), item => item.taskRate, 'employee_id', dist.employee_id)
     const tipRateRank = getRank(monthlyRankings.filter(item => item.hours > 0), item => item.tipRate, 'employee_id', dist.employee_id)
+
+    // Escape user-supplied name before embedding in HTML
+    const safeName = escapeHtml(dist.employee.name)
+
     const html = renderEmailShell(logoUrl, `
         <h2 style="color:#1a1a1a">Your Tip Summary — ${report.session_date}</h2>
-        <p>Hi ${dist.employee.name},</p>
+        <p>Hi ${safeName},</p>
         <p>Here is your tip breakdown for <strong>${report.session_date}</strong>:</p>
         <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
           <tr style="background:#f5f5f5"><td><strong>Worked Schedule</strong></td><td>${formatShiftTime(dist.start_time)} - ${formatShiftTime(dist.end_time)}</td></tr>
@@ -250,9 +223,14 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Full revenue and tip settlement report to admin only
+  const closedByName = escapeHtml((report.closed_by as { name?: string } | null)?.name ?? 'N/A')
+  const memoHtml = report.memo
+    ? `<p><strong>Memo:</strong> ${escapeHtml(report.memo)}</p>`
+    : ''
+
   const tipRows = tipDists.map(d =>
     `<tr>
-      <td>${d.employee?.name ?? ''}</td>
+      <td>${escapeHtml(d.employee?.name ?? '')}</td>
       <td>${Number(d.hours_worked).toFixed(2)}</td>
       <td>${(Number(d.tip_share) * 100).toFixed(1)}%</td>
       <td>-$${Number(d.house_deduction).toFixed(2)}</td>
@@ -262,7 +240,7 @@ export async function POST(req: NextRequest) {
 
   const adminEodHtml = renderEmailShell(logoUrl, `
       <h2 style="color:#1a1a1a">FOH End of Day Report — ${report.session_date}</h2>
-      <p><strong>Closed by:</strong> ${(report.closed_by as { name?: string } | null)?.name ?? 'N/A'}</p>
+      <p><strong>Closed by:</strong> ${closedByName}</p>
       <h3>Revenue</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
         <tr><td>Cash Total</td><td style="text-align:right">$${Number(report.cash_total).toFixed(2)}</td></tr>
@@ -273,7 +251,7 @@ export async function POST(req: NextRequest) {
         <tr style="background:#f5f5f5"><td><strong>Tip Total</strong></td><td style="text-align:right"><strong>$${Number(report.tip_total).toFixed(2)}</strong></td></tr>
         <tr><td>Cash Deposit</td><td style="text-align:right">$${Number(report.cash_deposit).toFixed(2)}</td></tr>
       </table>
-      ${report.memo ? `<p><strong>Memo:</strong> ${report.memo}</p>` : ''}
+      ${memoHtml}
       <h3>Tip Distribution</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
         <tr style="background:#f5f5f5"><th>Name</th><th>Hours</th><th>Tip Share</th><th>Deduction</th><th>Net Tip</th></tr>
@@ -291,25 +269,23 @@ export async function POST(req: NextRequest) {
     const sunday = new Date(report.session_date + 'T12:00:00')
     const monday = new Date(sunday)
     monday.setDate(sunday.getDate() - 6)
-    const weekStart = monday.toISOString().split('T')[0]
-    const weekEnd = report.session_date
+    const summaryWeekStart = monday.toISOString().split('T')[0]
+    const summaryWeekEnd = report.session_date
 
     const { data: weekReports } = await supabase
       .from('eod_reports')
       .select('*, tip_distributions(*)')
-      .gte('session_date', weekStart)
-      .lte('session_date', weekEnd)
+      .gte('session_date', summaryWeekStart)
+      .lte('session_date', summaryWeekEnd)
       .order('session_date')
 
     if (weekReports && weekReports.length > 0) {
-      // Collect all tip distribution data with employee names
       const allEodIds = weekReports.map((r: { id: string }) => r.id)
       const { data: allDists } = await supabase
         .from('tip_distributions')
         .select('*, employee:employees(id, name)')
         .in('eod_report_id', allEodIds)
 
-      // Aggregate totals
       const totalRevenue = weekReports.reduce((s: number, r: { revenue_total: number }) => s + Number(r.revenue_total), 0)
       const totalTips = weekReports.reduce((s: number, r: { tip_total: number }) => s + Number(r.tip_total), 0)
       const totalCash = weekReports.reduce((s: number, r: { cash_total: number }) => s + Number(r.cash_total), 0)
@@ -330,7 +306,6 @@ export async function POST(req: NextRequest) {
         </tr>`
       ).join('')
 
-      // Sum tips by employee
       type EmpTip = { name: string; hours: number; total: number }
       const empTipMap = new Map<string, EmpTip>()
       for (const d of (allDists ?? []) as Array<{ employee_id: string; employee?: { id: string; name: string } | null; hours_worked: number; net_tip: number }>) {
@@ -346,7 +321,7 @@ export async function POST(req: NextRequest) {
         .sort((a, b) => b.total - a.total)
         .map(e =>
           `<tr>
-            <td>${e.name}</td>
+            <td>${escapeHtml(e.name)}</td>
             <td style="text-align:right">${e.hours.toFixed(1)}</td>
             <td style="text-align:right">$${e.total.toFixed(2)}</td>
           </tr>`
@@ -354,7 +329,7 @@ export async function POST(req: NextRequest) {
 
       const weeklyHtml = renderEmailShell(logoUrl, `
           <h2 style="color:#1a1a1a">Weekly Revenue &amp; Tip Summary</h2>
-          <p><strong>Week:</strong> ${weekStart} – ${weekEnd}</p>
+          <p><strong>Week:</strong> ${summaryWeekStart} – ${summaryWeekEnd}</p>
           <h3>Daily Breakdown</h3>
           <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
             <tr style="background:#f5f5f5">
@@ -379,7 +354,7 @@ export async function POST(req: NextRequest) {
       `, 640)
 
       emailPromises.push(
-        sendEmail(resendKey, ADMIN_EMAIL, `Weekly Summary — ${weekStart} to ${weekEnd}`, weeklyHtml)
+        sendEmail(resendKey, ADMIN_EMAIL, `Weekly Summary — ${summaryWeekStart} to ${summaryWeekEnd}`, weeklyHtml)
       )
     }
   }

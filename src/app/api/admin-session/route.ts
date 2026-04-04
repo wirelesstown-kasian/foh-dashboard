@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { verifyPin } from '@/lib/pin'
 import { ADMIN_SESSION_COOKIE, createAdminSessionValue } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { isValidPin } from '@/lib/validation'
 
 export async function GET() {
   const cookieStore = await cookies()
@@ -11,7 +12,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const { pin } = await req.json()
-  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
+  if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
   }
 
