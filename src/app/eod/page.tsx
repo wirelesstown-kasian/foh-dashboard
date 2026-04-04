@@ -67,6 +67,43 @@ function isTipEligibleRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
 
+function getStepStyles(state: 'saved' | 'dirty' | 'ready' | 'locked') {
+  switch (state) {
+    case 'saved':
+      return {
+        card: 'border-emerald-300 bg-emerald-50',
+        badge: 'bg-emerald-600 text-white',
+        title: 'text-emerald-950',
+        body: 'text-emerald-800',
+        status: 'text-emerald-700',
+      }
+    case 'dirty':
+      return {
+        card: 'border-amber-300 bg-amber-50',
+        badge: 'bg-amber-500 text-white',
+        title: 'text-amber-950',
+        body: 'text-amber-800',
+        status: 'text-amber-700',
+      }
+    case 'ready':
+      return {
+        card: 'border-blue-300 bg-blue-50',
+        badge: 'bg-blue-600 text-white',
+        title: 'text-blue-950',
+        body: 'text-blue-800',
+        status: 'text-blue-700',
+      }
+    default:
+      return {
+        card: 'border-slate-200 bg-slate-50',
+        badge: 'bg-slate-300 text-slate-700',
+        title: 'text-slate-900',
+        body: 'text-slate-600',
+        status: 'text-slate-500',
+      }
+  }
+}
+
 export default function EodPage() {
   const businessDate = getBusinessDate()
   const today = getBusinessDateString()
@@ -472,6 +509,15 @@ export default function EodPage() {
     form.batch_total.trim() !== '' &&
     form.cc_tip.trim() !== '' &&
     form.cash_tip.trim() !== ''
+  const financialStepState: 'saved' | 'dirty' | 'locked' =
+    financialsSaved ? 'saved' : canSaveFinancials ? 'dirty' : 'locked'
+  const tipStepState: 'saved' | 'dirty' | 'ready' | 'locked' =
+    !financialsSaved ? 'locked' : tipDistributionSaved ? 'saved' : 'dirty'
+  const eodStepState: 'saved' | 'ready' | 'locked' =
+    eodAlreadySaved && !managerOverride ? 'saved' : financialsSaved && tipDistributionSaved ? 'ready' : 'locked'
+  const financialStyles = getStepStyles(financialStepState)
+  const tipStyles = getStepStyles(tipStepState)
+  const eodStyles = getStepStyles(eodStepState)
 
   return (
     <>
@@ -532,32 +578,41 @@ export default function EodPage() {
             </div>
 
             <div className="mb-6 grid gap-3 md:grid-cols-3">
-              <div className={`rounded-xl border p-4 ${financialsSaved ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-900">1</span>
-                  <div className="font-semibold">Revenue & Tips</div>
+              <div className={`rounded-xl border p-4 text-center ${financialStyles.card}`}>
+                <div className="flex flex-col items-center gap-2">
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${financialStyles.badge}`}>1</span>
+                  <div className={`font-semibold ${financialStyles.title}`}>Revenue & Tips</div>
                 </div>
-                <p className="mt-2 text-xs text-slate-600">Enter revenue totals and save to unlock tip distribution.</p>
+                <p className={`mt-2 text-xs ${financialStyles.body}`}>Enter revenue totals and save to unlock tip distribution.</p>
+                <p className={`mt-2 text-[11px] font-semibold uppercase tracking-wide ${financialStyles.status}`}>
+                  {financialsSaved ? 'Saved' : canSaveFinancials ? 'Ready to Save' : 'Waiting for Input'}
+                </p>
               </div>
-              <div className={`rounded-xl border p-4 ${tipDistributionSaved ? 'border-emerald-300 bg-emerald-50' : financialsSaved ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-900">2</span>
-                  <div className="font-semibold">Tip Distribution</div>
+              <div className={`rounded-xl border p-4 text-center ${tipStyles.card}`}>
+                <div className="flex flex-col items-center gap-2">
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${tipStyles.badge}`}>2</span>
+                  <div className={`font-semibold ${tipStyles.title}`}>Tip Distribution</div>
                 </div>
-                <p className="mt-2 text-xs text-slate-600">Save FOH tip recipients and shift hours before final EOD save.</p>
+                <p className={`mt-2 text-xs ${tipStyles.body}`}>Save FOH tip recipients and shift hours before final EOD save.</p>
+                <p className={`mt-2 text-[11px] font-semibold uppercase tracking-wide ${tipStyles.status}`}>
+                  {!financialsSaved ? 'Locked' : tipDistributionSaved ? 'Saved' : 'Needs Save'}
+                </p>
               </div>
-              <div className={`rounded-xl border p-4 ${financialsSaved && tipDistributionSaved ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-slate-50'}`}>
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-900">3</span>
-                  <div className="font-semibold">Save EOD</div>
+              <div className={`rounded-xl border p-4 text-center ${eodStyles.card}`}>
+                <div className="flex flex-col items-center gap-2">
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${eodStyles.badge}`}>3</span>
+                  <div className={`font-semibold ${eodStyles.title}`}>Save EOD</div>
                 </div>
-                <p className="mt-2 text-xs text-slate-600">Lock the report and move to the final send flow.</p>
+                <p className={`mt-2 text-xs ${eodStyles.body}`}>Lock the report and move to the final send flow.</p>
+                <p className={`mt-2 text-[11px] font-semibold uppercase tracking-wide ${eodStyles.status}`}>
+                  {eodAlreadySaved && !managerOverride ? 'Saved' : financialsSaved && tipDistributionSaved ? 'Ready to Save' : 'Locked'}
+                </p>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-6">
               {/* Revenue */}
-              <div className="bg-white rounded-xl border p-5">
+              <div className={`rounded-xl border p-5 ${financialStyles.card}`}>
                 <h2 className="font-semibold mb-4">Revenue</h2>
                 <div className="space-y-3">
                   <div>
@@ -593,7 +648,7 @@ export default function EodPage() {
               </div>
 
               {/* Tips */}
-              <div className="bg-white rounded-xl border p-5">
+              <div className={`rounded-xl border p-5 ${financialStyles.card}`}>
                 <h2 className="font-semibold mb-4">Tips</h2>
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
@@ -629,8 +684,14 @@ export default function EodPage() {
             </div>
 
             <div className="mt-4 flex justify-center">
-              <Button onClick={handleFinancialSave} disabled={!canSaveFinancials || saving || submitting}>
-                Save Revenue & Tips
+              <Button
+                onClick={handleFinancialSave}
+                disabled={!canSaveFinancials || saving || submitting}
+                className={`h-12 min-w-64 text-base font-semibold ${
+                  financialsSaved ? 'bg-emerald-600 hover:bg-emerald-700' : ''
+                }`}
+              >
+                {financialsSaved ? 'Revenue & Tips Saved' : 'Save Revenue & Tips'}
               </Button>
             </div>
             <div className="mt-2 text-center text-xs text-muted-foreground">
@@ -638,7 +699,7 @@ export default function EodPage() {
             </div>
 
             {/* Tip Distribution */}
-            <div className={`bg-white rounded-xl border p-5 mt-6 ${!financialsSaved ? 'pointer-events-none opacity-60' : ''}`}>
+            <div className={`rounded-xl border p-5 mt-6 ${tipStyles.card} ${!financialsSaved ? 'pointer-events-none opacity-60' : ''}`}>
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
@@ -746,13 +807,24 @@ export default function EodPage() {
                   </tfoot>
                 )}
               </table>
-              <div className="mt-5 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-                <div>
-                  <div className="text-sm font-semibold text-blue-900">Step 2 Complete</div>
-                  <div className="text-xs text-blue-700">Save tip recipients and hours before final EOD save.</div>
+              <div className={`mt-5 rounded-xl border px-4 py-4 text-center ${
+                tipDistributionSaved ? 'border-emerald-200 bg-emerald-50' : 'border-blue-200 bg-blue-50'
+              }`}>
+                <div className={`text-sm font-semibold ${tipDistributionSaved ? 'text-emerald-900' : 'text-blue-900'}`}>
+                  {tipDistributionSaved ? 'Step 2 Saved' : 'Step 2 Ready'}
                 </div>
-                <Button size="sm" className="min-w-40" variant="outline" onClick={handleTipDistributionSave} disabled={saving || submitting}>
-                  Save Tip Distribution
+                <div className={`mt-1 text-xs ${tipDistributionSaved ? 'text-emerald-700' : 'text-blue-700'}`}>
+                  Save tip recipients and hours before final EOD save.
+                </div>
+                <Button
+                  className={`mt-4 h-12 min-w-64 text-base font-semibold ${
+                    tipDistributionSaved ? 'bg-emerald-600 hover:bg-emerald-700' : ''
+                  }`}
+                  variant={tipDistributionSaved ? 'default' : 'outline'}
+                  onClick={handleTipDistributionSave}
+                  disabled={saving || submitting}
+                >
+                  {tipDistributionSaved ? 'Tip Distribution Saved' : 'Save Tip Distribution'}
                 </Button>
               </div>
             </div>
@@ -770,9 +842,15 @@ export default function EodPage() {
               </div>
             )}
 
-            <div className="mt-3 flex justify-center">
-              <Button onClick={handleSave} disabled={saving || submitting || !financialsSaved || !tipDistributionSaved}>
-                {saving ? 'Saving…' : 'Save EOD'}
+            <div className="mt-4 flex justify-center">
+              <Button
+                onClick={handleSave}
+                disabled={saving || submitting || !financialsSaved || !tipDistributionSaved}
+                className={`h-12 min-w-64 text-base font-semibold ${
+                  eodAlreadySaved && !managerOverride ? 'bg-emerald-600 hover:bg-emerald-700' : ''
+                }`}
+              >
+                {saving ? 'Saving…' : eodAlreadySaved && !managerOverride ? 'EOD Saved' : 'Save EOD'}
               </Button>
             </div>
           </>

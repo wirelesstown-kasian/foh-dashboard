@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Task, TaskCategory, TaskCompletion, DailySession, Employee, Schedule, SessionPhase } from '@/lib/types'
+import { Task, TaskCategory, TaskCompletion, DailySession, Employee, Schedule, SessionPhase, TaskCompletionStatus } from '@/lib/types'
 import { PinModal } from '@/components/layout/PinModal'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -37,11 +37,11 @@ const REMINDER_WINDOW_MINUTES = 30
 export function TaskFlow({ categories, tasks, schedules, completions, session, employees, today, now, onRefresh }: Props) {
   const router = useRouter()
   const [taskActionTarget, setTaskActionTarget] = useState<Task | null>(null)
-  const [pinTarget, setPinTarget] = useState<Task | null>(null)
-  const [undoTarget, setUndoTarget] = useState<{ task: Task; completionId: string } | null>(null)
+  const [pinTarget, setPinTarget] = useState<{ task: Task; status: TaskCompletionStatus } | null>(null)
+  const [statusTarget, setStatusTarget] = useState<{ task: Task; completionId: string; status: TaskCompletionStatus } | null>(null)
   const [transferTarget, setTransferTarget] = useState<{ task: Task; completionId: string } | null>(null)
   const [pinError, setPinError] = useState<string | null>(null)
-  const [undoPinError, setUndoPinError] = useState<string | null>(null)
+  const [statusPinError, setStatusPinError] = useState<string | null>(null)
   const [transferPinError, setTransferPinError] = useState<string | null>(null)
   const [advancing, setAdvancing] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
@@ -73,10 +73,16 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
         .sort((a, b) => a.display_order - b.display_order)
     : []
 
-  const isCompleted = (taskId: string) =>
-    completions.some(c => c.task_id === taskId && c.session_date === today)
+  const getCompletion = (taskId: string) =>
+    completions.find(c => c.task_id === taskId && c.session_date === today)
+  const getTaskStatus = (taskId: string): 'pending' | TaskCompletionStatus => {
+    const completion = getCompletion(taskId)
+    if (!completion) return 'pending'
+    return completion.status ?? 'complete'
+  }
+  const isResolved = (taskId: string) => getTaskStatus(taskId) !== 'pending'
 
-  const allCurrentDone = currentTasks.length === 0 || currentTasks.every(t => isCompleted(t.id))
+  const allCurrentDone = currentTasks.length === 0 || currentTasks.every(t => isResolved(t.id))
   const clockInTask = tasks.find(task => task.title.trim().toLowerCase() === CLOCK_IN_TITLE.toLowerCase())
   const clockOutTask = tasks.find(task => task.title.trim().toLowerCase() === CLOCK_OUT_TITLE.toLowerCase())
 
@@ -118,7 +124,11 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
       },
     ]
 
-    const completedTaskIds = new Set(completions.map(completion => completion.task_id))
+    const completedTaskIds = new Set(
+      completions
+        .filter(completion => (completion.status ?? 'complete') === 'complete')
+        .map(completion => completion.task_id)
+    )
     const activeReminder = reminderCandidates.find(candidate => {
       if (candidate.phase !== currentPhase || !candidate.task || !candidate.eventTime || !candidate.eventLabel) {
         return false
@@ -150,8 +160,9 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         pin,
-        task_id: pinTarget.id,
+        task_id: pinTarget.task.id,
         session_date: today,
+        status: pinTarget.status,
       }),
     })
 
@@ -165,26 +176,27 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
     onRefresh()
   }
 
-  const handleUndoPinConfirm = async (pin: string) => {
-    if (!undoTarget) return
-    setUndoPinError(null)
+  const handleStatusPinConfirm = async (pin: string) => {
+    if (!statusTarget) return
+    setStatusPinError(null)
 
     const res = await fetch('/api/task-completions', {
-      method: 'DELETE',
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         pin,
-        completion_id: undoTarget.completionId,
+        completion_id: statusTarget.completionId,
+        status: statusTarget.status,
       }),
     })
 
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string }
-      setUndoPinError(data.error ?? 'Incorrect PIN')
+      setStatusPinError(data.error ?? 'Incorrect PIN')
       throw new Error(data.error ?? 'Incorrect PIN')
     }
 
-    setUndoTarget(null)
+    setStatusTarget(null)
     onRefresh()
   }
 
@@ -294,14 +306,17 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
     onRefresh()
   }
 
-  const completedCount = completions.filter(c => c.session_date === today).length
+  const completedCount = completions.filter(c => c.session_date === today && (c.status ?? 'complete') === 'complete').length
+  const incompleteCount = completions.filter(c => c.session_date === today && c.status === 'incomplete').length
 
   if (currentPhase === 'complete' || showSummary) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
         <CheckCircle2 className="w-16 h-16 text-green-500 mb-4" />
         <h2 className="text-2xl font-bold mb-2">All Tasks Complete!</h2>
-        <p className="text-muted-foreground mb-6">{completedCount} tasks completed today</p>
+        <p className="text-muted-foreground mb-6">
+          {completedCount} completed, {incompleteCount} marked incomplete
+        </p>
 
         <div className="bg-white rounded-xl border p-6 w-full max-w-lg text-left mb-6">
           <h3 className="font-semibold mb-3">Today&apos;s Task Summary</h3>
@@ -314,16 +329,20 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
               <div key={phase} className="mb-3">
                 <p className="text-sm font-medium text-muted-foreground mb-1">{PHASE_LABELS[phase]}</p>
                 {phaseTasks.map(task => {
-                  const done = isCompleted(task.id)
-                  const comp = completions.find(c => c.task_id === task.id && c.session_date === today)
+                  const status = getTaskStatus(task.id)
+                  const done = status === 'complete'
+                  const incomplete = status === 'incomplete'
+                  const comp = getCompletion(task.id)
                   const emp = comp ? employees.find(e => e.id === comp.employee_id) : null
                   return (
                     <div key={task.id} className="flex items-center gap-2 text-sm py-0.5">
                       {done
                         ? <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                        : incomplete
+                          ? <Circle className="w-4 h-4 text-red-500 shrink-0" />
                         : <Circle className="w-4 h-4 text-gray-300 shrink-0" />
                       }
-                      <span className={done ? '' : 'text-muted-foreground'}>{task.title}</span>
+                      <span className={done ? '' : incomplete ? 'text-red-700' : 'text-muted-foreground'}>{task.title}</span>
                       {emp && <span className="text-xs text-muted-foreground ml-auto">by {emp.name}</span>}
                     </div>
                   )
@@ -385,7 +404,7 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
           <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">
-              {currentTasks.filter(t => isCompleted(t.id)).length} / {currentTasks.length} done
+              {currentTasks.filter(t => isResolved(t.id)).length} / {currentTasks.length} resolved
             </span>
             {currentPhase !== 'pre_shift' && (
               <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-400 hover:text-red-600" onClick={() => setShowPhaseResetPin(true)}>
@@ -402,8 +421,10 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
           )}
           <div className="grid grid-cols-6 gap-3">
             {currentTasks.map(task => {
-              const done = isCompleted(task.id)
-              const comp = completions.find(c => c.task_id === task.id && c.session_date === today)
+              const status = getTaskStatus(task.id)
+              const done = status === 'complete'
+              const incomplete = status === 'incomplete'
+              const comp = getCompletion(task.id)
               const emp = comp ? employees.find(e => e.id === comp.employee_id) : null
               return (
                 <button
@@ -411,6 +432,8 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
                   className={`aspect-square rounded-2xl border-2 p-3 text-center transition-all ${
                     done
                       ? 'bg-green-50 border-green-400 hover:bg-green-100'
+                      : incomplete
+                        ? 'bg-red-50 border-red-400 hover:bg-red-100'
                       : 'bg-white border-gray-200 hover:border-amber-400 hover:shadow-sm'
                   }`}
                   onClick={() => setTaskActionTarget(task)}
@@ -419,17 +442,23 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
                     <div className="flex w-full justify-center">
                       {done
                         ? <CheckCircle2 className="w-6 h-6 text-green-500 shrink-0" />
+                        : incomplete
+                          ? <Circle className="w-6 h-6 text-red-500 shrink-0" />
                         : <Circle className="w-6 h-6 text-gray-300 shrink-0" />
                       }
                     </div>
                     <div className="flex-1 flex flex-col items-center justify-center px-1">
-                      <p className={`line-clamp-3 text-sm font-semibold leading-tight ${done ? 'text-green-800' : 'text-slate-900'}`}>
+                      <p className={`line-clamp-3 text-sm font-semibold leading-tight ${
+                        done ? 'text-green-800' : incomplete ? 'text-red-800' : 'text-slate-900'
+                      }`}>
                         {task.title}
                       </p>
                     </div>
                     <div className="min-h-10 flex flex-col items-center justify-end">
-                      {done && emp ? (
-                        <span className="rounded-full bg-green-200 px-2 py-1 text-[11px] font-semibold text-green-700">
+                      {emp ? (
+                        <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                          done ? 'bg-green-200 text-green-700' : incomplete ? 'bg-red-200 text-red-700' : 'bg-slate-200 text-slate-700'
+                        }`}>
                           {emp.name}
                         </span>
                       ) : getTaskHelperText(task) ? (
@@ -466,8 +495,8 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
 
       <PinModal
         open={!!pinTarget}
-        title="Complete Task"
-        description={pinTarget?.title}
+        title={pinTarget?.status === 'incomplete' ? 'Mark Incomplete' : 'Complete Task'}
+        description={pinTarget?.task.title}
         onConfirm={handlePinConfirm}
         onClose={() => { setPinTarget(null); setPinError(null) }}
         error={pinError}
@@ -483,12 +512,12 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
       />
 
       <PinModal
-        open={!!undoTarget}
-        title="Mark Incomplete"
-        description={undoTarget?.task.title}
-        onConfirm={handleUndoPinConfirm}
-        onClose={() => { setUndoTarget(null); setUndoPinError(null) }}
-        error={undoPinError}
+        open={!!statusTarget}
+        title={statusTarget?.status === 'complete' ? 'Mark Complete' : 'Mark Incomplete'}
+        description={statusTarget?.task.title}
+        onConfirm={handleStatusPinConfirm}
+        onClose={() => { setStatusTarget(null); setStatusPinError(null) }}
+        error={statusPinError}
       />
 
       <PinModal
@@ -506,14 +535,20 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
             <DialogTitle>{taskActionTarget?.title}</DialogTitle>
           </DialogHeader>
           {taskActionTarget && (() => {
-            const completion = completions.find(c => c.task_id === taskActionTarget.id && c.session_date === today)
+            const completion = getCompletion(taskActionTarget.id)
             const assignedEmployee = completion ? employees.find(e => e.id === completion.employee_id) : null
+            const taskStatus = completion?.status ?? 'complete'
 
             return completion ? (
               <div className="space-y-3">
                 <div className="rounded-xl border bg-muted/40 px-4 py-3 text-sm">
                   <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Assigned To</div>
                   <div className="mt-1 font-semibold">{assignedEmployee?.name ?? 'Unknown Staff'}</div>
+                </div>
+                <div className={`rounded-xl border px-4 py-3 text-sm ${
+                  taskStatus === 'incomplete' ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'
+                }`}>
+                  {taskStatus === 'incomplete' ? 'Marked incomplete for this phase' : 'Completed for this phase'}
                 </div>
                 <Button
                   variant="outline"
@@ -530,10 +565,14 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
                   className="w-full justify-start"
                   onClick={() => {
                     setTaskActionTarget(null)
-                    setUndoTarget({ task: taskActionTarget, completionId: completion.id })
+                    setStatusTarget({
+                      task: taskActionTarget,
+                      completionId: completion.id,
+                      status: taskStatus === 'incomplete' ? 'complete' : 'incomplete',
+                    })
                   }}
                 >
-                  Mark Incomplete
+                  {taskStatus === 'incomplete' ? 'Mark Complete' : 'Mark Incomplete'}
                 </Button>
                 <Button variant="ghost" className="w-full" onClick={() => setTaskActionTarget(null)}>
                   Cancel
@@ -545,10 +584,20 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
                   className="w-full justify-start"
                   onClick={() => {
                     setTaskActionTarget(null)
-                    setPinTarget(taskActionTarget)
+                    setPinTarget({ task: taskActionTarget, status: 'complete' })
                   }}
                 >
                   Complete
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    setTaskActionTarget(null)
+                    setPinTarget({ task: taskActionTarget, status: 'incomplete' })
+                  }}
+                >
+                  Incomplete
                 </Button>
                 <Button variant="ghost" className="w-full" onClick={() => setTaskActionTarget(null)}>
                   Cancel

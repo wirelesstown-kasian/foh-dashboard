@@ -2,6 +2,7 @@ export type EmployeeRole = 'manager' | 'server' | 'busser' | 'runner' | 'kitchen
 export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
 export type SessionPhase = 'pre_shift' | 'operation' | 'closing' | 'complete'
 export type ScheduleDepartment = 'foh' | 'boh'
+export type TaskCompletionStatus = 'complete' | 'incomplete'
 
 export interface Employee {
   id: string
@@ -54,6 +55,7 @@ export interface TaskCompletion {
   employee_id: string
   completed_at: string
   session_date: string
+  status?: TaskCompletionStatus
   employee?: Employee
   task?: Task
 }

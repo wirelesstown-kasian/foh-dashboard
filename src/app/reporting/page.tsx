@@ -109,6 +109,7 @@ export default function ReportingPage() {
   const [refDate, setRefDate] = useState(new Date())
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
+  const isCompletedTask = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
   useEffect(() => {
     let mounted = true
@@ -156,7 +157,8 @@ export default function ReportingPage() {
     completion =>
       completion.session_date >= startDate &&
       completion.session_date <= endDate &&
-      filteredEmployeeIds.has(completion.employee_id)
+      filteredEmployeeIds.has(completion.employee_id) &&
+      isCompletedTask(completion)
   )
 
   const perfStats = filteredEmployees.map(emp => {
@@ -167,7 +169,7 @@ export default function ReportingPage() {
 
   const monthStart = format(startOfMonth(refDate), 'yyyy-MM-dd')
   const monthEnd = format(endOfMonth(refDate), 'yyyy-MM-dd')
-  const monthCompletions = completions.filter(c => c.session_date >= monthStart && c.session_date <= monthEnd)
+  const monthCompletions = completions.filter(c => c.session_date >= monthStart && c.session_date <= monthEnd && isCompletedTask(c))
   const monthEods = eodReports.filter(r => r.session_date >= monthStart && r.session_date <= monthEnd)
 
   const monthHoursByEmp = new Map<string, number>()

@@ -4,13 +4,16 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
 
 export async function POST(req: NextRequest) {
-  const { pin, task_id, session_date } = await req.json()
+  const { pin, task_id, session_date, status } = await req.json()
 
   if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
   }
   if (typeof task_id !== 'string' || typeof session_date !== 'string') {
     return NextResponse.json({ error: 'Missing task completion payload' }, { status: 400 })
+  }
+  if (status !== undefined && status !== 'complete' && status !== 'incomplete') {
+    return NextResponse.json({ error: 'Invalid task completion status' }, { status: 400 })
   }
 
   const { data: employees, error: employeeError } = await supabaseAdmin
@@ -38,6 +41,7 @@ export async function POST(req: NextRequest) {
     task_id,
     employee_id: employeeId,
     session_date,
+    status: status ?? 'complete',
   })
 
   if (error) {
@@ -91,13 +95,16 @@ export async function DELETE(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { pin, completion_id } = await req.json()
+  const { pin, completion_id, status } = await req.json()
 
   if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
   }
   if (typeof completion_id !== 'string') {
     return NextResponse.json({ error: 'Missing completion id' }, { status: 400 })
+  }
+  if (status !== undefined && status !== 'complete' && status !== 'incomplete') {
+    return NextResponse.json({ error: 'Invalid task completion status' }, { status: 400 })
   }
 
   const { data: employees, error: employeeError } = await supabaseAdmin
@@ -121,9 +128,10 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
   }
 
+  const payload = status ? { employee_id: employeeId, status } : { employee_id: employeeId }
   const { error } = await supabaseAdmin
     .from('task_completions')
-    .update({ employee_id: employeeId })
+    .update(payload)
     .eq('id', completion_id)
 
   if (error) {

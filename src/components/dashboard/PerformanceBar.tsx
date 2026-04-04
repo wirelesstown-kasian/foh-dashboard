@@ -11,11 +11,12 @@ interface Props {
 
 export function PerformanceBar({ employees, completions, today }: Props) {
   const thisMonth = format(new Date(), 'yyyy-MM')
+  const isCompleted = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
   const dailyCounts = employees.map(emp => ({
     emp,
-    daily: completions.filter(c => c.employee_id === emp.id && c.session_date === today).length,
-    monthly: completions.filter(c => c.employee_id === emp.id && c.session_date.startsWith(thisMonth)).length,
+    daily: completions.filter(c => c.employee_id === emp.id && c.session_date === today && isCompleted(c)).length,
+    monthly: completions.filter(c => c.employee_id === emp.id && c.session_date.startsWith(thisMonth) && isCompleted(c)).length,
   })).filter(x => x.daily > 0 || x.monthly > 0)
     .sort((a, b) => b.daily - a.daily)
 

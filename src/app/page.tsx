@@ -24,6 +24,8 @@ export default function DashboardPage() {
   const [session, setSession] = useState<DailySession | null>(null)
   const [notes, setNotes] = useState('')
   const [notesSaved, setNotesSaved] = useState(false)
+  const isResolvedCompletion = (completion: TaskCompletion) => completion.status === 'incomplete' || completion.status === 'complete' || !completion.status
+  const isCompletedCompletion = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
   const load = useCallback(async () => {
     const [empRes, schRes, catRes, taskRes, compRes, sessRes] = await Promise.all([
@@ -94,12 +96,13 @@ export default function DashboardPage() {
     const cat = categories.find(c => c.type === phase)
     if (!cat) return [0, 0]
     const phaseTasks = tasks.filter(t => t.category_id === cat.id && t.is_active)
-    const done = phaseTasks.filter(t => completions.some(c => c.task_id === t.id)).length
+    const done = phaseTasks.filter(t => completions.some(c => c.task_id === t.id && isResolvedCompletion(c))).length
     return [done, phaseTasks.length]
   }
 
   const totalTasks = tasks.filter(t => t.is_active).length
-  const doneTasks = new Set(completions.map(c => c.task_id)).size
+  const doneTasks = new Set(completions.filter(isResolvedCompletion).map(c => c.task_id)).size
+  const completedTasks = new Set(completions.filter(isCompletedCompletion).map(c => c.task_id)).size
   const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
 
   return (
@@ -117,12 +120,17 @@ export default function DashboardPage() {
               <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
                 <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
               </div>
-              <span className="text-sm font-medium">{doneTasks}/{totalTasks} tasks</span>
+              <span className="text-sm font-medium">{doneTasks}/{totalTasks} resolved</span>
             </div>
           </div>
         </div>
 
         <PerformanceBar employees={employees} completions={completions} today={today} />
+        {doneTasks !== completedTasks && (
+          <p className="text-xs text-muted-foreground">
+            {completedTasks} completed, {doneTasks - completedTasks} marked incomplete
+          </p>
+        )}
 
         <div className="flex items-start gap-4">
           <TaskRoadmap

@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     const [monthlyTaskRes, monthlyReportsRes, weeklyReportsRes] = await Promise.all([
       supabase
         .from('task_completions')
-        .select('employee_id')
+        .select('employee_id, status')
         .gte('session_date', monthStart)
         .lte('session_date', monthEnd)
         .in('employee_id', employeeIds),
@@ -122,7 +122,8 @@ export async function POST(req: NextRequest) {
         .lte('session_date', weekEnd),
     ])
 
-    for (const completion of (monthlyTaskRes.data ?? []) as Array<{ employee_id: string }>) {
+    for (const completion of (monthlyTaskRes.data ?? []) as Array<{ employee_id: string; status?: 'complete' | 'incomplete' }>) {
+      if (completion.status === 'incomplete') continue
       monthlyTaskTotals.set(completion.employee_id, (monthlyTaskTotals.get(completion.employee_id) ?? 0) + 1)
     }
 
