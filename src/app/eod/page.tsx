@@ -63,6 +63,10 @@ function getFinancialDraftKey(sessionDate: string) {
   return `eod-financials:${sessionDate}`
 }
 
+function isTipEligibleRole(role: Employee['role']) {
+  return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
+}
+
 export default function EodPage() {
   const businessDate = getBusinessDate()
   const today = getBusinessDateString()
@@ -95,6 +99,7 @@ export default function EodPage() {
   })
   const [tipRows, setTipRows] = useState<TipRow[]>([])
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
+  const tipEligibleEmployees = employees.filter(employee => isTipEligibleRole(employee.role))
   const allowedTimeOptions = getAllowedTimeOptions()
 
   const load = useCallback(async () => {
@@ -121,7 +126,12 @@ export default function EodPage() {
         memo: eod.memo ?? '',
         closed_by: eod.closed_by_employee_id ?? '',
       })
-      setTipRows((eod.tip_distributions ?? []).map((d: TipDistribution & { employee?: Employee }) => {
+      setTipRows((eod.tip_distributions ?? [])
+        .filter((d: TipDistribution & { employee?: Employee }) => {
+          const role = d.employee?.role ?? (empRes.data ?? []).find((employee: Employee) => employee.id === d.employee_id)?.role
+          return !!role && isTipEligibleRole(role)
+        })
+        .map((d: TipDistribution & { employee?: Employee }) => {
         const sched = (schRes.data ?? []).find((s: Schedule) => s.employee_id === d.employee_id)
         return {
           employee_id: d.employee_id,
@@ -133,7 +143,12 @@ export default function EodPage() {
       setFinancialsSaved(true)
       setTipDistributionSaved(true)
     } else {
-      const rows: TipRow[] = (schRes.data ?? []).map((s: Schedule) => {
+      const rows: TipRow[] = (schRes.data ?? [])
+        .filter((s: Schedule) => {
+          const emp = (empRes.data ?? []).find((e: Employee) => e.id === s.employee_id)
+          return !!emp && isTipEligibleRole(emp.role)
+        })
+        .map((s: Schedule) => {
         const emp = (empRes.data ?? []).find((e: Employee) => e.id === s.employee_id)
         return {
           employee_id: s.employee_id,
@@ -201,7 +216,7 @@ export default function EodPage() {
   }
 
   const addTipRow = () => {
-    const unusedEmp = employees.find(e => !tipRows.some(r => r.employee_id === e.id))
+    const unusedEmp = tipEligibleEmployees.find(e => !tipRows.some(r => r.employee_id === e.id))
     if (!unusedEmp) return
     setTipDistributionSaved(false)
     const sched = schedules.find(s => s.employee_id === unusedEmp.id)
@@ -223,7 +238,7 @@ export default function EodPage() {
     setTipRows(prev => prev.map((r, i) => {
       if (i !== idx) return r
       if (field === 'employee_id') {
-        const emp = employees.find(e => e.id === value)
+        const emp = tipEligibleEmployees.find(e => e.id === value)
         const sched = schedules.find(s => s.employee_id === value)
         return {
           ...r,
@@ -516,6 +531,30 @@ export default function EodPage() {
               <h1 className="text-2xl font-bold">End of Day — {format(businessDate, 'MMM d, yyyy')}</h1>
             </div>
 
+            <div className="mb-6 grid gap-3 md:grid-cols-3">
+              <div className={`rounded-xl border p-4 ${financialsSaved ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-900">1</span>
+                  <div className="font-semibold">Revenue & Tips</div>
+                </div>
+                <p className="mt-2 text-xs text-slate-600">Enter revenue totals and save to unlock tip distribution.</p>
+              </div>
+              <div className={`rounded-xl border p-4 ${tipDistributionSaved ? 'border-emerald-300 bg-emerald-50' : financialsSaved ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-900">2</span>
+                  <div className="font-semibold">Tip Distribution</div>
+                </div>
+                <p className="mt-2 text-xs text-slate-600">Save FOH tip recipients and shift hours before final EOD save.</p>
+              </div>
+              <div className={`rounded-xl border p-4 ${financialsSaved && tipDistributionSaved ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-slate-50'}`}>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-bold text-slate-900">3</span>
+                  <div className="font-semibold">Save EOD</div>
+                </div>
+                <p className="mt-2 text-xs text-slate-600">Lock the report and move to the final send flow.</p>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-6">
               {/* Revenue */}
               <div className="bg-white rounded-xl border p-5">
@@ -600,9 +639,12 @@ export default function EodPage() {
 
             {/* Tip Distribution */}
             <div className={`bg-white rounded-xl border p-5 mt-6 ${!financialsSaved ? 'pointer-events-none opacity-60' : ''}`}>
-              <div className="flex items-center justify-between mb-4">
+              <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <h2 className="font-semibold">Tip Distribution</h2>
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700">2</span>
+                    <h2 className="font-semibold">Tip Distribution</h2>
+                  </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     House takes 15% — distributing ${(tipTotal * 0.85).toFixed(2)} among staff
                   </p>
@@ -644,7 +686,7 @@ export default function EodPage() {
                               </span>
                             </SelectTrigger>
                             <SelectContent>
-                              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                              {tipEligibleEmployees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         </td>
@@ -704,8 +746,12 @@ export default function EodPage() {
                   </tfoot>
                 )}
               </table>
-              <div className="mt-4 flex justify-end">
-                <Button size="sm" variant="outline" onClick={handleTipDistributionSave} disabled={saving || submitting}>
+              <div className="mt-5 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-blue-900">Step 2 Complete</div>
+                  <div className="text-xs text-blue-700">Save tip recipients and hours before final EOD save.</div>
+                </div>
+                <Button size="sm" className="min-w-40" variant="outline" onClick={handleTipDistributionSave} disabled={saving || submitting}>
                   Save Tip Distribution
                 </Button>
               </div>
