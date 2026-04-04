@@ -270,7 +270,12 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     }
 
     let nextDrafts: ShiftDraft[] = published
-    if (canUseServerDrafts && isEditableWeek) {
+    if (published.length > 0) {
+      nextDrafts = published
+      setDrafts(published)
+      setIsDirty(false)
+      localStorage.setItem(key, JSON.stringify(published))
+    } else if (canUseServerDrafts && isEditableWeek) {
       const serverDrafts = ((draftRes.data ?? []) as Array<ShiftDraft & { id?: string }>).map(draft => ({
         id: draft.id,
         employee_id: draft.employee_id,
