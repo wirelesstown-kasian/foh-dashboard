@@ -84,8 +84,12 @@ export async function POST(req: NextRequest) {
     const schedule = scheduleByEmployee.get(dist.employee_id)
     return {
       ...dist,
-      start_time: dist.start_time ?? schedule?.start_time ?? null,
-      end_time: dist.end_time ?? schedule?.end_time ?? null,
+      // Worked time: tip_distribution explicit times (what was entered at EOD)
+      start_time: dist.start_time ?? null,
+      end_time: dist.end_time ?? null,
+      // Original scheduled shift from the schedules table; null means they were Off
+      scheduled_start: schedule?.start_time ?? null,
+      scheduled_end: schedule?.end_time ?? null,
     }
   })
   const emailPromises: Promise<void>[] = []
@@ -190,24 +194,32 @@ export async function POST(req: NextRequest) {
     // Escape user-supplied name before embedding in HTML
     const safeName = escapeHtml(dist.employee.name)
 
+    const scheduledShiftText = dist.scheduled_start
+      ? `${formatShiftTime(dist.scheduled_start)} – ${formatShiftTime(dist.scheduled_end ?? '')}`
+      : 'Off'
+    const workedShiftText = dist.start_time
+      ? `${formatShiftTime(dist.start_time)} – ${formatShiftTime(dist.end_time ?? '')}`
+      : scheduledShiftText  // fallback to scheduled if tip dist had no explicit time
+
     const html = renderEmailShell(logoUrl, `
         <h2 style="color:#1a1a1a">Your Tip Summary — ${report.session_date}</h2>
         <p>Hi ${safeName},</p>
         <p>Here is your tip breakdown for <strong>${report.session_date}</strong>:</p>
         <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
-          <tr style="background:#f5f5f5"><td><strong>Worked Schedule</strong></td><td>${formatShiftTime(dist.start_time)} - ${formatShiftTime(dist.end_time)}</td></tr>
+          <tr><td><strong>Scheduled Shift</strong></td><td>${scheduledShiftText}</td></tr>
+          <tr style="background:#f5f5f5"><td><strong>Worked Schedule</strong></td><td>${workedShiftText}</td></tr>
           <tr><td><strong>Total Hours</strong></td><td>${Number(dist.hours_worked).toFixed(2)} hrs</td></tr>
           <tr style="background:#e8f5e9"><td><strong>Net Tip</strong></td><td><strong>$${Number(dist.net_tip).toFixed(2)}</strong></td></tr>
         </table>
         <p style="margin:18px 0 8px;font-weight:600">This Week So Far</p>
         <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
-          <tr style="background:#f5f5f5"><td><strong>Week Range</strong></td><td>${weekStart} - ${weekEnd}</td></tr>
+          <tr style="background:#f5f5f5"><td><strong>Week Range</strong></td><td>${weekStart} – ${weekEnd}</td></tr>
           <tr><td><strong>Total Hours</strong></td><td>${weeklyTotal.hours.toFixed(2)} hrs</td></tr>
           <tr style="background:#eef7ff"><td><strong>Total Tips</strong></td><td><strong>$${weeklyTotal.netTip.toFixed(2)}</strong></td></tr>
         </table>
         <p style="margin:18px 0 8px;font-weight:600">This Month So Far</p>
         <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
-          <tr style="background:#f5f5f5"><td><strong>Month Range</strong></td><td>${monthStart} - ${monthEnd}</td></tr>
+          <tr style="background:#f5f5f5"><td><strong>Month Range</strong></td><td>${monthStart} – ${monthEnd}</td></tr>
           <tr><td><strong>Total Tasks</strong></td><td>${monthlyTotal.tasks}</td></tr>
           <tr><td><strong>Total Hours</strong></td><td>${monthlyTotal.hours.toFixed(2)} hrs</td></tr>
           <tr><td><strong>Total Tips</strong></td><td>$${monthlyTotal.netTip.toFixed(2)}</td></tr>
@@ -215,7 +227,13 @@ export async function POST(req: NextRequest) {
           <tr><td><strong>Tasks / Hr Rank</strong></td><td>${taskRateRank ? `#${taskRateRank}` : '—'}</td></tr>
           <tr style="background:#eef7ff"><td><strong>Tips / Hr Rank</strong></td><td><strong>${tipRateRank ? `#${tipRateRank}` : '—'}</strong></td></tr>
         </table>
-        <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin-top:28px" />
+        <p style="color:#6b7280;font-size:12px;margin-top:16px;line-height:1.7">
+          Please do not reply to this email. If you have any questions about your tip summary,
+          speak with your manager or reach us at
+          <a href="mailto:admin@newvillagepub.com" style="color:#374151">admin@newvillagepub.com</a>.
+        </p>
+        <p style="color:#aaa;font-size:11px;margin-top:4px">New Village Pub · FOH Dashboard</p>
     `, 480)
     emailPromises.push(
       sendEmail(resendKey, dist.employee.email, `Your Tip — ${report.session_date}`, html)
