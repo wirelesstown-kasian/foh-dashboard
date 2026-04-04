@@ -23,6 +23,7 @@ type ShiftDraft = {
   start_time: string
   end_time: string
   is_off?: boolean
+  display_order?: number
 }
 
 function snapTimeToHalfHour(value: string) {
@@ -79,7 +80,12 @@ function draftKey(weekRef: Date) {
   return `schedule_draft_${formatDate(days[0])}`
 }
 
-async function saveServerDrafts(weekStart: string, department: ScheduleDepartment, nextDrafts: ShiftDraft[]) {
+async function saveServerDrafts(
+  weekStart: string,
+  department: ScheduleDepartment,
+  nextDrafts: ShiftDraft[],
+  displayedEmployeeIds: string[]
+) {
   const weekUpsert = await supabase
     .from('schedule_draft_weeks')
     .upsert({ week_start: weekStart, updated_at: new Date().toISOString() }, { onConflict: 'week_start' })
@@ -96,6 +102,8 @@ async function saveServerDrafts(weekStart: string, department: ScheduleDepartmen
 
   if (nextDrafts.length === 0) return
 
+  const displayOrderByEmployeeId = new Map(displayedEmployeeIds.map((employeeId, index) => [employeeId, index]))
+
   const insertDrafts = await supabase
     .from('schedule_drafts')
     .insert(nextDrafts.map(draft => ({
@@ -106,6 +114,7 @@ async function saveServerDrafts(weekStart: string, department: ScheduleDepartmen
       start_time: draft.start_time,
       end_time: draft.end_time,
       is_off: !!draft.is_off,
+      display_order: displayOrderByEmployeeId.get(draft.employee_id) ?? 0,
       updated_at: new Date().toISOString(),
     })))
 
@@ -132,7 +141,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [savingDraft, setSavingDraft] = useState(false)
-  const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string } | null>(null)
+  const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string; draftIndex?: number } | null>(null)
   const [addStaffDialogOpen, setAddStaffDialogOpen] = useState(false)
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
   const [staffToAdd, setStaffToAdd] = useState<string[]>([])
@@ -202,7 +211,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       supabase.from('employees').select('*').eq('is_active', true).order('name'),
       supabase.from('schedules').select('*, employee:employees(id, name, role, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate),
       supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
-      supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('date'),
+      supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('display_order').order('date'),
     ])
     const activeEmployees = (empRes.data ?? []).filter(employee => isEmployeeInDepartment(employee, department))
     const loadedSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
@@ -283,6 +292,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
         start_time: draft.start_time,
         end_time: draft.end_time,
         is_off: draft.is_off ?? false,
+        display_order: draft.display_order ?? 0,
       }))
       nextDrafts = serverDrafts
       setDrafts(serverDrafts)
@@ -299,7 +309,18 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     }
 
     const autoShownIds = nextDrafts.map(draft => draft.employee_id)
-    const restoredRowIds = savedRows ? (JSON.parse(savedRows) as string[]) : []
+    const serverOrderedRowIds = Array.from(
+      new Set(
+        ((draftRes.data ?? []) as Array<ShiftDraft>)
+          .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+          .map(draft => draft.employee_id)
+      )
+    )
+    const restoredRowIds = serverOrderedRowIds.length > 0
+      ? serverOrderedRowIds
+      : savedRows
+        ? (JSON.parse(savedRows) as string[])
+        : []
     const validRowIds = [...restoredRowIds, ...autoShownIds].filter(employeeId =>
       [...activeEmployees, ...scheduledOnlyEmployees].some(employee => employee.id === employeeId)
     )
@@ -327,13 +348,13 @@ export function PlanningGrid({ department }: PlanningGridProps) {
 
     const weekStart = formatDate(days[0])
     const timeoutId = window.setTimeout(() => {
-      void saveServerDrafts(weekStart, department, drafts).catch(error => {
+      void saveServerDrafts(weekStart, department, drafts, displayedEmployeeIds).catch(error => {
         console.error('Failed to save schedule drafts to server', error)
       })
     }, 300)
 
     return () => window.clearTimeout(timeoutId)
-  }, [days, department, drafts, isDirty, isEditableWeek, loading, serverDraftsReady])
+  }, [days, department, displayedEmployeeIds, drafts, isDirty, isEditableWeek, loading, serverDraftsReady])
 
   useEffect(() => {
     if (!isEditableWeek) return
@@ -360,13 +381,25 @@ export function PlanningGrid({ department }: PlanningGridProps) {
 
   useEffect(() => {
     if (!addDialog) return
+    if (typeof addDialog.draftIndex === 'number') {
+      const draft = drafts[addDialog.draftIndex]
+      if (draft) {
+        setAddForm({
+          start_time: draft.start_time.slice(0, 5),
+          end_time: draft.end_time.slice(0, 5),
+          is_off: !!draft.is_off,
+        })
+        return
+      }
+    }
+
     const defaults = getDefaultTimes(addDialog.date)
     setAddForm({ start_time: defaults.start, end_time: defaults.end, is_off: defaults.isOff })
-  }, [addDialog])
+  }, [addDialog, drafts])
 
-  const openAddDialog = (date: string, employee_id: string) => {
+  const openAddDialog = (date: string, employee_id: string, draftIndex?: number) => {
     if (!isEditableWeek) return
-    setAddDialog({ date, employee_id })
+    setAddDialog({ date, employee_id, draftIndex })
   }
 
   const getShifts = (employeeId: string, date: string) =>
@@ -380,16 +413,19 @@ export function PlanningGrid({ department }: PlanningGridProps) {
 
   const addShift = () => {
     if (!addDialog || !isEditableWeek) return
-    const nextDrafts = [
-      ...drafts,
-      {
-        employee_id: addDialog.employee_id,
-        date: addDialog.date,
-        start_time: addForm.is_off ? '00:00:00' : addForm.start_time + ':00',
-        end_time: addForm.is_off ? '00:00:00' : addForm.end_time + ':00',
-        is_off: addForm.is_off,
-      }
-    ]
+    const nextEntry = {
+      employee_id: addDialog.employee_id,
+      date: addDialog.date,
+      start_time: addForm.is_off ? '00:00:00' : addForm.start_time + ':00',
+      end_time: addForm.is_off ? '00:00:00' : addForm.end_time + ':00',
+      is_off: addForm.is_off,
+      display_order: displayedEmployeeIds.indexOf(addDialog.employee_id),
+    } satisfies ShiftDraft
+
+    const nextDrafts = typeof addDialog.draftIndex === 'number'
+      ? drafts.map((draft, index) => index === addDialog.draftIndex ? { ...draft, ...nextEntry } : draft)
+      : [...drafts, nextEntry]
+
     persistDrafts(nextDrafts)
     setAddDialog(null)
   }
@@ -497,7 +533,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       localStorage.setItem(currentDraftKey, JSON.stringify(drafts))
       localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
       if (serverDraftsReady) {
-        await saveServerDrafts(formatDate(days[0]), department, drafts)
+        await saveServerDrafts(formatDate(days[0]), department, drafts, displayedEmployeeIds)
       }
       setDraftSavedMessage('Draft saved')
     } catch (error) {
@@ -569,7 +605,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
         .catch(() => { /* fire and forget */ })
     }
 
-    await saveServerDrafts(startDate, department, drafts).catch(error => {
+    await saveServerDrafts(startDate, department, drafts, displayedEmployeeIds).catch(error => {
       console.error('Failed to persist planner snapshot after publish', error)
     })
     localStorage.setItem(key, JSON.stringify(drafts))
@@ -583,7 +619,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 md:gap-3">
           {isDirty && (
             <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
               <CloudOff className="w-3 h-3" /> Unpublished Draft
@@ -603,15 +639,15 @@ export function PlanningGrid({ department }: PlanningGridProps) {
           <Button variant="outline" size="sm" onClick={() => setWeekRef(getNextWeek(weekRef))}>
             <ChevronRight className="w-4 h-4" />
           </Button>
-          <Button variant="outline" onClick={() => void copyPreviousWeekForAll()} disabled={!isEditableWeek}>
+          <Button variant="outline" className="h-11 px-4 text-sm" onClick={() => void copyPreviousWeekForAll()} disabled={!isEditableWeek}>
             <Copy className="w-4 h-4 mr-2" />
             Copy Previous Week
           </Button>
-          <Button variant="outline" onClick={() => void handleSaveDraft()} disabled={savingDraft || !isEditableWeek}>
+          <Button variant="outline" className="h-11 px-4 text-sm" onClick={() => void handleSaveDraft()} disabled={savingDraft || !isEditableWeek}>
             <Save className="w-4 h-4 mr-2" />
             {savingDraft ? 'Saving…' : 'Save Draft'}
           </Button>
-          <Button onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
+          <Button className="h-11 px-4 text-sm" onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
             <Send className="w-4 h-4 mr-2" />
             Publish {department.toUpperCase()} Schedule
           </Button>
@@ -621,15 +657,15 @@ export function PlanningGrid({ department }: PlanningGridProps) {
         <div className="mb-4 text-sm text-emerald-700">{draftSavedMessage}</div>
       )}
 
-      <div className="mb-5 rounded-2xl border bg-slate-50/80 p-4">
-        <div className="flex items-center justify-between gap-4">
+      <div className="mb-5 rounded-2xl border bg-slate-50/80 p-4 md:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold">{department === 'boh' ? 'BOH Staff Lines' : 'FOH Staff Lines'}</h2>
             <p className="text-sm text-muted-foreground">
               Add only the staff you want to schedule for this week, then build shifts row by row.
             </p>
           </div>
-          <Button variant="outline" onClick={() => setAddStaffDialogOpen(true)} disabled={!isEditableWeek}>
+          <Button variant="outline" className="h-11 px-5 text-sm" onClick={() => setAddStaffDialogOpen(true)} disabled={!isEditableWeek}>
             <Plus className="w-4 h-4 mr-2" />
             Add Staff
           </Button>
@@ -639,46 +675,46 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       {loading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
+        <div className="overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-sm">
+          <table className="min-w-[1080px] w-full text-[15px]">
+            <thead className="bg-slate-100">
               <tr>
-                <th className="text-left p-3 font-semibold w-36 border-b">Employee</th>
+                <th className="text-left p-4 font-semibold w-48 border-b border-slate-300">Employee</th>
                 {days.map(d => (
-                  <th key={d.toISOString()} className="text-center p-3 font-semibold border-b min-w-32">
+                  <th key={d.toISOString()} className="text-center p-4 font-semibold border-b border-slate-300 min-w-36">
                     <div>{getDayName(d)}</div>
                     <div className="text-xs text-muted-foreground font-normal">{formatDisplayDate(d)}</div>
                   </th>
                 ))}
-                <th className="text-center p-3 font-semibold border-b w-24">Total</th>
+                <th className="text-center p-4 font-semibold border-b border-slate-300 w-28">Total</th>
               </tr>
             </thead>
             <tbody>
               {displayedEmployees.map((emp, rowIndex) => (
-                <tr key={emp.id} className="border-b hover:bg-gray-50">
-                  <td className="p-3">
+                <tr key={emp.id} className="border-b border-slate-200 hover:bg-slate-50/70">
+                  <td className="p-4 align-top">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="font-medium">{employeeNamesById.get(emp.id) ?? emp.name}</div>
-                        <div className="text-xs text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
+                        <div className="font-semibold text-base">{employeeNamesById.get(emp.id) ?? emp.name}</div>
+                        <div className="text-sm text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
                       </div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <button
-                          className="text-slate-400 hover:text-slate-600 disabled:text-gray-300"
+                          className="rounded-md border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:text-gray-300"
                           disabled={!isEditableWeek || rowIndex === 0}
                           onClick={() => moveStaffRow(emp.id, 'up')}
                         >
                           <ChevronUp className="w-4 h-4" />
                         </button>
                         <button
-                          className="text-slate-400 hover:text-slate-600 disabled:text-gray-300"
+                          className="rounded-md border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:text-gray-300"
                           disabled={!isEditableWeek || rowIndex === displayedEmployees.length - 1}
                           onClick={() => moveStaffRow(emp.id, 'down')}
                         >
                           <ChevronDown className="w-4 h-4" />
                         </button>
                         <button
-                          className="text-red-400 hover:text-red-600 disabled:text-gray-300"
+                          className="rounded-md border border-red-200 p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:text-gray-300"
                           disabled={!isEditableWeek}
                           onClick={() => removeStaffRow(emp.id)}
                         >
@@ -691,38 +727,44 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                     const dateStr = formatDate(d)
                     const shifts = getShifts(emp.id, dateStr)
                     return (
-                      <td key={d.toISOString()} className="p-2 align-top">
+                      <td key={d.toISOString()} className="p-3 align-top">
                         {shifts.map((sh, idx) => {
                           const globalIdx = drafts.indexOf(sh)
                           return sh.is_off ? (
-                            <div key={idx} className="bg-gray-100 border border-gray-300 rounded p-1.5 mb-1 text-xs group relative text-center text-gray-500 font-medium">
-                              Off
-                              <button
-                                className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600"
-                                disabled={!isEditableWeek}
-                                onClick={() => removeShift(globalIdx)}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
+                            <div key={idx} className="mb-2 rounded-xl border border-slate-300 bg-slate-100 p-2.5 text-center text-sm font-semibold text-slate-600">
+                              <div>Off</div>
+                              {isEditableWeek && (
+                                <div className="mt-2 flex justify-center gap-2">
+                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs" onClick={() => openAddDialog(dateStr, emp.id, globalIdx)}>
+                                    Modify
+                                  </Button>
+                                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs text-red-600" onClick={() => removeShift(globalIdx)}>
+                                    Remove
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           ) : (
-                            <div key={idx} className="bg-blue-50 border border-blue-200 rounded p-1.5 mb-1 text-xs group relative">
-                              <div className="font-medium text-blue-800">
+                            <div key={idx} className="mb-2 rounded-xl border border-slate-400 bg-white p-2.5 text-sm shadow-sm">
+                              <div className="font-semibold text-slate-900">
                                 {formatTime(sh.start_time)} – {formatTime(sh.end_time)}
                               </div>
-                              <div className="text-blue-600">{formatHours(calcHours(sh.start_time, sh.end_time))}</div>
-                              <button
-                                className="absolute top-1 right-1 hidden group-hover:block text-red-400 hover:text-red-600"
-                                disabled={!isEditableWeek}
-                                onClick={() => removeShift(globalIdx)}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
+                              <div className="mt-1 text-sm text-slate-600">{formatHours(calcHours(sh.start_time, sh.end_time))}</div>
+                              {isEditableWeek && (
+                                <div className="mt-2 flex gap-2">
+                                  <Button variant="outline" size="sm" className="h-8 flex-1 text-xs" onClick={() => openAddDialog(dateStr, emp.id, globalIdx)}>
+                                    Modify
+                                  </Button>
+                                  <Button variant="outline" size="sm" className="h-8 flex-1 text-xs text-red-600" onClick={() => removeShift(globalIdx)}>
+                                    Remove
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           )
                         })}
                         <button
-                          className="w-full border border-dashed border-gray-300 rounded p-1 text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors text-xs flex items-center justify-center gap-1 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:border-gray-200 disabled:hover:text-gray-300"
+                          className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-slate-400 p-2.5 text-sm text-slate-500 transition-colors hover:border-slate-700 hover:text-slate-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:border-gray-200 disabled:hover:text-gray-300"
                           disabled={!isEditableWeek}
                           onClick={() => openAddDialog(dateStr, emp.id)}
                         >
@@ -731,7 +773,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                       </td>
                     )
                   })}
-                  <td className="p-3 text-center font-semibold text-sm">
+                  <td className="p-4 text-center font-semibold text-base">
                     {formatHours(getWeeklyHours(emp.id))}
                   </td>
                 </tr>
@@ -741,7 +783,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
               )}
             </tbody>
             {displayedEmployees.length > 0 && (
-              <tfoot className="bg-slate-50">
+              <tfoot className="bg-slate-100">
                 <tr>
                   <td className="p-4 text-base font-semibold border-t">Daily Total Hours</td>
                   {days.map(d => (
@@ -846,7 +888,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       <Dialog open={!!addDialog} onOpenChange={v => !v && setAddDialog(null)}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
-            <DialogTitle>Add Shift</DialogTitle>
+            <DialogTitle>{addDialog && typeof addDialog.draftIndex === 'number' ? 'Modify Shift' : 'Add Shift'}</DialogTitle>
           </DialogHeader>
           {addDialog && (
             <div className="space-y-3">

@@ -26,15 +26,23 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
   const [pin, setPin] = useState('')
   const [loading, setLoading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [allowHardwareKeyboard, setAllowHardwareKeyboard] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    setAllowHardwareKeyboard(!window.matchMedia('(pointer: coarse)').matches)
+  }, [])
 
   useEffect(() => {
     if (open) {
       setPin('')
       setLocalError(null)
-      window.setTimeout(() => inputRef.current?.focus(), 50)
+      if (allowHardwareKeyboard) {
+        window.setTimeout(() => inputRef.current?.focus(), 50)
+      }
     }
-  }, [open])
+  }, [allowHardwareKeyboard, open])
 
   const handleKey = (key: string) => {
     if (key === 'del') {
@@ -139,6 +147,8 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
           onKeyDown={handleKeyDown}
           className="sr-only"
           aria-label="PIN input"
+          tabIndex={allowHardwareKeyboard ? 0 : -1}
+          readOnly={!allowHardwareKeyboard}
         />
 
         {/* Numpad */}
