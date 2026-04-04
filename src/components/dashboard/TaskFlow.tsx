@@ -39,7 +39,7 @@ const REMINDER_WINDOW_MINUTES = 30
 export function TaskFlow({ categories, tasks, schedules, completions, clockRecords, session, employees, today, now, onRefresh }: Props) {
   const router = useRouter()
   const [taskActionTarget, setTaskActionTarget] = useState<Task | null>(null)
-  const [pinTarget, setPinTarget] = useState<{ task: Task; status: TaskCompletionStatus } | null>(null)
+  const [pinTarget, setPinTarget] = useState<{ tasks: Task[]; status: TaskCompletionStatus } | null>(null)
   const [statusTarget, setStatusTarget] = useState<{ task: Task; completionId: string; status: TaskCompletionStatus } | null>(null)
   const [transferTarget, setTransferTarget] = useState<{ task: Task; completionId: string } | null>(null)
   const [clockCaptureTarget, setClockCaptureTarget] = useState<{ task: Task; action: 'clock_in' | 'clock_out' } | null>(null)
@@ -57,6 +57,8 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
   const [resetError, setResetError] = useState<string | null>(null)
   const [showPhaseResetPin, setShowPhaseResetPin] = useState(false)
   const [phaseResetError, setPhaseResetError] = useState<string | null>(null)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
 
   const todayDow = getBusinessDate().getDay() // 0=Sun, 1=Mon, ...
   const currentPhase: SessionPhase = session?.current_phase ?? 'pre_shift'
@@ -78,7 +80,7 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
   const currentCategory = phaseCategory(currentPhase)
   const currentTasks = currentCategory
     ? tasks
-        .filter(t => t.category_id === currentCategory.id && t.is_active && filterByDay(t))
+        .filter(t => t.category_id === currentCategory.id && t.is_active && filterByDay(t) && !isClockTask(t))
         .sort((a, b) => a.display_order - b.display_order)
     : []
 
@@ -119,6 +121,18 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
     const title = task?.title.trim().toLowerCase()
     return title === CLOCK_IN_TITLE.toLowerCase() || title === CLOCK_OUT_TITLE.toLowerCase()
   }
+
+  const clearSelection = () => setSelectedTaskIds([])
+
+  const toggleTaskSelection = (taskId: string) => {
+    setSelectedTaskIds(prev =>
+      prev.includes(taskId)
+        ? prev.filter(id => id !== taskId)
+        : [...prev, taskId]
+    )
+  }
+
+  const selectedTasks = currentTasks.filter(task => selectedTaskIds.includes(task.id))
 
   const handleClockPhotoChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -223,24 +237,27 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
     if (!pinTarget) return
     setPinError(null)
 
-    const res = await fetch('/api/task-completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pin,
-        task_id: pinTarget.task.id,
-        session_date: today,
-        status: pinTarget.status,
-      }),
-    })
+    for (const task of pinTarget.tasks) {
+      const res = await fetch('/api/task-completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin,
+          task_id: task.id,
+          session_date: today,
+          status: pinTarget.status,
+        }),
+      })
 
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string }
-      setPinError(data.error ?? 'Incorrect PIN')
-      throw new Error(data.error ?? 'Incorrect PIN')
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        setPinError(data.error ?? 'Incorrect PIN')
+        throw new Error(data.error ?? 'Incorrect PIN')
+      }
     }
 
     setPinTarget(null)
+    clearSelection()
     onRefresh()
   }
 
@@ -471,6 +488,17 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
         <div className="p-3 border-b bg-gray-50 flex items-center justify-between gap-2">
           <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant={selectionMode ? 'default' : 'outline'}
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                setSelectionMode(value => !value)
+                setSelectedTaskIds([])
+              }}
+            >
+              {selectionMode ? 'Done Selecting' : 'Multi-Select'}
+            </Button>
             <span className="text-sm text-muted-foreground">
               {currentTasks.filter(t => isResolved(t.id)).length} / {currentTasks.length} resolved
             </span>
@@ -486,6 +514,33 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
             )}
           </div>
         </div>
+        {selectionMode && (
+          <div className="border-b bg-amber-50 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-amber-800">{selectedTasks.length} selected</span>
+              <Button
+                size="sm"
+                className="h-8"
+                disabled={selectedTasks.length === 0}
+                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'complete' })}
+              >
+                Complete Selected
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-8"
+                disabled={selectedTasks.length === 0}
+                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'incomplete' })}
+              >
+                Incomplete Selected
+              </Button>
+              <Button size="sm" variant="ghost" className="h-8" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="overflow-y-auto p-3" style={{ maxHeight: 'calc(100vh - 340px)' }}>
           {currentTasks.length === 0 && (
             <p className="text-center text-muted-foreground py-8 text-sm">
@@ -502,14 +557,21 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
               return (
                 <button
                   key={task.id}
+                  type="button"
                   className={`aspect-square rounded-2xl border-2 p-3 text-center transition-all ${
                     done
                       ? 'bg-green-50 border-green-400 hover:bg-green-100'
                       : incomplete
                         ? 'bg-red-50 border-red-400 hover:bg-red-100'
                       : 'bg-white border-gray-200 hover:border-amber-400 hover:shadow-sm'
-                  }`}
-                  onClick={() => setTaskActionTarget(task)}
+                  } ${selectionMode && selectedTaskIds.includes(task.id) ? 'ring-4 ring-amber-300' : ''}`}
+                  onClick={() => {
+                    if (selectionMode && !isClockTask(task)) {
+                      toggleTaskSelection(task.id)
+                      return
+                    }
+                    setTaskActionTarget(task)
+                  }}
                 >
                   <div className="flex h-full flex-col items-center justify-between">
                     <div className="flex w-full justify-center">
@@ -569,7 +631,7 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
       <PinModal
         open={!!pinTarget}
         title={pinTarget?.status === 'incomplete' ? 'Mark Incomplete' : 'Complete Task'}
-        description={pinTarget?.task.title}
+        description={pinTarget ? (pinTarget.tasks.length > 1 ? `${pinTarget.tasks.length} tasks selected` : pinTarget.tasks[0]?.title) : undefined}
         onConfirm={handlePinConfirm}
         onClose={() => { setPinTarget(null); setPinError(null) }}
         error={pinError}
@@ -682,7 +744,7 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
                       className="w-full justify-start"
                       onClick={() => {
                         setTaskActionTarget(null)
-                        setPinTarget({ task: taskActionTarget, status: 'complete' })
+                        setPinTarget({ tasks: [taskActionTarget], status: 'complete' })
                       }}
                     >
                       Complete
@@ -692,7 +754,7 @@ export function TaskFlow({ categories, tasks, schedules, completions, clockRecor
                       className="w-full justify-start"
                       onClick={() => {
                         setTaskActionTarget(null)
-                        setPinTarget({ task: taskActionTarget, status: 'incomplete' })
+                        setPinTarget({ tasks: [taskActionTarget], status: 'incomplete' })
                       }}
                     >
                       Incomplete

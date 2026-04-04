@@ -7,6 +7,7 @@ import { getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
 import { ensureDefaultClockTasks } from '@/lib/defaultTasks'
 import { StaffSidebar } from '@/components/dashboard/StaffSidebar'
 import { TaskFlow } from '@/components/dashboard/TaskFlow'
+import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
 import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
@@ -27,6 +28,10 @@ export default function DashboardPage() {
   const [notesSaved, setNotesSaved] = useState(false)
   const isResolvedCompletion = (completion: TaskCompletion) => completion.status === 'incomplete' || completion.status === 'complete' || !completion.status
   const isCompletedCompletion = (completion: TaskCompletion) => completion.status !== 'incomplete'
+  const isClockTask = (task: Task) => {
+    const title = task.title.trim().toLowerCase()
+    return title === 'clock in' || title === 'clock out'
+  }
 
   const load = useCallback(async () => {
     const [empRes, schRes, catRes, taskRes, compRes, sessRes, clockRes] = await Promise.all([
@@ -100,14 +105,15 @@ export default function DashboardPage() {
   const getTaskCounts = (phase: 'pre_shift' | 'operation' | 'closing'): [number, number] => {
     const cat = categories.find(c => c.type === phase)
     if (!cat) return [0, 0]
-    const phaseTasks = tasks.filter(t => t.category_id === cat.id && t.is_active)
+    const phaseTasks = tasks.filter(t => t.category_id === cat.id && t.is_active && !isClockTask(t))
     const done = phaseTasks.filter(t => completions.some(c => c.task_id === t.id && isResolvedCompletion(c))).length
     return [done, phaseTasks.length]
   }
 
-  const totalTasks = tasks.filter(t => t.is_active).length
-  const doneTasks = new Set(completions.filter(isResolvedCompletion).map(c => c.task_id)).size
-  const completedTasks = new Set(completions.filter(isCompletedCompletion).map(c => c.task_id)).size
+  const totalTasks = tasks.filter(t => t.is_active && !isClockTask(t)).length
+  const nonClockTaskIds = new Set(tasks.filter(task => task.is_active && !isClockTask(task)).map(task => task.id))
+  const doneTasks = new Set(completions.filter(c => isResolvedCompletion(c) && nonClockTaskIds.has(c.task_id)).map(c => c.task_id)).size
+  const completedTasks = new Set(completions.filter(c => isCompletedCompletion(c) && nonClockTaskIds.has(c.task_id)).map(c => c.task_id)).size
   const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
 
   return (
@@ -121,6 +127,7 @@ export default function DashboardPage() {
             </h1>
           </div>
           <div className="flex items-center gap-4">
+            <ClockToolbar tasks={tasks} schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
             <div className="flex items-center gap-2">
               <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
                 <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
