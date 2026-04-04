@@ -211,16 +211,13 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
     const [empRes, schRes, draftWeekRes, draftRes] = await Promise.all([
       supabase.from('employees').select('*').eq('is_active', true).order('name'),
-      supabase.from('schedules').select('*, employee:employees(id, name, role, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate),
+      supabase.from('schedules').select('*, employee:employees(id, name, role, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
       supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('display_order').order('date'),
     ])
     const activeEmployees = (empRes.data ?? []).filter(employee => isEmployeeInDepartment(employee, department))
-    const loadedSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
-    const departmentSchedules = loadedSchedules.filter(schedule => {
-      const role = schedule.employee?.role ?? 'server'
-      return department === 'boh' ? role === 'kitchen_staff' || role === 'manager' : role !== 'kitchen_staff'
-    })
+    // schedules query is already filtered by department — no role-based filtering needed
+    const departmentSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
     const namesById = new Map<string, string>()
 
     for (const employee of activeEmployees) {
@@ -234,11 +231,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
     const scheduledOnlyEmployees = Array.from(
       new Map(
-        loadedSchedules
-          .filter(schedule => {
-            const role = schedule.employee?.role ?? 'server'
-            return department === 'boh' ? role === 'kitchen_staff' || role === 'manager' : role !== 'kitchen_staff'
-          })
+        departmentSchedules
           .filter(schedule => !activeEmployees.some(employee => employee.id === schedule.employee_id))
           .map(schedule => [
             schedule.employee_id,
@@ -617,6 +610,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         .select('*')
         .gte('date', previousWeekStart)
         .lte('date', previousWeekEnd)
+        .eq('department', department)
         .order('employee_id')
         .order('date'),
     ])
@@ -689,16 +683,15 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const startDate = formatDate(days[0])
     const endDate = formatDate(days[6])
     const key = `${draftKey(days[0])}_${department}`
-    const departmentEmployeeIds = employees.map(employee => employee.id)
 
-    if (departmentEmployeeIds.length > 0) {
-      await supabase
-        .from('schedules')
-        .delete()
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .in('employee_id', departmentEmployeeIds)
-    }
+    // Delete by department so FOH and BOH schedules don't interfere with each other.
+    // Managers can have independent shifts in each department.
+    await supabase
+      .from('schedules')
+      .delete()
+      .gte('date', startDate)
+      .lte('date', endDate)
+      .eq('department', department)
 
     const shiftsToPublish = drafts.filter(d => !d.is_off)
     if (shiftsToPublish.length > 0) {
@@ -708,6 +701,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           date: d.date,
           start_time: d.start_time,
           end_time: d.end_time,
+          department,
         }))
       )
     }
