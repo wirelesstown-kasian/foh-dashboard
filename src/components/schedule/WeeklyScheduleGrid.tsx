@@ -14,6 +14,11 @@ function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartme
   return department === 'boh' ? employee.role === 'kitchen_staff' : employee.role !== 'kitchen_staff'
 }
 
+function draftKey(weekRef: Date) {
+  const days = getWeekDays(weekRef)
+  return `schedule_draft_${formatDate(days[0])}`
+}
+
 interface WeeklyScheduleGridProps {
   department: ScheduleDepartment
 }
@@ -25,6 +30,7 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [loading, setLoading] = useState(true)
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
+  const currentRowsKey = `${draftKey(weekRef)}_${department}_rows`
 
   useEffect(() => {
     setDays(getWeekDays(weekRef))
@@ -79,11 +85,25 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
       ).values()
     )
 
+    const mergedEmployees = [...activeEmployees, ...scheduledOnlyEmployees].sort((a, b) => a.name.localeCompare(b.name))
+    const storedRowOrder = typeof window !== 'undefined'
+      ? JSON.parse(window.localStorage.getItem(currentRowsKey) ?? '[]') as string[]
+      : []
+    const rowOrderMap = new Map(storedRowOrder.map((id, index) => [id, index]))
+    const orderedEmployees = [...mergedEmployees].sort((a, b) => {
+      const aOrder = rowOrderMap.get(a.id)
+      const bOrder = rowOrderMap.get(b.id)
+      if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder
+      if (aOrder !== undefined) return -1
+      if (bOrder !== undefined) return 1
+      return a.name.localeCompare(b.name)
+    })
+
     setEmployeeNamesById(namesById)
-    setEmployees([...activeEmployees, ...scheduledOnlyEmployees].sort((a, b) => a.name.localeCompare(b.name)))
+    setEmployees(orderedEmployees)
     setSchedules(departmentSchedules)
     setLoading(false)
-  }, [days, department])
+  }, [currentRowsKey, days, department])
 
   useEffect(() => { loadData() }, [loadData])
 

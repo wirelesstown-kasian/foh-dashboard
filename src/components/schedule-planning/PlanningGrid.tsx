@@ -112,32 +112,6 @@ async function saveServerDrafts(weekStart: string, department: ScheduleDepartmen
   if (insertDrafts.error) throw insertDrafts.error
 }
 
-async function clearServerDrafts(weekStart: string, department: ScheduleDepartment) {
-  const draftDelete = await supabase
-    .from('schedule_drafts')
-    .delete()
-    .eq('week_start', weekStart)
-    .eq('department', department)
-
-  if (draftDelete.error) throw draftDelete.error
-
-  const remainingDrafts = await supabase
-    .from('schedule_drafts')
-    .select('id', { count: 'exact', head: true })
-    .eq('week_start', weekStart)
-
-  if (remainingDrafts.error) throw remainingDrafts.error
-
-  if ((remainingDrafts.count ?? 0) > 0) return
-
-  const weekDelete = await supabase
-    .from('schedule_draft_weeks')
-    .delete()
-    .eq('week_start', weekStart)
-
-  if (weekDelete.error) throw weekDelete.error
-}
-
 function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartment) {
   return department === 'boh'
     ? employee.role === 'kitchen_staff' || employee.role === 'manager'
@@ -307,7 +281,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       }))
       nextDrafts = serverDrafts
       setDrafts(serverDrafts)
-      setIsDirty(true)
+      setIsDirty(!matchesPublishedSchedule(serverDrafts, published))
       localStorage.setItem(key, JSON.stringify(serverDrafts))
     } else if (saved && isEditableWeek) {
       nextDrafts = JSON.parse(saved) as ShiftDraft[]
@@ -577,8 +551,8 @@ export function PlanningGrid({ department }: PlanningGridProps) {
         .catch(() => { /* fire and forget */ })
     }
 
-    await clearServerDrafts(startDate, department).catch(error => {
-      console.error('Failed to clear schedule drafts after publish', error)
+    await saveServerDrafts(startDate, department, drafts).catch(error => {
+      console.error('Failed to persist planner snapshot after publish', error)
     })
     localStorage.setItem(key, JSON.stringify(drafts))
     localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
