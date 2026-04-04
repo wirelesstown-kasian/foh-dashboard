@@ -14,14 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save } from 'lucide-react'
 
 type ShiftDraft = {
   id?: string
@@ -145,12 +138,15 @@ export function PlanningGrid({ department }: PlanningGridProps) {
   const [isDirty, setIsDirty] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingDraft, setSavingDraft] = useState(false)
   const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string } | null>(null)
   const [addStaffDialogOpen, setAddStaffDialogOpen] = useState(false)
-  const [staffToAdd, setStaffToAdd] = useState<string>('')
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false)
+  const [staffToAdd, setStaffToAdd] = useState<string[]>([])
   const [addForm, setAddForm] = useState({ start_time: '15:30', end_time: '01:00', is_off: false })
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
   const [serverDraftsReady, setServerDraftsReady] = useState(true)
+  const [draftSavedMessage, setDraftSavedMessage] = useState<string | null>(null)
   const allowedTimeOptions = getAllowedTimeOptions()
 
   useEffect(() => {
@@ -175,6 +171,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     const uniqueIds = Array.from(new Set(nextIds))
     localStorage.setItem(currentRowsKey, JSON.stringify(uniqueIds))
     setDisplayedEmployeeIds(uniqueIds)
+    setIsDirty(true)
   }, [currentRowsKey])
 
   const loadData = useCallback(async () => {
@@ -386,9 +383,9 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       .reduce((sum, d) => sum + calcHours(d.start_time, d.end_time), 0)
 
   const addStaffRow = () => {
-    if (!staffToAdd) return
-    persistDisplayedEmployeeIds([...displayedEmployeeIds, staffToAdd])
-    setStaffToAdd('')
+    if (staffToAdd.length === 0) return
+    persistDisplayedEmployeeIds([...displayedEmployeeIds, ...staffToAdd])
+    setStaffToAdd([])
     setAddStaffDialogOpen(false)
   }
 
@@ -400,7 +397,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     persistDrafts(nextDrafts)
   }
 
-  const copyPreviousWeekForEmployee = async (employeeId: string) => {
+  const copyPreviousWeekForAll = async () => {
     if (days.length === 0 || !isEditableWeek) return
 
     const currentWeekStartDate = days[0]
@@ -408,12 +405,16 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     const previousWeekStart = formatDate(previousWeekDays[0])
     const previousWeekEnd = formatDate(previousWeekDays[6])
 
+    const employeeIds = displayedEmployeeIds.length > 0 ? displayedEmployeeIds : employees.map(employee => employee.id)
+    if (employeeIds.length === 0) return
+
     const { data: previousSchedules, error } = await supabase
       .from('schedules')
       .select('*')
-      .eq('employee_id', employeeId)
+      .in('employee_id', employeeIds)
       .gte('date', previousWeekStart)
       .lte('date', previousWeekEnd)
+      .order('employee_id')
       .order('date')
 
     if (error || !previousSchedules) {
@@ -427,7 +428,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       nextDate.setDate(nextDate.getDate() + 7)
 
       return {
-        employee_id: employeeId,
+        employee_id: schedule.employee_id,
         date: formatDate(nextDate),
         start_time: schedule.start_time,
         end_time: schedule.end_time,
@@ -435,14 +436,35 @@ export function PlanningGrid({ department }: PlanningGridProps) {
       } satisfies ShiftDraft
     })
 
-    const employeeDraftsRemoved = drafts.filter(draft => draft.employee_id !== employeeId)
-    if (!displayedEmployeeIds.includes(employeeId)) {
-      persistDisplayedEmployeeIds([...displayedEmployeeIds, employeeId])
-    }
+    const nextDisplayedIds = Array.from(new Set([...displayedEmployeeIds, ...employeeIds]))
+    const employeeDraftsRemoved = drafts.filter(draft => !employeeIds.includes(draft.employee_id))
+    persistDisplayedEmployeeIds(nextDisplayedIds)
     persistDrafts([...employeeDraftsRemoved, ...shiftedDrafts].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date)
+      if (a.employee_id !== b.employee_id) return a.employee_id.localeCompare(b.employee_id)
       return a.start_time.localeCompare(b.start_time)
     }))
+  }
+
+  const handleSaveDraft = async () => {
+    if (!isEditableWeek || days.length === 0) return
+    setSavingDraft(true)
+    setDraftSavedMessage(null)
+    try {
+      localStorage.setItem(currentDraftKey, JSON.stringify(drafts))
+      localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
+      if (serverDraftsReady) {
+        await saveServerDrafts(formatDate(days[0]), department, drafts)
+      }
+      setDraftSavedMessage('Draft saved')
+      setIsDirty(false)
+    } catch (error) {
+      console.error('Failed to save draft', error)
+      setDraftSavedMessage('Draft saved locally')
+    } finally {
+      setSavingDraft(false)
+      window.setTimeout(() => setDraftSavedMessage(null), 2500)
+    }
   }
 
   const handlePublish = async () => {
@@ -508,9 +530,11 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     await clearServerDrafts(startDate, department).catch(error => {
       console.error('Failed to clear schedule drafts after publish', error)
     })
-    localStorage.removeItem(`${key}_${department}`)
+    localStorage.removeItem(key)
+    localStorage.removeItem(currentRowsKey)
     await loadData()
     setIsDirty(false)
+    setPublishDialogOpen(false)
     setSaving(false)
   }
 
@@ -537,12 +561,23 @@ export function PlanningGrid({ department }: PlanningGridProps) {
           <Button variant="outline" size="sm" onClick={() => setWeekRef(getNextWeek(weekRef))}>
             <ChevronRight className="w-4 h-4" />
           </Button>
-          <Button onClick={handlePublish} disabled={saving || !isDirty || !isEditableWeek}>
+          <Button variant="outline" onClick={() => void copyPreviousWeekForAll()} disabled={!isEditableWeek}>
+            <Copy className="w-4 h-4 mr-2" />
+            Copy Previous Week
+          </Button>
+          <Button variant="outline" onClick={() => void handleSaveDraft()} disabled={savingDraft || !isEditableWeek}>
+            <Save className="w-4 h-4 mr-2" />
+            {savingDraft ? 'Saving…' : 'Save Draft'}
+          </Button>
+          <Button onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
             <Send className="w-4 h-4 mr-2" />
-            {saving ? 'Publishing…' : `Publish ${department.toUpperCase()} Schedule`}
+            Publish {department.toUpperCase()} Schedule
           </Button>
         </div>
       </div>
+      {draftSavedMessage && (
+        <div className="mb-4 text-sm text-emerald-700">{draftSavedMessage}</div>
+      )}
 
       <div className="mb-5 rounded-2xl border bg-slate-50/80 p-4">
         <div className="flex items-center justify-between gap-4">
@@ -584,14 +619,6 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                       <div>
                         <div className="font-medium">{employeeNamesById.get(emp.id) ?? emp.name}</div>
                         <div className="text-xs text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
-                        <button
-                          className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 disabled:text-gray-400"
-                          disabled={!isEditableWeek}
-                          onClick={() => void copyPreviousWeekForEmployee(emp.id)}
-                        >
-                          <Copy className="w-3 h-3" />
-                          Copy Previous Week
-                        </button>
                       </div>
                       <button
                         className="text-red-400 hover:text-red-600 disabled:text-gray-300"
@@ -685,26 +712,73 @@ export function PlanningGrid({ department }: PlanningGridProps) {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Choose which {department === 'boh' ? 'kitchen staff' : 'FOH staff'} member to add to this weekly planner.
+              Choose one or more {department === 'boh' ? 'BOH staff' : 'FOH staff'} members to add to this weekly planner.
             </p>
-            <Select value={staffToAdd} onValueChange={(value: string | null) => value && setStaffToAdd(value)}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select staff member" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableEmployeesToAdd.map(employee => (
-                  <SelectItem key={employee.id} value={employee.id}>
-                    {employee.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="max-h-72 space-y-2 overflow-y-auto rounded-lg border p-3">
+              {availableEmployeesToAdd.map(employee => {
+                const checked = staffToAdd.includes(employee.id)
+                return (
+                  <label key={employee.id} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={event => {
+                        setStaffToAdd(current =>
+                          event.target.checked
+                            ? [...current, employee.id]
+                            : current.filter(id => id !== employee.id)
+                        )
+                      }}
+                    />
+                    <span className="font-medium">{employee.name}</span>
+                    <span className="text-xs text-muted-foreground capitalize">{employee.role.replace('_', ' ')}</span>
+                  </label>
+                )
+              })}
+              {availableEmployeesToAdd.length === 0 && (
+                <div className="text-sm text-muted-foreground">All available staff are already on this planner.</div>
+              )}
+            </div>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setAddStaffDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button className="flex-1" onClick={addStaffRow} disabled={!staffToAdd}>
+              <Button className="flex-1" onClick={addStaffRow} disabled={staffToAdd.length === 0}>
                 Add Staff
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Publish</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              You are about to publish the {department.toUpperCase()} schedule for {formatWeekRange(weekRef)}.
+            </p>
+            <div className="rounded-lg border bg-slate-50 p-3 text-sm">
+              <div className="flex justify-between">
+                <span>Staff lines</span>
+                <span className="font-medium">{displayedEmployees.length}</span>
+              </div>
+              <div className="mt-2 flex justify-between">
+                <span>Scheduled shifts</span>
+                <span className="font-medium">{drafts.filter(draft => !draft.is_off).length}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              Review once more before confirming. This will replace the published schedule for this department and week.
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setPublishDialogOpen(false)}>
+                Back
+              </Button>
+              <Button className="flex-1" onClick={handlePublish} disabled={saving}>
+                {saving ? 'Publishing…' : 'Confirm Publish'}
               </Button>
             </div>
           </div>
