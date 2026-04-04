@@ -801,30 +801,6 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                 {employeeNamesById.get(addDialog.employee_id) ?? employees.find(e => e.id === addDialog.employee_id)?.name} — {addDialog.date}
               </p>
 
-              {/* Off toggle */}
-              <div className="flex gap-2">
-                <button
-                  className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                    !addForm.is_off
-                      ? 'bg-blue-500 text-white border-blue-500'
-                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                  }`}
-                  onClick={() => setAddForm(f => ({ ...f, is_off: false }))}
-                >
-                  Working
-                </button>
-                <button
-                  className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                    addForm.is_off
-                      ? 'bg-gray-500 text-white border-gray-500'
-                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                  }`}
-                  onClick={() => setAddForm(f => ({ ...f, is_off: true }))}
-                >
-                  Off
-                </button>
-              </div>
-
               {!addForm.is_off && (
                 <>
                   <div>
@@ -861,10 +837,16 @@ export function PlanningGrid({ department }: PlanningGridProps) {
                 </>
               )}
 
+              {addForm.is_off && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-4 text-center text-sm text-slate-700">
+                  This day will be saved as <span className="font-semibold">Off</span>.
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <Button variant="outline" className="flex-1" onClick={() => setAddDialog(null)}>Cancel</Button>
                 <Button className="flex-1" onClick={addShift}>
-                  {addForm.is_off ? 'Mark Off' : 'Add Shift'}
+                  {addForm.is_off ? 'Save Off Day' : 'Add Shift'}
                 </Button>
               </div>
             </div>
