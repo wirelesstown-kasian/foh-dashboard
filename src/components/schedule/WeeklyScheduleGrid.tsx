@@ -207,55 +207,46 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-[20px] border border-slate-300 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-600">
+    <div className="space-y-2">
+      <div className="rounded-[18px] border border-slate-300 bg-white px-3.5 py-2.5 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">
               {department === 'boh' ? 'Back Of House' : 'Front Of House'}
             </div>
             <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight text-slate-900">
+              <h1 className="text-lg font-semibold tracking-tight text-slate-900">
                 {department === 'boh' ? 'BOH Weekly Schedule' : 'FOH Weekly Schedule'}
               </h1>
-              <p className="mt-0.5 text-[12px] text-slate-600">
-                {department === 'boh'
-                  ? 'Kitchen and manager coverage for the week.'
-                  : 'Front-of-house lineup and shift coverage for the week.'}
-              </p>
             </div>
-            <div className="flex flex-wrap gap-2 xl:ml-2">
-              <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Staff</div>
-                <div className="mt-0.5 text-lg font-semibold text-slate-900">{employees.length}</div>
-              </div>
-              <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Shifts</div>
-                <div className="mt-0.5 text-lg font-semibold text-slate-900">{totalShifts}</div>
-              </div>
-              <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Week Hours</div>
-                <div className="mt-0.5 text-lg font-semibold text-slate-900">{formatHours(totalWeekHours)}</div>
-              </div>
+            <div className="flex flex-wrap items-center gap-2 xl:ml-1">
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                {employees.length} staff
+              </span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                {totalShifts} shifts
+              </span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                {formatHours(totalWeekHours)} total
+              </span>
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-300 bg-slate-50 p-2">
+          <div className="rounded-xl border border-slate-300 bg-slate-50 p-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" className="h-9 w-9 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
+              <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
                 <ChevronLeft className="w-4 h-4" />
               </Button>
-              <div className="min-w-48 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center">
-                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Week Of</div>
-                <div className="mt-0.5 text-[14px] font-semibold text-slate-900">{formatWeekRange(weekRef)}</div>
+              <div className="min-w-44 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-center">
+                <div className="text-[13px] font-semibold text-slate-900">{formatWeekRange(weekRef)}</div>
               </div>
-              <Button variant="outline" size="sm" className="h-9 w-9 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
+              <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
                 <ChevronRight className="w-4 h-4" />
               </Button>
-              <Button variant="outline" size="sm" className="h-9 rounded-lg px-3.5" onClick={() => setWeekRef(new Date())}>
+              <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
                 Today&apos;s Week
               </Button>
-              <Button variant="outline" size="sm" className="h-9 rounded-lg px-3.5" onClick={exportDepartmentPdf}>
+              <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportDepartmentPdf}>
                 <Download className="w-4 h-4 mr-2" />
                 Export PDF
               </Button>
