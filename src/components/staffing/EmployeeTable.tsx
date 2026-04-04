@@ -48,6 +48,8 @@ interface FormState {
   pin: string
 }
 
+type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
+
 const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', birth_date: '', pin: '' }
 const ROLE_LABELS: Record<EmployeeRole, string> = {
   manager: 'Manager',
@@ -66,6 +68,7 @@ export function EmployeeTable() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [filterRole, setFilterRole] = useState<string>('all')
+  const [sortBy, setSortBy] = useState<SortOption>('name_asc')
 
   const load = useCallback(async () => {
     const res = await fetch('/api/employees', { cache: 'no-store' })
@@ -141,6 +144,24 @@ export function EmployeeTable() {
   }
 
   const filtered = filterRole === 'all' ? employees : employees.filter(e => e.role === filterRole)
+  const sorted = [...filtered].sort((a, b) => {
+    switch (sortBy) {
+      case 'name_desc':
+        return b.name.localeCompare(a.name)
+      case 'role':
+        return ROLE_LABELS[a.role].localeCompare(ROLE_LABELS[b.role]) || a.name.localeCompare(b.name)
+      case 'birthday': {
+        const aValue = a.birth_date ?? '9999-12-31'
+        const bValue = b.birth_date ?? '9999-12-31'
+        return aValue.localeCompare(bValue) || a.name.localeCompare(b.name)
+      }
+      case 'newest':
+        return b.created_at.localeCompare(a.created_at)
+      case 'name_asc':
+      default:
+        return a.name.localeCompare(b.name)
+    }
+  })
 
   return (
     <div>
@@ -158,6 +179,24 @@ export function EmployeeTable() {
               {ROLES.map(r => (
                 <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          <Select value={sortBy} onValueChange={(v: string | null) => v && setSortBy(v as SortOption)}>
+            <SelectTrigger className="w-40">
+              <span>
+                {sortBy === 'name_asc' && 'Name A-Z'}
+                {sortBy === 'name_desc' && 'Name Z-A'}
+                {sortBy === 'role' && 'Role'}
+                {sortBy === 'birthday' && 'Birthday'}
+                {sortBy === 'newest' && 'Newest'}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name_asc">Name A-Z</SelectItem>
+              <SelectItem value="name_desc">Name Z-A</SelectItem>
+              <SelectItem value="role">Role</SelectItem>
+              <SelectItem value="birthday">Birthday</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
             </SelectContent>
           </Select>
           <Button onClick={openAdd}>
@@ -182,7 +221,7 @@ export function EmployeeTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map(emp => (
+            {sorted.map(emp => (
               <TableRow key={emp.id}>
                 <TableCell className="font-medium">
                   <span className="flex items-center gap-2">
@@ -217,7 +256,7 @@ export function EmployeeTable() {
                 </TableCell>
               </TableRow>
             ))}
-            {filtered.length === 0 && (
+            {sorted.length === 0 && (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   No employees found

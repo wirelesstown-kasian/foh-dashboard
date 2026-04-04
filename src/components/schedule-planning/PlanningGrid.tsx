@@ -127,7 +127,9 @@ async function clearServerDrafts(weekStart: string, department: ScheduleDepartme
 }
 
 function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartment) {
-  return department === 'boh' ? employee.role === 'kitchen_staff' : employee.role !== 'kitchen_staff'
+  return department === 'boh'
+    ? employee.role === 'kitchen_staff' || employee.role === 'manager'
+    : employee.role !== 'kitchen_staff'
 }
 
 interface PlanningGridProps {
@@ -192,7 +194,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
     const loadedSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
     const departmentSchedules = loadedSchedules.filter(schedule => {
       const role = schedule.employee?.role ?? 'server'
-      return department === 'boh' ? role === 'kitchen_staff' : role !== 'kitchen_staff'
+      return department === 'boh' ? role === 'kitchen_staff' || role === 'manager' : role !== 'kitchen_staff'
     })
     const namesById = new Map<string, string>()
 
@@ -210,7 +212,7 @@ export function PlanningGrid({ department }: PlanningGridProps) {
         loadedSchedules
           .filter(schedule => {
             const role = schedule.employee?.role ?? 'server'
-            return department === 'boh' ? role === 'kitchen_staff' : role !== 'kitchen_staff'
+            return department === 'boh' ? role === 'kitchen_staff' || role === 'manager' : role !== 'kitchen_staff'
           })
           .filter(schedule => !activeEmployees.some(employee => employee.id === schedule.employee_id))
           .map(schedule => [
