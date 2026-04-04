@@ -142,7 +142,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string; draftIndex?: number } | null>(null)
-  const [addStaffDialogOpen, setAddStaffDialogOpen] = useState(false)
+  const [addStaffInlineOpen, setAddStaffInlineOpen] = useState(false)
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
   const [staffToAdd, setStaffToAdd] = useState<string[]>([])
   const [addForm, setAddForm] = useState({ start_time: '15:30', end_time: '01:00', is_off: false })
@@ -565,7 +565,45 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     persistDisplayedEmployeeIds(nextDisplayedIds)
     persistDrafts(ensureMondayOffDrafts(drafts, nextDisplayedIds))
     setStaffToAdd([])
-    setAddStaffDialogOpen(false)
+    setAddStaffInlineOpen(false)
+  }
+
+  const [deleteAllDialogOpen, setDeleteAllDialogOpen] = useState(false)
+  const [deleteAllPin, setDeleteAllPin] = useState('')
+  const [deleteAllError, setDeleteAllError] = useState<string | null>(null)
+  const [deletingAll, setDeletingAll] = useState(false)
+
+  const handleDeleteAll = async () => {
+    if (!isEditableWeek || days.length === 0) return
+    setDeletingAll(true)
+    setDeleteAllError(null)
+    try {
+      const res = await fetch('/api/manager-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: deleteAllPin }),
+      })
+      if (!res.ok) {
+        setDeleteAllError('Incorrect manager PIN')
+        setDeletingAll(false)
+        return
+      }
+    } catch {
+      setDeleteAllError('Failed to verify PIN')
+      setDeletingAll(false)
+      return
+    }
+    const weekStart = formatDate(days[0])
+    localStorage.removeItem(currentDraftKey)
+    localStorage.removeItem(currentRowsKey)
+    await supabase.from('schedule_drafts').delete().eq('week_start', weekStart).eq('department', department)
+    await supabase.from('schedule_draft_weeks').delete().eq('week_start', weekStart)
+    setDrafts([])
+    setDisplayedEmployeeIds([])
+    setIsDirty(false)
+    setDeleteAllPin('')
+    setDeleteAllDialogOpen(false)
+    setDeletingAll(false)
   }
 
   const removeStaffRow = (employeeId: string) => {
@@ -794,18 +832,10 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       </div>
 
       <div className="mb-5 rounded-2xl border bg-slate-50/80 p-4 md:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold">{department === 'boh' ? 'BOH Staff Lines' : 'FOH Staff Lines'}</h2>
-            <p className="text-sm text-muted-foreground">
-              Add only the staff you want to schedule for this week, then build shifts row by row.
-            </p>
-          </div>
-          <Button variant="outline" className="h-11 px-5 text-sm" onClick={() => setAddStaffDialogOpen(true)} disabled={!isEditableWeek}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Staff
-          </Button>
-        </div>
+        <h2 className="text-lg font-semibold">{department === 'boh' ? 'BOH Staff Lines' : 'FOH Staff Lines'}</h2>
+        <p className="text-sm text-muted-foreground">
+          Add only the staff you want to schedule for this week, then build shifts row by row.
+        </p>
       </div>
 
       {loading ? (
@@ -922,8 +952,85 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                   </td>
                 </tr>
               ))}
-              {displayedEmployees.length === 0 && (
-                <tr><td colSpan={9} className="text-center py-12 text-muted-foreground">No staff lines yet. Use Add Staff to start building this week&apos;s schedule.</td></tr>
+              {displayedEmployees.length === 0 && !addStaffInlineOpen && (
+                <tr>
+                  <td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">
+                    No staff lines yet. Click <strong>+ Add staff</strong> below to start building this week&apos;s schedule.
+                  </td>
+                </tr>
+              )}
+
+              {/* ── Inline Add Staff row ── */}
+              {isEditableWeek && (
+                addStaffInlineOpen ? (
+                  <tr className="border-t border-slate-200 bg-slate-50/60">
+                    <td colSpan={days.length + 2} className="p-4">
+                      {availableEmployeesToAdd.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">All available staff are already on this planner.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          {availableEmployeesToAdd.map(employee => {
+                            const checked = staffToAdd.includes(employee.id)
+                            return (
+                              <label
+                                key={employee.id}
+                                className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${checked ? 'border-slate-700 bg-slate-100 font-medium' : 'border-slate-300 bg-white hover:border-slate-500'}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="sr-only"
+                                  checked={checked}
+                                  onChange={e => setStaffToAdd(cur => e.target.checked ? [...cur, employee.id] : cur.filter(id => id !== employee.id))}
+                                />
+                                <span>{employee.name}</span>
+                                <span className="text-xs text-slate-500 capitalize">{employee.role.replace('_', ' ')}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={addStaffRow} disabled={staffToAdd.length === 0}>
+                          Add{staffToAdd.length > 0 ? ` ${staffToAdd.length} staff` : ''}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => { setAddStaffInlineOpen(false); setStaffToAdd([]) }}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr className="border-t border-dashed border-slate-300">
+                    <td colSpan={days.length + 2} className="p-0">
+                      <button
+                        className="flex w-full items-center gap-2 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        disabled={availableEmployeesToAdd.length === 0}
+                        onClick={() => setAddStaffInlineOpen(true)}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add staff
+                        {availableEmployeesToAdd.length > 0 && (
+                          <span className="text-xs text-slate-400">({availableEmployeesToAdd.length} available)</span>
+                        )}
+                      </button>
+                    </td>
+                  </tr>
+                )
+              )}
+
+              {/* ── Delete All row ── */}
+              {isEditableWeek && displayedEmployees.length > 0 && (
+                <tr className="border-t border-dashed border-red-200">
+                  <td colSpan={days.length + 2} className="p-0">
+                    <button
+                      className="flex w-full items-center gap-2 px-4 py-3 text-sm text-red-400 hover:bg-red-50 hover:text-red-600"
+                      onClick={() => { setDeleteAllDialogOpen(true); setDeleteAllPin(''); setDeleteAllError(null) }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete all staff lines
+                    </button>
+                  </td>
+                </tr>
               )}
             </tbody>
             {displayedEmployees.length > 0 && (
@@ -949,46 +1056,37 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         </div>
       )}
 
-      <Dialog open={addStaffDialogOpen} onOpenChange={setAddStaffDialogOpen}>
+      <Dialog open={deleteAllDialogOpen} onOpenChange={open => { setDeleteAllDialogOpen(open); if (!open) { setDeleteAllPin(''); setDeleteAllError(null) } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Add Staff Line</DialogTitle>
+            <DialogTitle>Delete All Staff Lines</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Choose one or more {department === 'boh' ? 'BOH staff' : 'FOH staff'} members to add to this weekly planner.
+              This will remove all staff rows and draft shifts for this week&apos;s {department.toUpperCase()} schedule. Enter a manager PIN to confirm.
             </p>
-            <div className="max-h-72 space-y-2 overflow-y-auto rounded-lg border p-3">
-              {availableEmployeesToAdd.map(employee => {
-                const checked = staffToAdd.includes(employee.id)
-                return (
-                  <label key={employee.id} className="flex items-center gap-3 rounded-md border px-3 py-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={event => {
-                        setStaffToAdd(current =>
-                          event.target.checked
-                            ? [...current, employee.id]
-                            : current.filter(id => id !== employee.id)
-                        )
-                      }}
-                    />
-                    <span className="font-medium">{employee.name}</span>
-                    <span className="text-xs text-muted-foreground capitalize">{employee.role.replace('_', ' ')}</span>
-                  </label>
-                )
-              })}
-              {availableEmployeesToAdd.length === 0 && (
-                <div className="text-sm text-muted-foreground">All available staff are already on this planner.</div>
-              )}
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              This action cannot be undone.
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Manager PIN</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                className="w-full rounded-lg border px-3 py-2 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-slate-400"
+                placeholder="••••"
+                value={deleteAllPin}
+                onChange={e => { setDeleteAllPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setDeleteAllError(null) }}
+              />
+              {deleteAllError && <p className="mt-1.5 text-sm text-red-600">{deleteAllError}</p>}
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setAddStaffDialogOpen(false)}>
+              <Button variant="outline" className="flex-1" onClick={() => setDeleteAllDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button className="flex-1" onClick={addStaffRow} disabled={staffToAdd.length === 0}>
-                Add Staff
+              <Button variant="destructive" className="flex-1" onClick={() => void handleDeleteAll()} disabled={deleteAllPin.length !== 4 || deletingAll}>
+                {deletingAll ? 'Deleting…' : 'Delete All'}
               </Button>
             </div>
           </div>
