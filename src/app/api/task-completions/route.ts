@@ -46,3 +46,89 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ success: true })
 }
+
+export async function DELETE(req: NextRequest) {
+  const { pin, completion_id } = await req.json()
+
+  if (!isValidPin(pin)) {
+    return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
+  }
+  if (typeof completion_id !== 'string') {
+    return NextResponse.json({ error: 'Missing completion id' }, { status: 400 })
+  }
+
+  const { data: employees, error: employeeError } = await supabaseAdmin
+    .from('employees')
+    .select('id, pin_hash')
+    .eq('is_active', true)
+
+  if (employeeError) {
+    return NextResponse.json({ error: employeeError.message }, { status: 500 })
+  }
+
+  let employeeId: string | null = null
+  for (const employee of employees ?? []) {
+    if (await verifyPin(pin, employee.pin_hash)) {
+      employeeId = employee.id
+      break
+    }
+  }
+
+  if (!employeeId) {
+    return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
+  }
+
+  const { error } = await supabaseAdmin
+    .from('task_completions')
+    .delete()
+    .eq('id', completion_id)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true })
+}
+
+export async function PATCH(req: NextRequest) {
+  const { pin, completion_id } = await req.json()
+
+  if (!isValidPin(pin)) {
+    return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
+  }
+  if (typeof completion_id !== 'string') {
+    return NextResponse.json({ error: 'Missing completion id' }, { status: 400 })
+  }
+
+  const { data: employees, error: employeeError } = await supabaseAdmin
+    .from('employees')
+    .select('id, pin_hash')
+    .eq('is_active', true)
+
+  if (employeeError) {
+    return NextResponse.json({ error: employeeError.message }, { status: 500 })
+  }
+
+  let employeeId: string | null = null
+  for (const employee of employees ?? []) {
+    if (await verifyPin(pin, employee.pin_hash)) {
+      employeeId = employee.id
+      break
+    }
+  }
+
+  if (!employeeId) {
+    return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
+  }
+
+  const { error } = await supabaseAdmin
+    .from('task_completions')
+    .update({ employee_id: employeeId })
+    .eq('id', completion_id)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true })
+}

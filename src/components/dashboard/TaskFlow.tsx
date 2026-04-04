@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { Task, TaskCategory, TaskCompletion, DailySession, Employee, Schedule, SessionPhase } from '@/lib/types'
 import { PinModal } from '@/components/layout/PinModal'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { CheckCircle2, Circle, ChevronRight, ArrowRight, RotateCcw, ChevronLeft } from 'lucide-react'
 import { formatTime, getBusinessDate, getBusinessDateTime } from '@/lib/dateUtils'
 import { useRouter } from 'next/navigation'
@@ -35,8 +36,13 @@ const REMINDER_WINDOW_MINUTES = 30
 
 export function TaskFlow({ categories, tasks, schedules, completions, session, employees, today, now, onRefresh }: Props) {
   const router = useRouter()
+  const [taskActionTarget, setTaskActionTarget] = useState<Task | null>(null)
   const [pinTarget, setPinTarget] = useState<Task | null>(null)
+  const [undoTarget, setUndoTarget] = useState<{ task: Task; completionId: string } | null>(null)
+  const [transferTarget, setTransferTarget] = useState<{ task: Task; completionId: string } | null>(null)
   const [pinError, setPinError] = useState<string | null>(null)
+  const [undoPinError, setUndoPinError] = useState<string | null>(null)
+  const [transferPinError, setTransferPinError] = useState<string | null>(null)
   const [advancing, setAdvancing] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
   const [showResetPin, setShowResetPin] = useState(false)
@@ -159,12 +165,50 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
     onRefresh()
   }
 
-  const uncompleteTask = async (task: Task) => {
-    const completion = completions.find(c => c.task_id === task.id && c.session_date === today)
-    if (completion) {
-      await supabase.from('task_completions').delete().eq('id', completion.id)
-      onRefresh()
+  const handleUndoPinConfirm = async (pin: string) => {
+    if (!undoTarget) return
+    setUndoPinError(null)
+
+    const res = await fetch('/api/task-completions', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pin,
+        completion_id: undoTarget.completionId,
+      }),
+    })
+
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      setUndoPinError(data.error ?? 'Incorrect PIN')
+      throw new Error(data.error ?? 'Incorrect PIN')
     }
+
+    setUndoTarget(null)
+    onRefresh()
+  }
+
+  const handleTransferPinConfirm = async (pin: string) => {
+    if (!transferTarget) return
+    setTransferPinError(null)
+
+    const res = await fetch('/api/task-completions', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pin,
+        completion_id: transferTarget.completionId,
+      }),
+    })
+
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      setTransferPinError(data.error ?? 'Incorrect PIN')
+      throw new Error(data.error ?? 'Incorrect PIN')
+    }
+
+    setTransferTarget(null)
+    onRefresh()
   }
 
   const advancePhase = async () => {
@@ -350,48 +394,57 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
             )}
           </div>
         </div>
-        <div className="overflow-y-auto p-3 space-y-2" style={{ maxHeight: 'calc(100vh - 340px)' }}>
+        <div className="overflow-y-auto p-3" style={{ maxHeight: 'calc(100vh - 340px)' }}>
           {currentTasks.length === 0 && (
             <p className="text-center text-muted-foreground py-8 text-sm">
               No tasks in this phase. Add tasks in Task Admin.
             </p>
           )}
-          {currentTasks.map(task => {
-            const done = isCompleted(task.id)
-            const comp = completions.find(c => c.task_id === task.id && c.session_date === today)
-            const emp = comp ? employees.find(e => e.id === comp.employee_id) : null
-            return (
-              <button
-                key={task.id}
-                className={`w-full rounded-xl border-2 px-4 py-3 text-left transition-all ${
-                  done
-                    ? 'bg-green-50 border-green-400 hover:bg-green-100'
-                    : 'bg-white border-gray-200 hover:border-amber-400 hover:shadow-sm'
-                }`}
-                onClick={() => done ? uncompleteTask(task) : setPinTarget(task)}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    {done
-                      ? <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
-                      : <Circle className="w-5 h-5 text-gray-300 shrink-0" />
-                    }
-                    <div className="min-w-0">
-                      <p className={`font-medium truncate ${done ? 'text-green-800' : ''}`}>{task.title}</p>
-                      {getTaskHelperText(task) && (
-                        <p className="text-xs text-muted-foreground">{getTaskHelperText(task)}</p>
+          <div className="grid grid-cols-6 gap-3">
+            {currentTasks.map(task => {
+              const done = isCompleted(task.id)
+              const comp = completions.find(c => c.task_id === task.id && c.session_date === today)
+              const emp = comp ? employees.find(e => e.id === comp.employee_id) : null
+              return (
+                <button
+                  key={task.id}
+                  className={`aspect-square rounded-2xl border-2 p-3 text-center transition-all ${
+                    done
+                      ? 'bg-green-50 border-green-400 hover:bg-green-100'
+                      : 'bg-white border-gray-200 hover:border-amber-400 hover:shadow-sm'
+                  }`}
+                  onClick={() => setTaskActionTarget(task)}
+                >
+                  <div className="flex h-full flex-col items-center justify-between">
+                    <div className="flex w-full justify-center">
+                      {done
+                        ? <CheckCircle2 className="w-6 h-6 text-green-500 shrink-0" />
+                        : <Circle className="w-6 h-6 text-gray-300 shrink-0" />
+                      }
+                    </div>
+                    <div className="flex-1 flex flex-col items-center justify-center px-1">
+                      <p className={`line-clamp-3 text-sm font-semibold leading-tight ${done ? 'text-green-800' : 'text-slate-900'}`}>
+                        {task.title}
+                      </p>
+                    </div>
+                    <div className="min-h-10 flex flex-col items-center justify-end">
+                      {done && emp ? (
+                        <span className="rounded-full bg-green-200 px-2 py-1 text-[11px] font-semibold text-green-700">
+                          {emp.name}
+                        </span>
+                      ) : getTaskHelperText(task) ? (
+                        <p className="text-[11px] text-muted-foreground leading-tight">
+                          {getTaskHelperText(task)}
+                        </p>
+                      ) : (
+                        <span />
                       )}
                     </div>
                   </div>
-                  {done && emp && (
-                    <span className="text-xs font-semibold text-green-700 bg-green-200 px-2.5 py-1 rounded-full shrink-0">
-                      {emp.name}
-                    </span>
-                  )}
-                </div>
-              </button>
-            )
-          })}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -428,6 +481,83 @@ export function TaskFlow({ categories, tasks, schedules, completions, session, e
         onClose={() => { setShowPhaseResetPin(false); setPhaseResetError(null) }}
         error={phaseResetError}
       />
+
+      <PinModal
+        open={!!undoTarget}
+        title="Mark Incomplete"
+        description={undoTarget?.task.title}
+        onConfirm={handleUndoPinConfirm}
+        onClose={() => { setUndoTarget(null); setUndoPinError(null) }}
+        error={undoPinError}
+      />
+
+      <PinModal
+        open={!!transferTarget}
+        title="Transfer Task"
+        description={transferTarget?.task.title}
+        onConfirm={handleTransferPinConfirm}
+        onClose={() => { setTransferTarget(null); setTransferPinError(null) }}
+        error={transferPinError}
+      />
+
+      <Dialog open={!!taskActionTarget} onOpenChange={open => !open && setTaskActionTarget(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>{taskActionTarget?.title}</DialogTitle>
+          </DialogHeader>
+          {taskActionTarget && (() => {
+            const completion = completions.find(c => c.task_id === taskActionTarget.id && c.session_date === today)
+            const assignedEmployee = completion ? employees.find(e => e.id === completion.employee_id) : null
+
+            return completion ? (
+              <div className="space-y-3">
+                <div className="rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+                  <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Assigned To</div>
+                  <div className="mt-1 font-semibold">{assignedEmployee?.name ?? 'Unknown Staff'}</div>
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    setTaskActionTarget(null)
+                    setTransferTarget({ task: taskActionTarget, completionId: completion.id })
+                  }}
+                >
+                  Transfer
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    setTaskActionTarget(null)
+                    setUndoTarget({ task: taskActionTarget, completionId: completion.id })
+                  }}
+                >
+                  Mark Incomplete
+                </Button>
+                <Button variant="ghost" className="w-full" onClick={() => setTaskActionTarget(null)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Button
+                  className="w-full justify-start"
+                  onClick={() => {
+                    setTaskActionTarget(null)
+                    setPinTarget(taskActionTarget)
+                  }}
+                >
+                  Complete
+                </Button>
+                <Button variant="ghost" className="w-full" onClick={() => setTaskActionTarget(null)}>
+                  Cancel
+                </Button>
+              </div>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
