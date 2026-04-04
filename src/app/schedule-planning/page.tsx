@@ -1,33 +1,28 @@
+'use client'
+
+import { useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { PlanningGrid } from '@/components/schedule-planning/PlanningGrid'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ScheduleDepartment } from '@/lib/types'
 
 export default function SchedulePlanningPage() {
+  const [department, setDepartment] = useState<ScheduleDepartment>('foh')
+
   return (
     <div className="p-6">
       <AdminSubpageHeader title="Schedule Planning" subtitle="Build, adjust, and publish the weekly schedule." />
-      <Tabs defaultValue="foh">
-        <TabsList className="mb-6 mt-3 grid w-full max-w-xl grid-cols-2 gap-2 bg-transparent p-0">
-          <TabsTrigger value="foh" className="h-auto min-h-0 rounded-xl border bg-white px-4 py-3 text-left data-active:border-blue-500 data-active:bg-blue-50">
-            <span className="flex flex-col items-start">
-              <span className="text-sm font-semibold">FOH Planning</span>
-              <span className="text-[11px] text-muted-foreground">Servers, bussers, runners, managers</span>
-            </span>
-          </TabsTrigger>
-          <TabsTrigger value="boh" className="h-auto min-h-0 rounded-xl border bg-white px-4 py-3 text-left data-active:border-emerald-500 data-active:bg-emerald-50">
-            <span className="flex flex-col items-start">
-              <span className="text-sm font-semibold">BOH Planning</span>
-              <span className="text-[11px] text-muted-foreground">Kitchen staff only</span>
-            </span>
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="foh">
-          <PlanningGrid department="foh" />
-        </TabsContent>
-        <TabsContent value="boh">
-          <PlanningGrid department="boh" />
-        </TabsContent>
-      </Tabs>
+      <PlanningGrid
+        department={department}
+        rightSlot={(
+          <Tabs value={department} onValueChange={value => setDepartment(value as ScheduleDepartment)}>
+            <TabsList className="h-9 rounded-lg bg-slate-100 p-1">
+              <TabsTrigger value="foh" className="px-3 text-xs font-semibold">FOH</TabsTrigger>
+              <TabsTrigger value="boh" className="px-3 text-xs font-semibold">BOH</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        )}
+      />
     </div>
   )
 }

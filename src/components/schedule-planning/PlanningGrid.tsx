@@ -129,9 +129,10 @@ function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartme
 
 interface PlanningGridProps {
   department: ScheduleDepartment
+  rightSlot?: React.ReactNode
 }
 
-export function PlanningGrid({ department }: PlanningGridProps) {
+export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -633,7 +634,8 @@ export function PlanningGrid({ department }: PlanningGridProps) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {rightSlot}
           <Button variant="outline" size="sm" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
             <ChevronLeft className="w-4 h-4" />
           </Button>

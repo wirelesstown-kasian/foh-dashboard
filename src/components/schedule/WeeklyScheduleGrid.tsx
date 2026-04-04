@@ -18,9 +18,10 @@ function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartme
 
 interface WeeklyScheduleGridProps {
   department: ScheduleDepartment
+  rightSlot?: React.ReactNode
 }
 
-export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
+export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGridProps) {
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -82,7 +83,9 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
       ).values()
     )
 
-    const mergedEmployees = [...activeEmployees, ...scheduledOnlyEmployees].sort((a, b) => a.name.localeCompare(b.name))
+    const mergedEmployees = [...activeEmployees, ...scheduledOnlyEmployees]
+      .filter(employee => departmentSchedules.some(schedule => schedule.employee_id === employee.id))
+      .sort((a, b) => a.name.localeCompare(b.name))
     const storedRowOrder = Array.from(
       new Set(((draftRes.data ?? []) as Array<{ employee_id: string; display_order: number | null }>).map(row => row.employee_id))
     )
@@ -210,16 +213,13 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
     <div className="space-y-2">
       <div className="rounded-[18px] border border-slate-300 bg-white px-3.5 py-2.5 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-              {department === 'boh' ? 'Back Of House' : 'Front Of House'}
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
             <div className="min-w-0">
-              <h1 className="text-lg font-semibold tracking-tight text-slate-900">
-                {department === 'boh' ? 'BOH Weekly Schedule' : 'FOH Weekly Schedule'}
+              <h1 className="text-base font-semibold tracking-tight text-slate-900">
+                {formatWeekRange(weekRef)}
               </h1>
             </div>
-            <div className="flex flex-wrap items-center gap-2 xl:ml-1">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
                 {employees.length} staff
               </span>
@@ -232,24 +232,24 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-300 bg-slate-50 p-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-              <div className="min-w-44 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-center">
-                <div className="text-[13px] font-semibold text-slate-900">{formatWeekRange(weekRef)}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            {rightSlot}
+            <div className="rounded-xl border border-slate-300 bg-slate-50 p-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
+                  Today&apos;s Week
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportDepartmentPdf}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Export PDF
+                </Button>
               </div>
-              <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-              <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
-                Today&apos;s Week
-              </Button>
-              <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportDepartmentPdf}>
-                <Download className="w-4 h-4 mr-2" />
-                Export PDF
-              </Button>
             </div>
           </div>
         </div>
@@ -291,10 +291,7 @@ export function WeeklyScheduleGrid({ department }: WeeklyScheduleGridProps) {
                           ) : (
                             shifts.map((s, i) => (
                               <div key={i} className="mb-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5 text-sm">
-                                <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                  Shift
-                                </div>
-                                <div className="mt-1 font-semibold text-[16px] text-slate-900">
+                                <div className="font-semibold text-[16px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>
                                 <div className="mt-1 text-[13px] text-slate-600">{formatHours(calcHours(s.start_time, s.end_time))}</div>
