@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, Save, ChevronUp, ChevronDown, Download } from 'lucide-react'
 
 type ShiftDraft = {
   id?: string
@@ -449,6 +449,104 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       .filter(d => d.date === date && !d.is_off)
       .reduce((sum, d) => sum + calcHours(d.start_time, d.end_time), 0)
 
+  const exportPlannerPdf = () => {
+    if (days.length === 0) return
+
+    const title = `${department.toUpperCase()} Planner`
+    const weekLabel = formatWeekRange(weekRef)
+    const tableRows = displayedEmployees.map(employee => {
+      const dayCells = days.map(day => {
+        const shifts = getShifts(employee.id, formatDate(day))
+        return `
+          <td>
+            ${shifts.length === 0 ? '<div class="muted">Off</div>' : shifts.map(shift => `
+              <div class="shift">
+                <div class="time">${shift.is_off ? 'Off' : `${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}`}</div>
+                ${shift.is_off ? '' : `<div class="muted">${formatHours(calcHours(shift.start_time, shift.end_time))}</div>`}
+              </div>
+            `).join('')}
+          </td>
+        `
+      }).join('')
+
+      return `
+        <tr>
+          <td>
+            <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
+            <div class="muted">${employee.role.replace('_', ' ')}</div>
+          </td>
+          ${dayCells}
+          <td class="weekly-total">${formatHours(getWeeklyHours(employee.id))}</td>
+        </tr>
+      `
+    }).join('')
+
+    const printWindow = window.open('', '_blank', 'width=1400,height=900')
+    if (!printWindow) return
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${title} PDF</title>
+          <style>
+            @page { size: A4 landscape; margin: 10mm; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; margin: 0; padding: 16px; color: #111827; }
+            h1 { margin: 0 0 4px 0; font-size: 24px; }
+            .sub { margin-bottom: 10px; color: #475569; font-size: 13px; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { border: 1.5px solid #475569; vertical-align: top; padding: 8px; font-size: 14px; }
+            th { background: #edf1f5; font-weight: 700; }
+            .employee-name { font-weight: 800; font-size: 15px; margin-bottom: 2px; }
+            .muted { color: #475569; font-size: 12px; }
+            .shift { background: #f7f7f5; border: 1.5px solid #64748b; border-radius: 8px; padding: 6px; margin-bottom: 5px; }
+            .time { font-weight: 700; font-size: 14px; }
+            .weekly-total { text-align: center; font-weight: 700; }
+            .totals-row td { background: #e5e7eb; text-align: center; vertical-align: middle; }
+            .totals-label { font-weight: 700; text-align: left; }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${title}</h1>
+          <div class="sub">${weekLabel}</div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 150px;">Employee</th>
+                ${days.map(day => `
+                  <th>
+                    <div>${getDayName(day)}</div>
+                    <div class="muted">${formatDisplayDate(day)}</div>
+                  </th>
+                `).join('')}
+                <th style="width: 85px;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+              <tr class="totals-row">
+                <td class="totals-label">Daily Total Hours</td>
+                ${days.map(day => `
+                  <td>
+                    <div style="font-weight:800;font-size:16px;">${formatHours(getDayTotal(formatDate(day)))}</div>
+                  </td>
+                `).join('')}
+                <td class="weekly-total">
+                  ${formatHours(displayedEmployees.reduce((sum, employee) => sum + getWeeklyHours(employee.id), 0))}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+  }
+
   const addStaffRow = () => {
     if (staffToAdd.length === 0) return
     const nextDisplayedIds = [...displayedEmployeeIds, ...staffToAdd]
@@ -621,7 +719,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap items-center gap-2 md:gap-3">
           {isDirty && (
             <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
@@ -650,6 +748,10 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           <Button variant="outline" className="h-11 px-4 text-sm" onClick={() => void handleSaveDraft()} disabled={savingDraft || !isEditableWeek}>
             <Save className="w-4 h-4 mr-2" />
             {savingDraft ? 'Saving…' : 'Save Draft'}
+          </Button>
+          <Button variant="outline" className="h-11 px-4 text-sm" onClick={exportPlannerPdf}>
+            <Download className="w-4 h-4 mr-2" />
+            Export PDF
           </Button>
           <Button className="h-11 px-4 text-sm" onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
             <Send className="w-4 h-4 mr-2" />
@@ -773,13 +875,15 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                             </button>
                           )
                         })}
-                        <button
-                          className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-slate-400 p-2 text-[14px] text-slate-500 transition-colors hover:border-slate-700 hover:text-slate-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:border-gray-200 disabled:hover:text-gray-300"
-                          disabled={!isEditableWeek}
-                          onClick={() => openAddDialog(dateStr, emp.id)}
-                        >
-                          <Plus className="w-3 h-3" /> Add
-                        </button>
+                        {shifts.length === 0 && (
+                          <button
+                            className="flex w-full items-center justify-center gap-1 rounded-xl border border-dashed border-slate-400 p-2 text-[14px] text-slate-500 transition-colors hover:border-slate-700 hover:text-slate-800 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-300 disabled:hover:border-gray-200 disabled:hover:text-gray-300"
+                            disabled={!isEditableWeek}
+                            onClick={() => openAddDialog(dateStr, emp.id)}
+                          >
+                            <Plus className="w-3 h-3" /> Add
+                          </button>
+                        )}
                       </td>
                     )
                   })}
@@ -1004,6 +1108,16 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                   }}
                 >
                   Modify Shift
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-11 justify-start"
+                  onClick={() => {
+                    openAddDialog(shiftActionTarget.date, shiftActionTarget.employeeId)
+                    setShiftActionTarget(null)
+                  }}
+                >
+                  Add Another Shift
                 </Button>
                 <Button
                   variant="outline"
