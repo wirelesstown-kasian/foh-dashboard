@@ -17,12 +17,8 @@ function isBohRole(role: Employee['role']) {
 export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
   const businessDate = getBusinessDate()
   const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
-  const clockedInEmployeeIds = new Set(
-    clockRecords
-      .filter(record => !record.clock_out_at)
-      .map(record => record.employee_id)
-  )
-  const staffIds = Array.from(new Set([...scheduledEmployeeIds, ...clockedInEmployeeIds]))
+  const clockActivityEmployeeIds = new Set(clockRecords.map(record => record.employee_id))
+  const staffIds = Array.from(new Set([...scheduledEmployeeIds, ...clockActivityEmployeeIds]))
   const staffOnToday = staffIds.map(employeeId => {
     const employee = employees.find(item => item.id === employeeId)
     const schedule = schedules.find(item => item.employee_id === employeeId) ?? null
