@@ -308,11 +308,12 @@ export async function PATCH(req: NextRequest) {
 
   const fallbackHours = nextClockOutAt ? calculateClockHours(nextClockInAt, nextClockOutAt) : 0
   const update = {
-    approval_status: action === 'adjust' || numericHours !== fallbackHours ? 'adjusted' : 'approved',
+    approval_status: 'approved',
     approved_hours: numericHours ?? fallbackHours,
     manager_note: manager_note?.trim() || null,
     clock_in_at: nextClockInAt,
     clock_out_at: nextClockOutAt,
+    auto_clock_out: false,
     manager_approved_by: null,
     manager_approved_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
