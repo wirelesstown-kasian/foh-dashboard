@@ -15,12 +15,20 @@ function isBohRole(role: Employee['role']) {
 }
 
 export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
-  // schedules are already filtered to today by the parent — use directly
   const businessDate = getBusinessDate()
-  const staffOnToday = schedules.map(s => ({
-    schedule: s,
-    employee: employees.find(e => e.id === s.employee_id),
-  })).filter(x => x.employee)
+  const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
+  const clockedInEmployeeIds = new Set(
+    clockRecords
+      .filter(record => !record.clock_out_at)
+      .map(record => record.employee_id)
+  )
+  const staffIds = Array.from(new Set([...scheduledEmployeeIds, ...clockedInEmployeeIds]))
+  const staffOnToday = staffIds.map(employeeId => {
+    const employee = employees.find(item => item.id === employeeId)
+    const schedule = schedules.find(item => item.employee_id === employeeId) ?? null
+    const record = clockRecords.find(item => item.employee_id === employeeId) ?? null
+    return { employee, schedule, record }
+  }).filter(entry => entry.employee)
 
   const groupedStaff = {
     foh: staffOnToday.filter(({ employee }) => !isBohRole(employee!.role)),
@@ -37,7 +45,7 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {staffOnToday.length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-4">No scheduled staff today</p>
+          <p className="text-xs text-muted-foreground text-center py-4">No scheduled or clocked-in staff today</p>
         )}
         {([
           ['FOH', groupedStaff.foh],
@@ -56,10 +64,9 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                   No scheduled {label} staff
                 </div>
               )}
-              {entries.map(({ schedule, employee }) => (
-                <div key={schedule.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+              {entries.map(({ schedule, employee, record }) => (
+                <div key={`${employee!.id}-${schedule?.id ?? 'clock'}`} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                   {(() => {
-                    const record = clockRecords.find(item => item.employee_id === employee!.id)
                     const statusLabel = !record
                       ? 'Not clocked in'
                       : record.approval_status === 'pending_review'
@@ -92,8 +99,17 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                     <span className="text-[11px] uppercase tracking-wide text-slate-500">{employee!.role.replace('_', ' ')}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-700">
-                    <span>{formatTime(schedule.start_time)} – {formatTime(schedule.end_time)}</span>
-                    <span className="text-slate-500">{formatHours(calcHours(schedule.start_time, schedule.end_time))}</span>
+                    {schedule ? (
+                      <>
+                        <span>{formatTime(schedule.start_time)} – {formatTime(schedule.end_time)}</span>
+                        <span className="text-slate-500">{formatHours(calcHours(schedule.start_time, schedule.end_time))}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-slate-500">No schedule</span>
+                        <span className="text-slate-500">Clock-in only</span>
+                      </>
+                    )}
                   </div>
                   {employee!.phone && (
                     <div className="mt-1 flex items-center gap-1 text-xs text-slate-600">

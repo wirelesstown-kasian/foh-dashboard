@@ -621,6 +621,10 @@ export default function EodPage() {
             <div className="rounded-lg border bg-gray-50 p-4 text-gray-700">
               <p className="font-medium">Drop Instructions</p>
               <p className="mt-2">Combine this cash amount with the Toast printout slip and place it in the cash drop.</p>
+              <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-amber-900">
+                <p className="font-medium">Before Tip Distribution</p>
+                <p className="mt-1">Make sure everyone clocks out before you proceed. Tip Distribution uses clock-in / clock-out hours, so tips will not calculate correctly until clock-outs are completed.</p>
+              </div>
               <p className="mt-2">Next, complete the Tip Distribution section below. After Tip Distribution is saved, `Save EOD` will activate.</p>
             </div>
             <Button className="w-full" onClick={() => setShowFinancialConfirm(false)}>
