@@ -35,13 +35,13 @@ import {
   subWeeks, addWeeks, eachDayOfInterval, subMonths, addMonths
 } from 'date-fns'
 import * as XLSX from 'xlsx'
-import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { isClockPending } from '@/lib/clockUtils'
 
 type Period = 'daily' | 'weekly' | 'monthly'
 type ReportDepartment = 'foh' | 'boh'
 type TipReportPeriod = 'daily' | 'weekly' | 'monthly'
 type TipReportView = 'earnings' | 'tips'
-type ReportTab = 'performance' | 'wages' | 'eod' | 'attendance'
+type ReportTab = 'performance' | 'wages' | 'eod' | 'clock'
 type TipDetail = {
   date: string
   amount: number | null
@@ -132,10 +132,11 @@ export default function ReportingPage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [sendingReportEmail, setSendingReportEmail] = useState(false)
   const [reportEmailStatus, setReportEmailStatus] = useState<string | null>(null)
-  const [attendancePeriod, setAttendancePeriod] = useState<Period>('daily')
-  const [attendanceEdits, setAttendanceEdits] = useState<Record<string, { hours: string; note: string }>>({})
-  const [savingAttendanceId, setSavingAttendanceId] = useState<string | null>(null)
-  const [attendanceStatus, setAttendanceStatus] = useState<string | null>(null)
+  const [clockPeriod, setClockPeriod] = useState<Period>('daily')
+  const [clockEmployeeFilter, setClockEmployeeFilter] = useState<string>('all')
+  const [clockEdits, setClockEdits] = useState<Record<string, { hours: string; note: string }>>({})
+  const [savingClockId, setSavingClockId] = useState<string | null>(null)
+  const [clockStatus, setClockStatus] = useState<string | null>(null)
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
   const isCompletedTask = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
@@ -271,26 +272,19 @@ export default function ReportingPage() {
     end: endOfWeek(refDate, { weekStartsOn: 1 }),
   })
   const weeklyEodReports = eodReports.filter(r => r.session_date >= tipWeekStart && r.session_date <= tipWeekEnd)
-  const getClockHoursForEmployeeDate = (employeeId: string, date: string, fallbackHours: number) => {
-    const records = clockRecords.filter(record => record.employee_id === employeeId && record.session_date === date)
-    if (records.length === 0) return fallbackHours
-    return records.reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
-  }
-
   const tipByEmployee = filteredEmployees.map(emp => {
     const daily: TipDetail[] = weekDays.map(day => {
       const dateStr = format(day, 'yyyy-MM-dd')
       const report = weeklyEodReports.find(r => r.session_date === dateStr)
-      const dist = report?.tip_distributions.find(d => d.employee_id === emp.id)
-      const amount = dist?.net_tip !== undefined ? Number(dist.net_tip) : null
-      const fallbackHours = dist ? Number(dist.hours_worked) : 0
-      const hours = getClockHoursForEmployeeDate(emp.id, dateStr, fallbackHours)
+      const distributions = report?.tip_distributions.filter(d => d.employee_id === emp.id) ?? []
+      const amount = distributions.length > 0 ? distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0) : null
+      const hours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
       return {
         date: dateStr,
         amount,
         hours,
         rate: amount !== null && hours > 0 ? amount / hours : null,
-        houseDeduction: dist ? Number(dist.house_deduction) : 0,
+        houseDeduction: distributions.reduce((sum, dist) => sum + Number(dist.house_deduction), 0),
       }
     })
     const total = daily.reduce((s, d) => s + (d.amount ?? 0), 0)
@@ -315,8 +309,7 @@ export default function ReportingPage() {
     for (const report of tipRangeReports) {
       const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
       const dailyTips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
-      const fallbackHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
-      const dailyHours = getClockHoursForEmployeeDate(emp.id, report.session_date, fallbackHours)
+      const dailyHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
       const dailyBaseWages = dailyHours * (emp.hourly_wage ?? 0)
       const dailyGuaranteedTarget = dailyHours * (emp.guaranteed_hourly ?? 0)
 
@@ -361,22 +354,23 @@ export default function ReportingPage() {
   }
   const [historyStart, historyEnd] = getHistoryRange()
   const filteredEodReports = eodReports.filter(report => report.session_date >= historyStart && report.session_date <= historyEnd)
-  const getAttendanceRange = (): [string, string] => {
-    if (attendancePeriod === 'daily') {
+  const getClockRange = (): [string, string] => {
+    if (clockPeriod === 'daily') {
       const d = format(refDate, 'yyyy-MM-dd')
       return [d, d]
     }
-    if (attendancePeriod === 'weekly') {
+    if (clockPeriod === 'weekly') {
       return [tipWeekStart, tipWeekEnd]
     }
     return [monthStart, monthEnd]
   }
-  const [attendanceStart, attendanceEnd] = getAttendanceRange()
-  const filteredAttendanceRecords = clockRecords
-    .filter(record => record.session_date >= attendanceStart && record.session_date <= attendanceEnd)
+  const [clockStart, clockEnd] = getClockRange()
+  const filteredClockRecords = clockRecords
+    .filter(record => record.session_date >= clockStart && record.session_date <= clockEnd)
     .filter(record => {
       const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
-      return employee ? isEmployeeInDepartment(employee, department) : false
+      if (!employee || !isEmployeeInDepartment(employee, department)) return false
+      return clockEmployeeFilter === 'all' || employee.id === clockEmployeeFilter
     })
     .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at))
   const rankingCards: RankingCard[] = selectedEmployeeStats ? [
@@ -617,10 +611,10 @@ export default function ReportingPage() {
     }
   }
 
-  const saveAttendanceAdjustment = async (record: ShiftClock) => {
-    const edit = attendanceEdits[record.id]
-    setSavingAttendanceId(record.id)
-    setAttendanceStatus(null)
+  const saveClockAdjustment = async (record: ShiftClock) => {
+    const edit = clockEdits[record.id]
+    setSavingClockId(record.id)
+    setClockStatus(null)
     try {
       const res = await fetch('/api/clock-events', {
         method: 'PATCH',
@@ -629,20 +623,20 @@ export default function ReportingPage() {
           id: record.id,
           approved_hours: edit?.hours ?? record.approved_hours ?? '',
           manager_note: edit?.note ?? record.manager_note ?? '',
-          action: edit?.hours && Number(edit.hours) !== Number(record.approved_hours ?? 0) ? 'adjust' : 'approve',
+          action: 'adjust',
         }),
       })
       const data = await res.json().catch(() => ({})) as { error?: string }
-      if (!res.ok) throw new Error(data.error ?? 'Failed to save attendance adjustment')
+      if (!res.ok) throw new Error(data.error ?? 'Failed to save clock update')
 
       const clockRes = await fetch('/api/clock-events', { cache: 'no-store' })
       const clockJson = (await clockRes.json().catch(() => ({}))) as { records?: ShiftClock[] }
       setClockRecords(clockJson.records ?? [])
-      setAttendanceStatus('Attendance report updated')
+      setClockStatus('Clock record updated')
     } catch (error) {
-      setAttendanceStatus(error instanceof Error ? error.message : 'Failed to save attendance adjustment')
+      setClockStatus(error instanceof Error ? error.message : 'Failed to save clock update')
     } finally {
-      setSavingAttendanceId(null)
+      setSavingClockId(null)
     }
   }
 
@@ -673,7 +667,7 @@ export default function ReportingPage() {
           <TabsTrigger value="performance">Task Performance</TabsTrigger>
           <TabsTrigger value="wages">Wage Report</TabsTrigger>
           <TabsTrigger value="eod">EOD History</TabsTrigger>
-          <TabsTrigger value="attendance">Attendance</TabsTrigger>
+          <TabsTrigger value="clock">Clock Records</TabsTrigger>
         </TabsList>
 
         <TabsContent value="performance">
@@ -1057,10 +1051,10 @@ export default function ReportingPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="attendance">
+        <TabsContent value="clock">
           <div className="bg-white rounded-xl border p-5">
             <div className="mb-4 flex items-center gap-3">
-              <Select value={attendancePeriod} onValueChange={(v: string | null) => v && setAttendancePeriod(v as Period)}>
+              <Select value={clockPeriod} onValueChange={(v: string | null) => v && setClockPeriod(v as Period)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="daily">Daily</SelectItem>
@@ -1068,21 +1062,30 @@ export default function ReportingPage() {
                   <SelectItem value="monthly">Monthly</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={clockEmployeeFilter} onValueChange={(v: string | null) => v && setClockEmployeeFilter(v)}>
+                <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Staff</SelectItem>
+                  {filteredEmployees.map(employee => (
+                    <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  if (attendancePeriod === 'daily') setRefDate(d => new Date(d.getTime() - 86400000))
-                  else if (attendancePeriod === 'weekly') setRefDate(d => subWeeks(d, 1))
+                  if (clockPeriod === 'daily') setRefDate(d => new Date(d.getTime() - 86400000))
+                  else if (clockPeriod === 'weekly') setRefDate(d => subWeeks(d, 1))
                   else setRefDate(d => subMonths(d, 1))
                 }}
               >
                 ←
               </Button>
               <span className="font-medium text-sm min-w-56 text-center">
-                {attendancePeriod === 'daily'
+                {clockPeriod === 'daily'
                   ? format(refDate, 'MMM d, yyyy')
-                  : attendancePeriod === 'weekly'
+                  : clockPeriod === 'weekly'
                     ? `Week of ${format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
                     : format(refDate, 'MMMM yyyy')}
               </span>
@@ -1090,8 +1093,8 @@ export default function ReportingPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  if (attendancePeriod === 'daily') setRefDate(d => new Date(d.getTime() + 86400000))
-                  else if (attendancePeriod === 'weekly') setRefDate(d => addWeeks(d, 1))
+                  if (clockPeriod === 'daily') setRefDate(d => new Date(d.getTime() + 86400000))
+                  else if (clockPeriod === 'weekly') setRefDate(d => addWeeks(d, 1))
                   else setRefDate(d => addMonths(d, 1))
                 }}
               >
@@ -1099,13 +1102,13 @@ export default function ReportingPage() {
               </Button>
               <div className="ml-auto flex items-center gap-2">
                 <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
-                  Pending {filteredAttendanceRecords.filter(record => isClockPending(record)).length}
+                  Open {filteredClockRecords.filter(record => isClockPending(record)).length}
                 </Badge>
               </div>
             </div>
-            {attendanceStatus && (
+            {clockStatus && (
               <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
-                {attendanceStatus}
+                {clockStatus}
               </div>
             )}
             <Table>
@@ -1116,15 +1119,15 @@ export default function ReportingPage() {
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Clock In</TableHead>
                   <TableHead className="text-right">Clock Out</TableHead>
-                  <TableHead className="text-right">Approved Hrs</TableHead>
-                  <TableHead>Manager Note</TableHead>
+                  <TableHead className="text-right">Worked Hrs</TableHead>
+                  <TableHead>Note</TableHead>
                   <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredAttendanceRecords.map(record => {
+                {filteredClockRecords.map(record => {
                   const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
-                  const currentEdit = attendanceEdits[record.id] ?? {
+                  const currentEdit = clockEdits[record.id] ?? {
                     hours: record.approved_hours !== null ? String(record.approved_hours) : '',
                     note: record.manager_note ?? '',
                   }
@@ -1142,10 +1145,10 @@ export default function ReportingPage() {
                                 ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
                                 : 'border-slate-300 bg-slate-50 text-slate-700'
                         }>
-                          {record.approval_status}
+                          {record.auto_clock_out ? 'Auto Clock-Out' : record.clock_out_at ? 'Closed' : 'Open'}
                         </Badge>
                         {record.auto_clock_out && (
-                          <div className="mt-1 text-xs text-amber-700">Auto clock-out warning</div>
+                          <div className="mt-1 text-xs text-amber-700">Review recommended</div>
                         )}
                       </TableCell>
                       <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
@@ -1153,7 +1156,7 @@ export default function ReportingPage() {
                       <TableCell className="text-right">
                         <Input
                           value={currentEdit.hours}
-                          onChange={event => setAttendanceEdits(prev => ({
+                          onChange={event => setClockEdits(prev => ({
                             ...prev,
                             [record.id]: { ...currentEdit, hours: event.target.value },
                           }))}
@@ -1163,26 +1166,26 @@ export default function ReportingPage() {
                       <TableCell>
                         <Input
                           value={currentEdit.note}
-                          onChange={event => setAttendanceEdits(prev => ({
+                          onChange={event => setClockEdits(prev => ({
                             ...prev,
                             [record.id]: { ...currentEdit, note: event.target.value },
                           }))}
                           className="h-8 min-w-40"
-                          placeholder="Approval note"
+                          placeholder="Clock note"
                         />
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => saveAttendanceAdjustment(record)} disabled={savingAttendanceId === record.id}>
-                          {savingAttendanceId === record.id ? 'Saving…' : 'Approve'}
+                        <Button size="sm" variant="outline" onClick={() => saveClockAdjustment(record)} disabled={savingClockId === record.id}>
+                          {savingClockId === record.id ? 'Saving…' : 'Save Changes'}
                         </Button>
                       </TableCell>
                     </TableRow>
                   )
                 })}
-                {filteredAttendanceRecords.length === 0 && (
+                {filteredClockRecords.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
-                      No attendance records for this range
+                      No clock records for this range
                     </TableCell>
                   </TableRow>
                 )}
