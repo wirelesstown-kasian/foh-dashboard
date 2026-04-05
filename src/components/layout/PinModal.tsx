@@ -63,8 +63,8 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
     setLoading(true)
     try {
       await onConfirm(value)
-    } catch {
-      setLocalError('Incorrect PIN')
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Incorrect PIN')
       setPin('')
     } finally {
       setLoading(false)
