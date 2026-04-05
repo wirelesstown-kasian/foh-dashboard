@@ -144,7 +144,10 @@ export default function EodPage() {
   const [submissionComplete, setSubmissionComplete] = useState(false)
   const [managerOverride, setManagerOverride] = useState(false)
   const [showUnlockPin, setShowUnlockPin] = useState(false)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [showResetPin, setShowResetPin] = useState(false)
   const [unlockError, setUnlockError] = useState<string | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
   const [showFinancialConfirm, setShowFinancialConfirm] = useState(false)
   const [showClockWarningConfirm, setShowClockWarningConfirm] = useState(false)
   const [financialsSaved, setFinancialsSaved] = useState(false)
@@ -463,6 +466,55 @@ export default function EodPage() {
     setShowUnlockPin(false)
   }
 
+  const handleManagerReset = async (pin: string) => {
+    if (!existing) {
+      setResetError('No saved EOD report to reset.')
+      throw new Error('No saved EOD report to reset.')
+    }
+
+    setResetError(null)
+
+    const pinRes = await fetch('/api/manager-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    })
+
+    if (!pinRes.ok) {
+      const data = (await pinRes.json().catch(() => ({}))) as { error?: string }
+      const message = data.error ?? 'Manager PIN required'
+      setResetError(message)
+      throw new Error(message)
+    }
+
+    setSaving(true)
+    try {
+      const deleteTips = await supabase.from('tip_distributions').delete().eq('eod_report_id', existing.id)
+      if (deleteTips.error) throw deleteTips.error
+
+      const deleteReport = await supabase.from('eod_reports').delete().eq('id', existing.id)
+      if (deleteReport.error) throw deleteReport.error
+
+      setExisting(null)
+      setCurrentReportId(null)
+      setSubmissionComplete(false)
+      setShowConfirm(false)
+      setSubmitResult(null)
+      setManagerOverride(false)
+      window.localStorage.removeItem(getFinancialDraftKey(today))
+      window.localStorage.removeItem(getTipDraftKey(today))
+      await load()
+      setShowResetPin(false)
+      setShowResetConfirm(false)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to reset EOD.'
+      setResetError(message)
+      throw error instanceof Error ? error : new Error(message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) return <div className="p-6 text-muted-foreground">Loading…</div>
 
   const closedByName = employees.find(e => e.id === form.closed_by)?.name ?? 'N/A'
@@ -604,6 +656,34 @@ export default function EodPage() {
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset Saved EOD</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-900">
+              <p className="font-medium">This will remove the saved EOD values for {format(businessDate, 'MMM d, yyyy')}.</p>
+              <p className="mt-2">After reset, the screen will reload with current clock-based tip rows so the report can be replaced.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowResetConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={() => {
+                  setShowResetConfirm(false)
+                  setShowResetPin(true)
+                }}
+              >
+                Continue
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="p-6 max-w-4xl">
         {submissionComplete ? (
           <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center p-8">
@@ -638,9 +718,14 @@ export default function EodPage() {
               </div>
             )}
             {eodAlreadySaved && (
-              <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
-                Manager Edit Override
-              </Button>
+              <div className="flex flex-col items-center gap-3">
+                <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
+                  Manager Edit Override
+                </Button>
+                <Button variant="destructive" onClick={() => setShowResetConfirm(true)}>
+                  Reset Saved EOD
+                </Button>
+              </div>
             )}
           </div>
         ) : (
@@ -940,6 +1025,13 @@ export default function EodPage() {
                 {saving ? 'Saving…' : eodAlreadySaved && !managerOverride ? 'EOD Saved' : 'Save EOD'}
               </Button>
             </div>
+            {existing && (
+              <div className="mt-4 flex justify-center">
+                <Button variant="destructive" onClick={() => setShowResetConfirm(true)} disabled={saving || submitting}>
+                  Reset Saved EOD
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -950,6 +1042,14 @@ export default function EodPage() {
         onConfirm={handleManagerUnlock}
         onClose={() => { setShowUnlockPin(false); setUnlockError(null) }}
         error={unlockError}
+      />
+      <PinModal
+        open={showResetPin}
+        title="Reset Saved EOD"
+        description="Manager PIN required to reset and replace this saved EOD"
+        onConfirm={handleManagerReset}
+        onClose={() => { setShowResetPin(false); setResetError(null) }}
+        error={resetError}
       />
     </>
   )

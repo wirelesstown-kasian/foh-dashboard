@@ -263,11 +263,13 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, approved_hours, manager_note, action } = await req.json() as {
+  const { id, approved_hours, manager_note, action, clock_in_at, clock_out_at } = await req.json() as {
     id?: string
     approved_hours?: number | string | null
     manager_note?: string | null
     action?: 'approve' | 'adjust'
+    clock_in_at?: string | null
+    clock_out_at?: string | null
   }
 
   if (!id || !action) {
@@ -294,11 +296,23 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: existingError?.message ?? 'Clock record not found' }, { status: 404 })
   }
 
-  const fallbackHours = existing.clock_out_at ? calculateClockHours(existing.clock_in_at, existing.clock_out_at) : 0
+  const nextClockInAt = clock_in_at?.trim() ? clock_in_at : existing.clock_in_at
+  const nextClockOutAt = clock_out_at?.trim() ? clock_out_at : existing.clock_out_at
+
+  if (!nextClockInAt) {
+    return NextResponse.json({ error: 'Clock in time is required' }, { status: 400 })
+  }
+  if (nextClockOutAt && new Date(nextClockOutAt).getTime() <= new Date(nextClockInAt).getTime()) {
+    return NextResponse.json({ error: 'Clock out must be after clock in' }, { status: 400 })
+  }
+
+  const fallbackHours = nextClockOutAt ? calculateClockHours(nextClockInAt, nextClockOutAt) : 0
   const update = {
     approval_status: action === 'adjust' || numericHours !== fallbackHours ? 'adjusted' : 'approved',
     approved_hours: numericHours ?? fallbackHours,
     manager_note: manager_note?.trim() || null,
+    clock_in_at: nextClockInAt,
+    clock_out_at: nextClockOutAt,
     manager_approved_by: null,
     manager_approved_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

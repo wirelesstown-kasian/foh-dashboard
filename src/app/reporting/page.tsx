@@ -35,6 +35,7 @@ import {
   subWeeks, addWeeks, eachDayOfInterval, subMonths, addMonths
 } from 'date-fns'
 import * as XLSX from 'xlsx'
+import { calculateClockHours } from '@/lib/clockUtils'
 import { isClockPending } from '@/lib/clockUtils'
 
 type Period = 'daily' | 'weekly' | 'monthly'
@@ -110,6 +111,25 @@ function formatDateRangeLabel(startDate: string, endDate: string) {
   return `${format(start, 'MMM d, yyyy')} - ${format(end, 'MMM d, yyyy')}`
 }
 
+function isoToTimeInput(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+function timeInputToIso(sessionDate: string, value: string) {
+  if (!value) return null
+  const [hour = '0', minute = '0'] = value.split(':')
+  const date = new Date(`${sessionDate}T00:00:00`)
+  date.setHours(Number(hour), Number(minute), 0, 0)
+  if (Number(hour) < 3) {
+    date.setDate(date.getDate() + 1)
+  }
+  return date.toISOString()
+}
+
 function isEmployeeInDepartment(employee: Employee, department: ReportDepartment) {
   return department === 'boh'
     ? employee.role === 'kitchen_staff' || employee.role === 'manager'
@@ -134,7 +154,8 @@ export default function ReportingPage() {
   const [reportEmailStatus, setReportEmailStatus] = useState<string | null>(null)
   const [clockPeriod, setClockPeriod] = useState<Period>('daily')
   const [clockEmployeeFilter, setClockEmployeeFilter] = useState<string>('all')
-  const [clockEdits, setClockEdits] = useState<Record<string, { hours: string; note: string }>>({})
+  const [editingClockId, setEditingClockId] = useState<string | null>(null)
+  const [clockEdits, setClockEdits] = useState<Record<string, { clockIn: string; clockOut: string; note: string }>>({})
   const [savingClockId, setSavingClockId] = useState<string | null>(null)
   const [clockStatus, setClockStatus] = useState<string | null>(null)
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
@@ -616,13 +637,17 @@ export default function ReportingPage() {
     setSavingClockId(record.id)
     setClockStatus(null)
     try {
+      const nextClockInAt = timeInputToIso(record.session_date, edit?.clockIn ?? isoToTimeInput(record.clock_in_at))
+      const nextClockOutAt = (edit?.clockOut ?? '') ? timeInputToIso(record.session_date, edit.clockOut) : null
       const res = await fetch('/api/clock-events', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: record.id,
-          approved_hours: edit?.hours ?? record.approved_hours ?? '',
+          approved_hours: nextClockInAt && nextClockOutAt ? calculateClockHours(nextClockInAt, nextClockOutAt) : 0,
           manager_note: edit?.note ?? record.manager_note ?? '',
+          clock_in_at: nextClockInAt,
+          clock_out_at: nextClockOutAt,
           action: 'adjust',
         }),
       })
@@ -633,6 +658,7 @@ export default function ReportingPage() {
       const clockJson = (await clockRes.json().catch(() => ({}))) as { records?: ShiftClock[] }
       setClockRecords(clockJson.records ?? [])
       setClockStatus('Clock record updated')
+      setEditingClockId(null)
     } catch (error) {
       setClockStatus(error instanceof Error ? error.message : 'Failed to save clock update')
     } finally {
@@ -1128,9 +1154,14 @@ export default function ReportingPage() {
                 {filteredClockRecords.map(record => {
                   const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
                   const currentEdit = clockEdits[record.id] ?? {
-                    hours: record.approved_hours !== null ? String(record.approved_hours) : '',
+                    clockIn: isoToTimeInput(record.clock_in_at),
+                    clockOut: isoToTimeInput(record.clock_out_at),
                     note: record.manager_note ?? '',
                   }
+                  const isEditing = editingClockId === record.id
+                  const previewClockInAt = timeInputToIso(record.session_date, currentEdit.clockIn)
+                  const previewClockOutAt = currentEdit.clockOut ? timeInputToIso(record.session_date, currentEdit.clockOut) : null
+                  const workedHours = previewClockInAt && previewClockOutAt ? calculateClockHours(previewClockInAt, previewClockOutAt) : 0
                   return (
                     <TableRow key={record.id}>
                       <TableCell className="font-medium">{format(new Date(record.session_date + 'T12:00:00'), 'MMM d, yyyy')}</TableCell>
@@ -1151,33 +1182,88 @@ export default function ReportingPage() {
                           <div className="mt-1 text-xs text-amber-700">Review recommended</div>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
-                      <TableCell className="text-right">{record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}</TableCell>
                       <TableCell className="text-right">
-                        <Input
-                          value={currentEdit.hours}
-                          onChange={event => setClockEdits(prev => ({
-                            ...prev,
-                            [record.id]: { ...currentEdit, hours: event.target.value },
-                          }))}
-                          className="ml-auto h-8 w-24 text-right"
-                        />
+                        {isEditing ? (
+                          <Input
+                            type="time"
+                            value={currentEdit.clockIn}
+                            onChange={event => setClockEdits(prev => ({
+                              ...prev,
+                              [record.id]: { ...currentEdit, clockIn: event.target.value },
+                            }))}
+                            className="ml-auto h-8 w-28 text-right"
+                          />
+                        ) : (
+                          format(new Date(record.clock_in_at), 'p')
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {isEditing ? (
+                          <Input
+                            type="time"
+                            value={currentEdit.clockOut}
+                            onChange={event => setClockEdits(prev => ({
+                              ...prev,
+                              [record.id]: { ...currentEdit, clockOut: event.target.value },
+                            }))}
+                            className="ml-auto h-8 w-28 text-right"
+                          />
+                        ) : (
+                          record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {workedHours.toFixed(2)}
                       </TableCell>
                       <TableCell>
-                        <Input
-                          value={currentEdit.note}
-                          onChange={event => setClockEdits(prev => ({
-                            ...prev,
-                            [record.id]: { ...currentEdit, note: event.target.value },
-                          }))}
-                          className="h-8 min-w-40"
-                          placeholder="Clock note"
-                        />
+                        {isEditing ? (
+                          <Input
+                            value={currentEdit.note}
+                            onChange={event => setClockEdits(prev => ({
+                              ...prev,
+                              [record.id]: { ...currentEdit, note: event.target.value },
+                            }))}
+                            className="h-8 min-w-40"
+                            placeholder="Clock note"
+                          />
+                        ) : (
+                          <span className="text-sm text-muted-foreground">{record.manager_note ?? '—'}</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => saveClockAdjustment(record)} disabled={savingClockId === record.id}>
-                          {savingClockId === record.id ? 'Saving…' : 'Save Changes'}
-                        </Button>
+                        {isEditing ? (
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingClockId(null)}
+                              disabled={savingClockId === record.id}
+                            >
+                              Cancel
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => saveClockAdjustment(record)} disabled={savingClockId === record.id}>
+                              {savingClockId === record.id ? 'Saving…' : 'Save'}
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setClockEdits(prev => ({
+                                ...prev,
+                                [record.id]: {
+                                  clockIn: isoToTimeInput(record.clock_in_at),
+                                  clockOut: isoToTimeInput(record.clock_out_at),
+                                  note: record.manager_note ?? '',
+                                },
+                              }))
+                              setEditingClockId(record.id)
+                            }}
+                          >
+                            Edit Times
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   )
