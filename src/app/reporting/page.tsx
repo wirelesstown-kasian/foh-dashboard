@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, TaskCompletion, EodReport, ShiftClock, TipDistribution } from '@/lib/types'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
@@ -206,7 +206,7 @@ export default function ReportingPage() {
     }
   }, [])
 
-  const getRange = (): [string, string] => {
+  const [startDate, endDate] = useMemo<[string, string]>(() => {
     if (period === 'daily') {
       const d = format(refDate, 'yyyy-MM-dd')
       return [d, d]
@@ -221,174 +221,208 @@ export default function ReportingPage() {
       format(startOfMonth(refDate), 'yyyy-MM-dd'),
       format(endOfMonth(refDate), 'yyyy-MM-dd'),
     ]
-  }
-
-  const [startDate, endDate] = getRange()
-  const filteredEmployees = employees.filter(employee => isEmployeeInDepartment(employee, department))
-  const filteredEmployeeIds = new Set(filteredEmployees.map(employee => employee.id))
-  const filteredCompletions = completions.filter(
-    completion =>
-      completion.session_date >= startDate &&
-      completion.session_date <= endDate &&
-      filteredEmployeeIds.has(completion.employee_id) &&
-      isCompletedTask(completion)
+  }, [period, refDate])
+  const filteredEmployees = useMemo(
+    () => employees.filter(employee => isEmployeeInDepartment(employee, department)),
+    [employees, department]
+  )
+  const filteredEmployeeIds = useMemo(
+    () => new Set(filteredEmployees.map(employee => employee.id)),
+    [filteredEmployees]
+  )
+  const filteredCompletions = useMemo(
+    () =>
+      completions.filter(
+        completion =>
+          completion.session_date >= startDate &&
+          completion.session_date <= endDate &&
+          filteredEmployeeIds.has(completion.employee_id) &&
+          isCompletedTask(completion)
+      ),
+    [completions, startDate, endDate, filteredEmployeeIds]
   )
 
-  const perfStats = filteredEmployees.map(emp => {
-    const done = filteredCompletions.filter(c => c.employee_id === emp.id).length
-    const allTime = completions.filter(c => c.employee_id === emp.id).length
-    return { emp, done, allTime }
-  }).sort((a, b) => b.done - a.done)
+  const perfStats = useMemo(
+    () =>
+      filteredEmployees
+        .map(emp => {
+          const done = filteredCompletions.filter(c => c.employee_id === emp.id).length
+          const allTime = completions.filter(c => c.employee_id === emp.id).length
+          return { emp, done, allTime }
+        })
+        .sort((a, b) => b.done - a.done),
+    [filteredEmployees, filteredCompletions, completions]
+  )
 
-  const monthStart = format(startOfMonth(refDate), 'yyyy-MM-dd')
-  const monthEnd = format(endOfMonth(refDate), 'yyyy-MM-dd')
-  const monthCompletions = completions.filter(c => c.session_date >= monthStart && c.session_date <= monthEnd && isCompletedTask(c))
-  const monthEods = eodReports.filter(r => r.session_date >= monthStart && r.session_date <= monthEnd)
+  const monthStart = useMemo(() => format(startOfMonth(refDate), 'yyyy-MM-dd'), [refDate])
+  const monthEnd = useMemo(() => format(endOfMonth(refDate), 'yyyy-MM-dd'), [refDate])
+  const employeeMonthStats: EmployeeMonthStat[] = useMemo(() => {
+    const monthCompletions = completions.filter(c => c.session_date >= monthStart && c.session_date <= monthEnd && isCompletedTask(c))
+    const monthEods = eodReports.filter(r => r.session_date >= monthStart && r.session_date <= monthEnd)
+    const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
+    const monthHoursByEmp = new Map<string, number>()
+    const monthTipsByEmp = new Map<string, number>()
 
-  const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
-  const monthHoursByEmp = new Map<string, number>()
-  const monthTipsByEmp = new Map<string, number>()
-  for (const record of monthClockRecords) {
-    if (!filteredEmployeeIds.has(record.employee_id)) continue
-    monthHoursByEmp.set(record.employee_id, (monthHoursByEmp.get(record.employee_id) ?? 0) + getEffectiveClockHours(record))
-  }
-  for (const eod of monthEods) {
-    for (const dist of (eod.tip_distributions ?? [])) {
-      if (!filteredEmployeeIds.has(dist.employee_id)) continue
-      monthTipsByEmp.set(dist.employee_id, (monthTipsByEmp.get(dist.employee_id) ?? 0) + Number(dist.net_tip))
+    for (const record of monthClockRecords) {
+      if (!filteredEmployeeIds.has(record.employee_id)) continue
+      monthHoursByEmp.set(record.employee_id, (monthHoursByEmp.get(record.employee_id) ?? 0) + getEffectiveClockHours(record))
     }
-  }
 
-  const baseMonthlyStats = filteredEmployees.map(emp => {
-    const tasks = monthCompletions.filter(c => c.employee_id === emp.id).length
-    const hours = monthHoursByEmp.get(emp.id) ?? 0
-    const totalTips = monthTipsByEmp.get(emp.id) ?? 0
-    return {
-      emp,
-      tasks,
-      hours,
-      totalTips,
-      taskRate: hours > 0 ? tasks / hours : 0,
-      tipRate: hours > 0 ? totalTips / hours : 0,
+    for (const eod of monthEods) {
+      for (const dist of (eod.tip_distributions ?? [])) {
+        if (!filteredEmployeeIds.has(dist.employee_id)) continue
+        monthTipsByEmp.set(dist.employee_id, (monthTipsByEmp.get(dist.employee_id) ?? 0) + Number(dist.net_tip))
+      }
     }
-  }).filter(stat => stat.tasks > 0 || stat.hours > 0 || stat.totalTips > 0)
 
-  const taskRankMap = getRankMap(baseMonthlyStats, item => item.tasks, item => item.emp.id)
-  const taskRateRankMap = getRankMap(baseMonthlyStats.filter(item => item.hours > 0), item => item.taskRate, item => item.emp.id)
-  const tipRateRankMap = getRankMap(baseMonthlyStats.filter(item => item.hours > 0), item => item.tipRate, item => item.emp.id)
-  const hoursRankMap = getRankMap(baseMonthlyStats, item => item.hours, item => item.emp.id)
-  const monthlyTaskTotal = baseMonthlyStats.reduce((sum, item) => sum + item.tasks, 0)
-  const monthlyHourTotal = baseMonthlyStats.reduce((sum, item) => sum + item.hours, 0)
-  const monthlyTipTotal = baseMonthlyStats.reduce((sum, item) => sum + item.totalTips, 0)
+    const baseMonthlyStats = filteredEmployees
+      .map(emp => {
+        const tasks = monthCompletions.filter(c => c.employee_id === emp.id).length
+        const hours = monthHoursByEmp.get(emp.id) ?? 0
+        const totalTips = monthTipsByEmp.get(emp.id) ?? 0
+        return {
+          emp,
+          tasks,
+          hours,
+          totalTips,
+          taskRate: hours > 0 ? tasks / hours : 0,
+          tipRate: hours > 0 ? totalTips / hours : 0,
+        }
+      })
+      .filter(stat => stat.tasks > 0 || stat.hours > 0 || stat.totalTips > 0)
 
-  const employeeMonthStats: EmployeeMonthStat[] = baseMonthlyStats.map(item => {
-    const taskRank = taskRankMap.get(item.emp.id) ?? 1
-    const taskRateRank = taskRateRankMap.get(item.emp.id) ?? taskRateRankMap.size + 1
-    const tipRateRank = tipRateRankMap.get(item.emp.id) ?? tipRateRankMap.size + 1
-    const hoursRank = hoursRankMap.get(item.emp.id) ?? 1
-    const score = Math.round(
-      scoreFromRank(taskRank, Math.max(taskRankMap.size, 1)) * 0.3 +
-      scoreFromRank(taskRateRank, Math.max(taskRateRankMap.size, 1)) * 0.3 +
-      scoreFromRank(tipRateRank, Math.max(tipRateRankMap.size, 1)) * 0.25 +
-      scoreFromRank(hoursRank, Math.max(hoursRankMap.size, 1)) * 0.15
-    )
-    return {
-      ...item,
-      taskRank,
-      taskRateRank,
-      tipRateRank,
-      hoursRank,
-      taskSharePct: monthlyTaskTotal > 0 ? (item.tasks / monthlyTaskTotal) * 100 : 0,
-      hourSharePct: monthlyHourTotal > 0 ? (item.hours / monthlyHourTotal) * 100 : 0,
-      tipSharePct: monthlyTipTotal > 0 ? (item.totalTips / monthlyTipTotal) * 100 : 0,
-      score,
-    }
-  })
+    const taskRankMap = getRankMap(baseMonthlyStats, item => item.tasks, item => item.emp.id)
+    const taskRateRankMap = getRankMap(baseMonthlyStats.filter(item => item.hours > 0), item => item.taskRate, item => item.emp.id)
+    const tipRateRankMap = getRankMap(baseMonthlyStats.filter(item => item.hours > 0), item => item.tipRate, item => item.emp.id)
+    const hoursRankMap = getRankMap(baseMonthlyStats, item => item.hours, item => item.emp.id)
+    const monthlyTaskTotal = baseMonthlyStats.reduce((sum, item) => sum + item.tasks, 0)
+    const monthlyHourTotal = baseMonthlyStats.reduce((sum, item) => sum + item.hours, 0)
+    const monthlyTipTotal = baseMonthlyStats.reduce((sum, item) => sum + item.totalTips, 0)
 
-  const monthlyRankings = period === 'monthly' ? employeeMonthStats : null
-  const performanceLeader = perfStats[0] ?? null
-  const performanceTotalTasks = perfStats.reduce((sum, item) => sum + item.done, 0)
-  const activePerformanceCount = perfStats.filter(item => item.done > 0).length
+    return baseMonthlyStats.map(item => {
+      const taskRank = taskRankMap.get(item.emp.id) ?? 1
+      const taskRateRank = taskRateRankMap.get(item.emp.id) ?? taskRateRankMap.size + 1
+      const tipRateRank = tipRateRankMap.get(item.emp.id) ?? tipRateRankMap.size + 1
+      const hoursRank = hoursRankMap.get(item.emp.id) ?? 1
+      const score = Math.round(
+        scoreFromRank(taskRank, Math.max(taskRankMap.size, 1)) * 0.3 +
+        scoreFromRank(taskRateRank, Math.max(taskRateRankMap.size, 1)) * 0.3 +
+        scoreFromRank(tipRateRank, Math.max(tipRateRankMap.size, 1)) * 0.25 +
+        scoreFromRank(hoursRank, Math.max(hoursRankMap.size, 1)) * 0.15
+      )
 
-  const tipWeekStart = format(startOfWeek(refDate, { weekStartsOn: 1 }), 'yyyy-MM-dd')
-  const tipWeekEnd = format(endOfWeek(refDate, { weekStartsOn: 1 }), 'yyyy-MM-dd')
-  const weekDays = eachDayOfInterval({
-    start: startOfWeek(refDate, { weekStartsOn: 1 }),
-    end: endOfWeek(refDate, { weekStartsOn: 1 }),
-  })
-  const weeklyEodReports = eodReports.filter(r => r.session_date >= tipWeekStart && r.session_date <= tipWeekEnd)
-  const tipByEmployee = filteredEmployees.map(emp => {
-    const daily: TipDetail[] = weekDays.map(day => {
-      const dateStr = format(day, 'yyyy-MM-dd')
-      const report = weeklyEodReports.find(r => r.session_date === dateStr)
-      const distributions = report?.tip_distributions.filter(d => d.employee_id === emp.id) ?? []
-      const amount = distributions.length > 0 ? distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0) : null
-      const hours = getClockHoursForEmployeeDate(clockRecords, emp.id, dateStr)
       return {
-        date: dateStr,
-        amount,
-        hours,
-        rate: amount !== null && hours > 0 ? amount / hours : null,
-        houseDeduction: distributions.reduce((sum, dist) => sum + Number(dist.house_deduction), 0),
+        ...item,
+        taskRank,
+        taskRateRank,
+        tipRateRank,
+        hoursRank,
+        taskSharePct: monthlyTaskTotal > 0 ? (item.tasks / monthlyTaskTotal) * 100 : 0,
+        hourSharePct: monthlyHourTotal > 0 ? (item.hours / monthlyHourTotal) * 100 : 0,
+        tipSharePct: monthlyTipTotal > 0 ? (item.totalTips / monthlyTipTotal) * 100 : 0,
+        score,
       }
     })
-    const total = daily.reduce((s, d) => s + (d.amount ?? 0), 0)
-    const totalHours = daily.reduce((s, d) => s + d.hours, 0)
-    const totalHouse = daily.reduce((s, d) => s + d.houseDeduction, 0)
-    const totalRate = totalHours > 0 ? total / totalHours : null
-    return { emp, daily, total, totalHours, totalHouse, totalRate }
-  }).filter(x => x.total > 0)
+  }, [clockRecords, completions, eodReports, filteredEmployeeIds, filteredEmployees, monthEnd, monthStart])
 
-  const [tipRangeStart, tipRangeEnd] = tipReportPeriod === 'weekly'
-    ? [tipWeekStart, tipWeekEnd]
-    : tipReportPeriod === 'monthly'
-      ? [monthStart, monthEnd]
-      : [format(refDate, 'yyyy-MM-dd'), format(refDate, 'yyyy-MM-dd')]
-  const tipRangeReports = eodReports.filter(r => r.session_date >= tipRangeStart && r.session_date <= tipRangeEnd)
-  const tipSummaryRows: TipSummaryRow[] = filteredEmployees.map(emp => {
-    let hours = 0
-    let tips = 0
-    let baseWages = 0
-    let guaranteeTopUp = 0
+  const monthlyRankings = useMemo(() => (period === 'monthly' ? employeeMonthStats : null), [period, employeeMonthStats])
+  const performanceLeader = perfStats[0] ?? null
+  const performanceTotalTasks = useMemo(() => perfStats.reduce((sum, item) => sum + item.done, 0), [perfStats])
+  const activePerformanceCount = useMemo(() => perfStats.filter(item => item.done > 0).length, [perfStats])
 
-    for (const report of tipRangeReports) {
-      const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
-      const dailyTips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
-      const dailyHours = getClockHoursForEmployeeDate(clockRecords, emp.id, report.session_date)
-      const dailyBaseWages = dailyHours * (emp.hourly_wage ?? 0)
-      const dailyGuaranteedTarget = dailyHours * (emp.guaranteed_hourly ?? 0)
+  const tipWeekStart = useMemo(() => format(startOfWeek(refDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'), [refDate])
+  const tipWeekEnd = useMemo(() => format(endOfWeek(refDate, { weekStartsOn: 1 }), 'yyyy-MM-dd'), [refDate])
+  const tipByEmployee = useMemo(() => {
+    const weekDays = eachDayOfInterval({
+      start: startOfWeek(refDate, { weekStartsOn: 1 }),
+      end: endOfWeek(refDate, { weekStartsOn: 1 }),
+    })
+    const weeklyEodReports = eodReports.filter(r => r.session_date >= tipWeekStart && r.session_date <= tipWeekEnd)
 
-      hours += dailyHours
-      tips += dailyTips
-      baseWages += dailyBaseWages
-      guaranteeTopUp += Math.max(0, dailyGuaranteedTarget - (dailyBaseWages + dailyTips))
-    }
+    return filteredEmployees
+      .map(emp => {
+        const daily: TipDetail[] = weekDays.map(day => {
+          const dateStr = format(day, 'yyyy-MM-dd')
+          const report = weeklyEodReports.find(r => r.session_date === dateStr)
+          const distributions = report?.tip_distributions.filter(d => d.employee_id === emp.id) ?? []
+          const amount = distributions.length > 0 ? distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0) : null
+          const hours = getClockHoursForEmployeeDate(clockRecords, emp.id, dateStr)
+          return {
+            date: dateStr,
+            amount,
+            hours,
+            rate: amount !== null && hours > 0 ? amount / hours : null,
+            houseDeduction: distributions.reduce((sum, dist) => sum + Number(dist.house_deduction), 0),
+          }
+        })
+        const total = daily.reduce((s, d) => s + (d.amount ?? 0), 0)
+        const totalHours = daily.reduce((s, d) => s + d.hours, 0)
+        const totalHouse = daily.reduce((s, d) => s + d.houseDeduction, 0)
+        const totalRate = totalHours > 0 ? total / totalHours : null
+        return { emp, daily, total, totalHours, totalHouse, totalRate }
+      })
+      .filter(x => x.total > 0)
+  }, [clockRecords, eodReports, filteredEmployees, refDate, tipWeekEnd, tipWeekStart])
 
-    const totalEarnings = baseWages + tips + guaranteeTopUp
+  const [tipRangeStart, tipRangeEnd] = useMemo(
+    () =>
+      tipReportPeriod === 'weekly'
+        ? [tipWeekStart, tipWeekEnd]
+        : tipReportPeriod === 'monthly'
+          ? [monthStart, monthEnd]
+          : [format(refDate, 'yyyy-MM-dd'), format(refDate, 'yyyy-MM-dd')],
+    [tipReportPeriod, tipWeekStart, tipWeekEnd, monthStart, monthEnd, refDate]
+  )
+  const tipSummaryRows: TipSummaryRow[] = useMemo(() => {
+    const tipRangeReports = eodReports.filter(r => r.session_date >= tipRangeStart && r.session_date <= tipRangeEnd)
+    return filteredEmployees
+      .map(emp => {
+        let hours = 0
+        let tips = 0
+        let baseWages = 0
+        let guaranteeTopUp = 0
 
-    return {
-      emp,
-      hours,
-      tips,
-      baseWages,
-      guaranteeTopUp,
-      totalEarnings,
-      tipRate: hours > 0 ? tips / hours : null,
-      effectiveRate: hours > 0 ? totalEarnings / hours : null,
-      ...getClockWarningsForEmployeeRange(clockRecords, emp.id, tipRangeStart, tipRangeEnd),
-    }
-  }).filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
-    .sort((a, b) => b.totalEarnings - a.totalEarnings)
-  const displayedTipSummaryRows = tipEmployeeFilter === 'all'
-    ? tipSummaryRows
-    : tipSummaryRows.filter(row => row.emp.id === tipEmployeeFilter)
+        for (const report of tipRangeReports) {
+          const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
+          const dailyTips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
+          const dailyHours = getClockHoursForEmployeeDate(clockRecords, emp.id, report.session_date)
+          const dailyBaseWages = dailyHours * (emp.hourly_wage ?? 0)
+          const dailyGuaranteedTarget = dailyHours * (emp.guaranteed_hourly ?? 0)
 
-  const selectedEmployeeStats = employeeMonthStats.find(item => item.emp.id === selectedEmployeeId) ?? null
-  const selectedWeekTips = tipByEmployee.find(item => item.emp.id === selectedEmployeeId) ?? null
-  const selectedPeriodTasks = perfStats.find(item => item.emp.id === selectedEmployeeId) ?? null
-  const selectedTipSummary = tipSummaryRows.find(item => item.emp.id === selectedEmployeeId) ?? null
+          hours += dailyHours
+          tips += dailyTips
+          baseWages += dailyBaseWages
+          guaranteeTopUp += Math.max(0, dailyGuaranteedTarget - (dailyBaseWages + dailyTips))
+        }
+
+        const totalEarnings = baseWages + tips + guaranteeTopUp
+
+        return {
+          emp,
+          hours,
+          tips,
+          baseWages,
+          guaranteeTopUp,
+          totalEarnings,
+          tipRate: hours > 0 ? tips / hours : null,
+          effectiveRate: hours > 0 ? totalEarnings / hours : null,
+          ...getClockWarningsForEmployeeRange(clockRecords, emp.id, tipRangeStart, tipRangeEnd),
+        }
+      })
+      .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
+      .sort((a, b) => b.totalEarnings - a.totalEarnings)
+  }, [clockRecords, eodReports, filteredEmployees, tipRangeEnd, tipRangeStart])
+  const displayedTipSummaryRows = useMemo(
+    () => (tipEmployeeFilter === 'all' ? tipSummaryRows : tipSummaryRows.filter(row => row.emp.id === tipEmployeeFilter)),
+    [tipEmployeeFilter, tipSummaryRows]
+  )
+
+  const selectedEmployeeStats = useMemo(() => employeeMonthStats.find(item => item.emp.id === selectedEmployeeId) ?? null, [employeeMonthStats, selectedEmployeeId])
+  const selectedWeekTips = useMemo(() => tipByEmployee.find(item => item.emp.id === selectedEmployeeId) ?? null, [tipByEmployee, selectedEmployeeId])
+  const selectedPeriodTasks = useMemo(() => perfStats.find(item => item.emp.id === selectedEmployeeId) ?? null, [perfStats, selectedEmployeeId])
+  const selectedTipSummary = useMemo(() => tipSummaryRows.find(item => item.emp.id === selectedEmployeeId) ?? null, [tipSummaryRows, selectedEmployeeId])
   const showEarningsReport = reportTab === 'wages' && !!selectedTipSummary
-  const getHistoryRange = (): [string, string] => {
+  const [historyStart, historyEnd] = useMemo<[string, string]>(() => {
     if (eodHistoryPeriod === 'daily') {
       const d = format(refDate, 'yyyy-MM-dd')
       return [d, d]
@@ -397,10 +431,26 @@ export default function ReportingPage() {
       return [tipWeekStart, tipWeekEnd]
     }
     return [monthStart, monthEnd]
-  }
-  const [historyStart, historyEnd] = getHistoryRange()
-  const filteredEodReports = eodReports.filter(report => report.session_date >= historyStart && report.session_date <= historyEnd)
-  const getClockRange = (): [string, string] => {
+  }, [eodHistoryPeriod, refDate, tipWeekStart, tipWeekEnd, monthStart, monthEnd])
+  const filteredEodReports = useMemo(
+    () => eodReports.filter(report => report.session_date >= historyStart && report.session_date <= historyEnd),
+    [eodReports, historyEnd, historyStart]
+  )
+  const eodTotals = useMemo(
+    () =>
+      filteredEodReports.reduce(
+        (totals, report) => ({
+          cash: totals.cash + report.cash_total,
+          batch: totals.batch + report.batch_total,
+          revenue: totals.revenue + report.revenue_total,
+          tip: totals.tip + report.tip_total,
+          deposit: totals.deposit + report.cash_deposit,
+        }),
+        { cash: 0, batch: 0, revenue: 0, tip: 0, deposit: 0 }
+      ),
+    [filteredEodReports]
+  )
+  const [clockStart, clockEnd] = useMemo<[string, string]>(() => {
     if (clockPeriod === 'daily') {
       const d = format(refDate, 'yyyy-MM-dd')
       return [d, d]
@@ -409,42 +459,51 @@ export default function ReportingPage() {
       return [tipWeekStart, tipWeekEnd]
     }
     return [monthStart, monthEnd]
-  }
-  const [clockStart, clockEnd] = getClockRange()
-  const filteredClockRecords = clockRecords
-    .filter(record => record.session_date >= clockStart && record.session_date <= clockEnd)
-    .filter(record => {
-      const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
-      if (!employee || !isEmployeeInDepartment(employee, department)) return false
-      return clockEmployeeFilter === 'all' || employee.id === clockEmployeeFilter
-    })
-    .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at))
-  const rankingCards: RankingCard[] = selectedEmployeeStats ? [
-    {
-      label: 'Task Rank',
-      rank: selectedEmployeeStats.taskRank,
-      value: `${selectedEmployeeStats.tasks} tasks`,
-      accentClass: 'border-amber-300 bg-amber-50 text-amber-900',
-    },
-    {
-      label: 'Task Pace',
-      rank: selectedEmployeeStats.taskRateRank,
-      value: `${selectedEmployeeStats.taskRate.toFixed(2)} tasks/hr`,
-      accentClass: 'border-violet-300 bg-violet-50 text-violet-900',
-    },
-    {
-      label: 'Tip Pace',
-      rank: selectedEmployeeStats.tipRateRank,
-      value: `${formatCurrency(selectedEmployeeStats.tipRate)}/hr`,
-      accentClass: 'border-green-300 bg-green-50 text-green-900',
-    },
-    {
-      label: 'Hours Rank',
-      rank: selectedEmployeeStats.hoursRank,
-      value: `${selectedEmployeeStats.hours.toFixed(1)}h`,
-      accentClass: 'border-sky-300 bg-sky-50 text-sky-900',
-    },
-  ] : []
+  }, [clockPeriod, refDate, tipWeekStart, tipWeekEnd, monthStart, monthEnd])
+  const filteredClockRecords = useMemo(
+    () =>
+      clockRecords
+        .filter(record => record.session_date >= clockStart && record.session_date <= clockEnd)
+        .filter(record => {
+          const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
+          if (!employee || !isEmployeeInDepartment(employee, department)) return false
+          return clockEmployeeFilter === 'all' || employee.id === clockEmployeeFilter
+        })
+        .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)),
+    [clockEmployeeFilter, clockEnd, clockRecords, clockStart, department, employees]
+  )
+  const rankingCards: RankingCard[] = useMemo(
+    () =>
+      selectedEmployeeStats
+        ? [
+            {
+              label: 'Task Rank',
+              rank: selectedEmployeeStats.taskRank,
+              value: `${selectedEmployeeStats.tasks} tasks`,
+              accentClass: 'border-amber-300 bg-amber-50 text-amber-900',
+            },
+            {
+              label: 'Task Pace',
+              rank: selectedEmployeeStats.taskRateRank,
+              value: `${selectedEmployeeStats.taskRate.toFixed(2)} tasks/hr`,
+              accentClass: 'border-violet-300 bg-violet-50 text-violet-900',
+            },
+            {
+              label: 'Tip Pace',
+              rank: selectedEmployeeStats.tipRateRank,
+              value: `${formatCurrency(selectedEmployeeStats.tipRate)}/hr`,
+              accentClass: 'border-green-300 bg-green-50 text-green-900',
+            },
+            {
+              label: 'Hours Rank',
+              rank: selectedEmployeeStats.hoursRank,
+              value: `${selectedEmployeeStats.hours.toFixed(1)}h`,
+              accentClass: 'border-sky-300 bg-sky-50 text-sky-900',
+            },
+          ]
+        : [],
+    [selectedEmployeeStats]
+  )
 
   const exportTips = () => {
     const rows = displayedTipSummaryRows.map(row => ({
@@ -1169,6 +1228,19 @@ export default function ReportingPage() {
                   </TableRow>
                 )}
               </TableBody>
+              {filteredEodReports.length > 0 && (
+                <tfoot>
+                  <TableRow>
+                    <TableCell className="font-semibold">Period Total</TableCell>
+                    <TableCell className="text-right font-semibold">{formatCurrency(eodTotals.cash)}</TableCell>
+                    <TableCell className="text-right font-semibold">{formatCurrency(eodTotals.batch)}</TableCell>
+                    <TableCell className="text-right font-bold">{formatCurrency(eodTotals.revenue)}</TableCell>
+                    <TableCell className="text-right font-semibold text-green-700">{formatCurrency(eodTotals.tip)}</TableCell>
+                    <TableCell className="text-right font-semibold">{formatCurrency(eodTotals.deposit)}</TableCell>
+                    <TableCell />
+                  </TableRow>
+                </tfoot>
+              )}
             </Table>
             <p className="mt-4 text-xs text-muted-foreground">
               EOD History stays store-wide. FOH / BOH filtering applies to task and tip analytics above.
