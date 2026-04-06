@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import {
   formatTime,
   calcHours,
@@ -6,6 +6,7 @@ import {
   formatDisplayDate,
   formatCalendarDay,
   renderEmailShell,
+  sendEmail,
 } from '@/lib/emailUtils'
 
 export async function sendWeeklyScheduleEmails({
@@ -20,13 +21,9 @@ export async function sendWeeklyScheduleEmails({
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) throw new Error('RESEND_API_KEY not configured')
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder'
-  )
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
-  const { data: schedules } = await supabase
+  const { data: schedules } = await supabaseAdmin
     .from('schedules')
     .select('*, employee:employees(id, name, email, role)')
     .gte('date', weekStart)
@@ -172,21 +169,7 @@ export async function sendWeeklyScheduleEmails({
 
     const weekStartShort = weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     emailPromises.push(
-      fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${resendKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: 'FOH Dashboard <noreply@mail.newvillagepub.com>',
-          to: [employee.email],
-          subject: `Your Schedule — Week of ${weekStartShort}`,
-          html,
-        }),
-      }).then(async res => {
-        if (!res.ok) throw new Error(await res.text())
-      })
+      sendEmail(resendKey, employee.email, `Your Schedule — Week of ${weekStartShort}`, html)
     )
   }
 

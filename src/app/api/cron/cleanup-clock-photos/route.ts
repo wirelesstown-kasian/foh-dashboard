@@ -4,8 +4,9 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { CLOCK_PHOTO_BUCKET, getSessionCutoffIso } from '@/lib/clockUtils'
 
 export async function GET(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET
   const authHeader = req.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

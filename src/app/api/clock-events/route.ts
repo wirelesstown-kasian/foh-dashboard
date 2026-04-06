@@ -39,6 +39,24 @@ async function ensureClockPhotoBucket() {
   })
 }
 
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+}
+
+function getPhotoExtension(dataUrl: string): string {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)
+  const mime = match?.[1] ?? 'image/jpeg'
+  return MIME_TO_EXT[mime] ?? 'jpg'
+}
+
+function isValidSessionDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
 async function uploadPhoto(dataUrl: string, path: string) {
   await ensureClockPhotoBucket()
   const binary = await dataUrlToArrayBuffer(dataUrl)
@@ -124,8 +142,6 @@ async function upsertClockTaskCompletion(taskId: string | null | undefined, empl
 }
 
 export async function GET(req: NextRequest) {
-  await processOverdueClockRecords()
-
   const includePhotos = req.nextUrl.searchParams.get('include_photos') === '1'
   const sessionDate = req.nextUrl.searchParams.get('session_date')
   const startDate = req.nextUrl.searchParams.get('start_date')
@@ -172,6 +188,9 @@ export async function POST(req: NextRequest) {
   if (!action || !session_date) {
     return NextResponse.json({ error: 'Missing clock payload' }, { status: 400 })
   }
+  if (!isValidSessionDate(session_date)) {
+    return NextResponse.json({ error: 'Invalid session_date format' }, { status: 400 })
+  }
   if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
   }
@@ -193,7 +212,8 @@ export async function POST(req: NextRequest) {
   }
 
   const nowIso = new Date().toISOString()
-  const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.jpg`
+  const ext = photo_data_url ? getPhotoExtension(photo_data_url) : 'jpg'
+  const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.${ext}`
   const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
 
   if (!allowPhotoSkip && !photo_data_url) {

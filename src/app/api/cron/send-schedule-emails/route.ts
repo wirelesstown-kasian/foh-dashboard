@@ -1,21 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { sendWeeklyScheduleEmails } from '@/lib/scheduleEmail'
 
 export async function GET(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET
   const authHeader = req.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
   const today = new Date().toISOString().slice(0, 10)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
 
-  const { data: pendingPublications, error } = await supabase
+  const { data: pendingPublications, error } = await supabaseAdmin
     .from('schedule_publications')
     .select('week_start, week_end')
     .lte('scheduled_send_date', today)
@@ -40,7 +37,7 @@ export async function GET(req: NextRequest) {
     })
 
     if (result.success) {
-      await supabase
+      await supabaseAdmin
         .from('schedule_publications')
         .update({ email_sent_at: new Date().toISOString() })
         .eq('week_start', publication.week_start)

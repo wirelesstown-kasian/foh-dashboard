@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { createClient } from '@supabase/supabase-js'
 import { renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 type WageReportPeriod = 'daily' | 'weekly' | 'monthly'
 type WageReportView = 'earnings' | 'tips'
@@ -46,11 +46,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder'
-  )
-
   const { employee_id, ref_date, period, view } = await req.json() as {
     employee_id?: string
     ref_date?: string
@@ -69,7 +64,7 @@ export async function POST(req: NextRequest) {
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
   const { start, end, label } = getRange(ref_date, period)
 
-  const { data: employee, error: employeeError } = await supabase
+  const { data: employee, error: employeeError } = await supabaseAdmin
     .from('employees')
     .select('*')
     .eq('id', employee_id)
@@ -79,7 +74,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Employee email not available' }, { status: 400 })
   }
 
-  const { data: reports, error: reportsError } = await supabase
+  const { data: reports, error: reportsError } = await supabaseAdmin
     .from('eod_reports')
     .select('id, session_date, tip_distributions(*)')
     .gte('session_date', start)
@@ -90,7 +85,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: reportsError.message }, { status: 500 })
   }
 
-  const { data: clockRecords, error: clockError } = await supabase
+  const { data: clockRecords, error: clockError } = await supabaseAdmin
     .from('shift_clocks')
     .select('session_date, approved_hours, auto_clock_out, clock_out_at, approval_status')
     .eq('employee_id', employee_id)

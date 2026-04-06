@@ -67,15 +67,27 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { error } = await supabaseAdmin.from('task_completions').insert({
-    task_id,
-    employee_id: employeeId,
-    session_date,
-    status: status ?? 'complete',
-  })
+  const { data: existing } = await supabaseAdmin
+    .from('task_completions')
+    .select('id')
+    .eq('task_id', task_id)
+    .eq('session_date', session_date)
+    .maybeSingle()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (existing?.id) {
+    const { error } = await supabaseAdmin
+      .from('task_completions')
+      .update({ employee_id: employeeId, status: status ?? 'complete' })
+      .eq('id', existing.id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  } else {
+    const { error } = await supabaseAdmin.from('task_completions').insert({
+      task_id,
+      employee_id: employeeId,
+      session_date,
+      status: status ?? 'complete',
+    })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
   return NextResponse.json({ success: true })

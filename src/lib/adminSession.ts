@@ -7,9 +7,9 @@ export function createAdminSessionValue() {
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// Accepts both legacy timestamp tokens (digits only) and new hex tokens
-// Cookie maxAge (8h) enforces expiry at the browser/server level
+// Accepts both legacy timestamp tokens (13-digit Date.now()) and new 64-char hex tokens.
+// Cookie maxAge (8h) enforces expiry at the browser/server level.
 export function isValidAdminSession(value: string | undefined | null) {
   if (!value) return false
-  return /^[0-9a-f]{64}$/.test(value) || /^\d+$/.test(value)
+  return /^[0-9a-f]{64}$/.test(value) || /^\d{13}$/.test(value)
 }

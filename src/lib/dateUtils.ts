@@ -11,7 +11,7 @@ import {
 
 // Week starts Monday
 export const WEEK_START = { weekStartsOn: 1 as const }
-export const BUSINESS_DAY_CUTOFF_HOUR = 4
+export const BUSINESS_DAY_CUTOFF_HOUR = 3
 
 export function getBusinessDate(referenceDate: Date = new Date()): Date {
   const businessDate = new Date(referenceDate)

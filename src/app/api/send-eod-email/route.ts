@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { createClient } from '@supabase/supabase-js'
 import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 const ADMIN_EMAIL = 'admin@newvillagepub.com'
 
@@ -25,7 +25,10 @@ function formatShiftTime(value: string | null) {
 function getWeekRange(sessionDate: string) {
   const endDate = new Date(sessionDate + 'T12:00:00')
   const startDate = new Date(endDate)
-  startDate.setDate(endDate.getDate() - endDate.getDay())
+  // Week starts Monday (getDay: 0=Sun, 1=Mon ... 6=Sat)
+  const day = startDate.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  startDate.setDate(startDate.getDate() + diff)
   return {
     weekStart: startDate.toISOString().split('T')[0],
     weekEnd: sessionDate,
@@ -54,10 +57,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder'
-  )
   const { eod_report_id } = await req.json()
   if (!eod_report_id) return NextResponse.json({ error: 'Missing eod_report_id' }, { status: 400 })
 
@@ -66,7 +65,7 @@ export async function POST(req: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
-  const { data: report, error } = await supabase
+  const { data: report, error } = await supabaseAdmin
     .from('eod_reports')
     .select('*, closed_by:employees(*), tip_distributions(*, employee:employees(*))')
     .eq('id', eod_report_id)
@@ -75,7 +74,7 @@ export async function POST(req: NextRequest) {
   if (error || !report) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
 
   const rawTipDists = (report.tip_distributions ?? []) as TipDist[]
-  const { data: sessionSchedules } = await supabase
+  const { data: sessionSchedules } = await supabaseAdmin
     .from('schedules')
     .select('employee_id, start_time, end_time')
     .eq('date', report.session_date)
@@ -101,7 +100,7 @@ export async function POST(req: NextRequest) {
   })
   const emailPromises: Promise<void>[] = []
 
-  const { data: shiftClocks } = await supabase
+  const { data: shiftClocks } = await supabaseAdmin
     .from('shift_clocks')
     .select('employee:employees(name), auto_clock_out, approval_status')
     .eq('session_date', report.session_date)
@@ -129,18 +128,18 @@ export async function POST(req: NextRequest) {
   if (employeeIds.length > 0) {
     // Batch all date-range queries in parallel
     const [monthlyTaskRes, monthlyReportsRes, weeklyReportsRes] = await Promise.all([
-      supabase
+      supabaseAdmin
         .from('task_completions')
         .select('employee_id, status')
         .gte('session_date', monthStart)
         .lte('session_date', monthEnd)
         .in('employee_id', employeeIds),
-      supabase
+      supabaseAdmin
         .from('eod_reports')
         .select('id')
         .gte('session_date', monthStart)
         .lte('session_date', monthEnd),
-      supabase
+      supabaseAdmin
         .from('eod_reports')
         .select('id')
         .gte('session_date', weekStart)
@@ -158,14 +157,14 @@ export async function POST(req: NextRequest) {
     // Batch tip distribution queries in parallel
     const [monthlyTipRes, weeklyTipRes] = await Promise.all([
       monthlyReportIds.length > 0
-        ? supabase
+        ? supabaseAdmin
             .from('tip_distributions')
             .select('employee_id, hours_worked, net_tip')
             .in('eod_report_id', monthlyReportIds)
             .in('employee_id', employeeIds)
         : Promise.resolve({ data: [] }),
       weeklyReportIds.length > 0
-        ? supabase
+        ? supabaseAdmin
             .from('tip_distributions')
             .select('employee_id, hours_worked, net_tip')
             .in('eod_report_id', weeklyReportIds)
@@ -318,7 +317,7 @@ export async function POST(req: NextRequest) {
     const summaryWeekStart = monday.toISOString().split('T')[0]
     const summaryWeekEnd = report.session_date
 
-    const { data: weekReports } = await supabase
+    const { data: weekReports } = await supabaseAdmin
       .from('eod_reports')
       .select('*, tip_distributions(*)')
       .gte('session_date', summaryWeekStart)
@@ -327,7 +326,7 @@ export async function POST(req: NextRequest) {
 
     if (weekReports && weekReports.length > 0) {
       const allEodIds = weekReports.map((r: { id: string }) => r.id)
-      const { data: allDists } = await supabase
+      const { data: allDists } = await supabaseAdmin
         .from('tip_distributions')
         .select('*, employee:employees(id, name)')
         .in('eod_report_id', allEodIds)
