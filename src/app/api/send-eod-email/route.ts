@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
+import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 
 const ADMIN_EMAIL = 'admin@newvillagepub.com'
 
@@ -47,6 +49,11 @@ function getRank<T>(items: T[], getValue: (item: T) => number, idKey: keyof T, t
 }
 
 export async function POST(req: NextRequest) {
+  const cookieStore = await cookies()
+  if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://placeholder.supabase.co',
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? 'placeholder'
