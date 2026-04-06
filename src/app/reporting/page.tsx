@@ -496,6 +496,22 @@ export default function ReportingPage() {
     else if (period === 'weekly') setRefDate(d => addWeeks(d, 1))
     else setRefDate(d => addMonths(d, 1))
   }
+  const goToTodayForPerformance = () => {
+    setPeriod('daily')
+    setRefDate(new Date())
+  }
+  const goToTodayForWages = () => {
+    setTipReportPeriod('daily')
+    setRefDate(new Date())
+  }
+  const goToTodayForEod = () => {
+    setEodHistoryPeriod('daily')
+    setRefDate(new Date())
+  }
+  const goToTodayForClock = () => {
+    setClockPeriod('daily')
+    setRefDate(new Date())
+  }
 
   const exportEmployeePdf = () => {
     if (!employeeReportRef.current || (!selectedEmployeeStats && !selectedTipSummary)) return
@@ -724,7 +740,7 @@ export default function ReportingPage() {
         <TabsContent value="performance">
           <div className="bg-white rounded-xl border p-5">
             <div className="flex items-center gap-3 mb-4">
-              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
+              <Button variant="outline" size="sm" onClick={goToTodayForPerformance}>Today</Button>
               <Select value={period} onValueChange={(v: string | null) => v && setPeriod(v as Period)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -925,6 +941,7 @@ export default function ReportingPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <Button variant="outline" size="sm" onClick={goToTodayForWages}>Today</Button>
               <Select value={tipReportPeriod} onValueChange={(v: string | null) => v && setTipReportPeriod(v as TipReportPeriod)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -933,7 +950,6 @@ export default function ReportingPage() {
                   <SelectItem value="monthly">Monthly</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
               <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'daily' ? new Date(d.getTime() - 86400000) : tipReportPeriod === 'weekly' ? subWeeks(d, 1) : subMonths(d, 1))}>←</Button>
               <span className="font-medium text-sm min-w-56 text-center">
                 {tipReportPeriod === 'daily'
@@ -1084,7 +1100,7 @@ export default function ReportingPage() {
         <TabsContent value="eod">
           <div className="bg-white rounded-xl border p-5">
             <div className="mb-4 flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
+              <Button variant="outline" size="sm" onClick={goToTodayForEod}>Today</Button>
               <Select value={eodHistoryPeriod} onValueChange={(v: string | null) => v && setEodHistoryPeriod(v as Period)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -1172,7 +1188,7 @@ export default function ReportingPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
+              <Button variant="outline" size="sm" onClick={goToTodayForClock}>Today</Button>
               <Select value={clockPeriod} onValueChange={(v: string | null) => v && setClockPeriod(v as Period)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
