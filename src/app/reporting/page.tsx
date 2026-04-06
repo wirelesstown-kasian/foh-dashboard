@@ -724,6 +724,7 @@ export default function ReportingPage() {
         <TabsContent value="performance">
           <div className="bg-white rounded-xl border p-5">
             <div className="flex items-center gap-3 mb-4">
+              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
               <Select value={period} onValueChange={(v: string | null) => v && setPeriod(v as Period)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -915,14 +916,6 @@ export default function ReportingPage() {
                   <SelectItem value="tips">Tip Only</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={tipReportPeriod} onValueChange={(v: string | null) => v && setTipReportPeriod(v as TipReportPeriod)}>
-                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                </SelectContent>
-              </Select>
               <Select value={tipEmployeeFilter} onValueChange={(v: string | null) => v && setTipEmployeeFilter(v)}>
                 <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -932,6 +925,15 @@ export default function ReportingPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <Select value={tipReportPeriod} onValueChange={(v: string | null) => v && setTipReportPeriod(v as TipReportPeriod)}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
               <Button variant="outline" size="sm" onClick={() => setRefDate(d => tipReportPeriod === 'daily' ? new Date(d.getTime() - 86400000) : tipReportPeriod === 'weekly' ? subWeeks(d, 1) : subMonths(d, 1))}>←</Button>
               <span className="font-medium text-sm min-w-56 text-center">
                 {tipReportPeriod === 'daily'
@@ -1082,6 +1084,7 @@ export default function ReportingPage() {
         <TabsContent value="eod">
           <div className="bg-white rounded-xl border p-5">
             <div className="mb-4 flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
               <Select value={eodHistoryPeriod} onValueChange={(v: string | null) => v && setEodHistoryPeriod(v as Period)}>
                 <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -1160,14 +1163,6 @@ export default function ReportingPage() {
         <TabsContent value="clock">
           <div className="bg-white rounded-xl border p-5">
             <div className="mb-4 flex items-center gap-3">
-              <Select value={clockPeriod} onValueChange={(v: string | null) => v && setClockPeriod(v as Period)}>
-                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                </SelectContent>
-              </Select>
               <Select value={clockEmployeeFilter} onValueChange={(v: string | null) => v && setClockEmployeeFilter(v)}>
                 <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -1175,6 +1170,15 @@ export default function ReportingPage() {
                   {filteredEmployees.map(employee => (
                     <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={() => setRefDate(new Date())}>Today</Button>
+              <Select value={clockPeriod} onValueChange={(v: string | null) => v && setClockPeriod(v as Period)}>
+                <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
                 </SelectContent>
               </Select>
               <Button
