@@ -339,14 +339,19 @@ export function EmployeeTable() {
             <div>
               <Label>{editTarget ? 'New PIN (4 digits, leave blank to keep current)' : 'PIN * (4 digits)'}</Label>
               <Input
-                type="password"
+                type="text"
                 inputMode="numeric"
                 maxLength={4}
                 value={form.pin}
                 onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-                placeholder="••••"
+                placeholder="1234"
                 className="tracking-widest text-center font-mono"
               />
+              {editTarget && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Current PIN is stored securely and can&apos;t be viewed. Enter a new 4-digit PIN here to replace it.
+                </p>
+              )}
             </div>
             {saveError && (
               <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">

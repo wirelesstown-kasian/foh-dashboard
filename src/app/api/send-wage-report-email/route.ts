@@ -83,14 +83,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: reportsError.message }, { status: 500 })
   }
 
-  const distributions = (reports ?? []).flatMap(report =>
-    (report.tip_distributions ?? [])
-      .filter((dist: { employee_id: string }) => dist.employee_id === employee_id)
-      .map((dist: { hours_worked: number; net_tip: number }) => ({
-        hours: Number(dist.hours_worked),
-        tips: Number(dist.net_tip),
-      }))
+  const { data: clockRecords, error: clockError } = await supabase
+    .from('shift_clocks')
+    .select('session_date, approved_hours, auto_clock_out, clock_out_at, approval_status')
+    .eq('employee_id', employee_id)
+    .gte('session_date', start)
+    .lte('session_date', end)
+
+  if (clockError) {
+    return NextResponse.json({ error: clockError.message }, { status: 500 })
+  }
+
+  const approvedClockHoursByDate = new Map(
+    ((clockRecords ?? []) as Array<{ session_date: string; approved_hours: number | null }>)
+      .map(record => [record.session_date, Number(record.approved_hours ?? 0)])
   )
+
+  const distributions = (reports ?? []).flatMap(report => {
+    const dailyTips = (report.tip_distributions ?? [])
+      .filter((dist: { employee_id: string }) => dist.employee_id === employee_id)
+      .reduce((sum: number, dist: { net_tip: number }) => sum + Number(dist.net_tip), 0)
+    const dailyHours = approvedClockHoursByDate.get(report.session_date) ?? 0
+    return dailyTips > 0 || dailyHours > 0
+      ? [{ hours: dailyHours, tips: dailyTips }]
+      : []
+  })
 
   const hours = distributions.reduce((sum, dist) => sum + dist.hours, 0)
   const tips = distributions.reduce((sum, dist) => sum + dist.tips, 0)
@@ -103,10 +120,17 @@ export async function POST(req: NextRequest) {
   const totalEarnings = baseWages + tips + guaranteedTopUp
   const tipsPerHour = hours > 0 ? tips / hours : null
   const effectiveRate = hours > 0 ? totalEarnings / hours : null
+  const hasClockWarning = ((clockRecords ?? []) as Array<{ auto_clock_out: boolean; clock_out_at: string | null; approval_status: string }>)
+    .some(record => record.auto_clock_out || !record.clock_out_at || record.approval_status === 'pending_review')
 
   const html = renderEmailShell(logoUrl, `
     <h2 style="color:#1a1a1a">${view === 'earnings' ? 'Earnings Report' : 'Tip Report'} — ${label}</h2>
     <p>Hi ${employee.name},</p>
+    ${hasClockWarning ? `
+      <div style="margin:0 0 16px;padding:12px 14px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:12px">
+        Clock warning: one or more shifts in this report still need review. Hours use approved clock records only.
+      </div>
+    ` : ''}
     <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
       <tr><td><strong>Period</strong></td><td>${label}</td></tr>
       <tr><td><strong>Hours Worked</strong></td><td>${hours.toFixed(2)} hrs</td></tr>

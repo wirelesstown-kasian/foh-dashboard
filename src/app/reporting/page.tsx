@@ -35,8 +35,7 @@ import {
   subWeeks, addWeeks, eachDayOfInterval, subMonths, addMonths
 } from 'date-fns'
 import * as XLSX from 'xlsx'
-import { calculateClockHours } from '@/lib/clockUtils'
-import { isClockPending } from '@/lib/clockUtils'
+import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 
 type Period = 'daily' | 'weekly' | 'monthly'
 type ReportDepartment = 'foh' | 'boh'
@@ -84,6 +83,8 @@ type TipSummaryRow = {
   totalEarnings: number
   tipRate: number | null
   effectiveRate: number | null
+  hasAutoClockOut: boolean
+  hasOpenClock: boolean
 }
 
 function formatCurrency(value: number) {
@@ -128,6 +129,25 @@ function timeInputToIso(sessionDate: string, value: string) {
     date.setDate(date.getDate() + 1)
   }
   return date.toISOString()
+}
+
+function getClockHoursForEmployeeDate(clockRecords: ShiftClock[], employeeId: string, date: string) {
+  return clockRecords
+    .filter(record => record.employee_id === employeeId && record.session_date === date)
+    .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+}
+
+function getClockWarningsForEmployeeRange(clockRecords: ShiftClock[], employeeId: string, startDate: string, endDate: string) {
+  const matching = clockRecords.filter(
+    record =>
+      record.employee_id === employeeId &&
+      record.session_date >= startDate &&
+      record.session_date <= endDate
+  )
+  return {
+    hasAutoClockOut: matching.some(record => record.auto_clock_out),
+    hasOpenClock: matching.some(record => !record.clock_out_at || isClockPending(record)),
+  }
 }
 
 function isEmployeeInDepartment(employee: Employee, department: ReportDepartment) {
@@ -225,12 +245,16 @@ export default function ReportingPage() {
   const monthCompletions = completions.filter(c => c.session_date >= monthStart && c.session_date <= monthEnd && isCompletedTask(c))
   const monthEods = eodReports.filter(r => r.session_date >= monthStart && r.session_date <= monthEnd)
 
+  const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
   const monthHoursByEmp = new Map<string, number>()
   const monthTipsByEmp = new Map<string, number>()
+  for (const record of monthClockRecords) {
+    if (!filteredEmployeeIds.has(record.employee_id)) continue
+    monthHoursByEmp.set(record.employee_id, (monthHoursByEmp.get(record.employee_id) ?? 0) + getEffectiveClockHours(record))
+  }
   for (const eod of monthEods) {
     for (const dist of (eod.tip_distributions ?? [])) {
       if (!filteredEmployeeIds.has(dist.employee_id)) continue
-      monthHoursByEmp.set(dist.employee_id, (monthHoursByEmp.get(dist.employee_id) ?? 0) + Number(dist.hours_worked))
       monthTipsByEmp.set(dist.employee_id, (monthTipsByEmp.get(dist.employee_id) ?? 0) + Number(dist.net_tip))
     }
   }
@@ -299,7 +323,7 @@ export default function ReportingPage() {
       const report = weeklyEodReports.find(r => r.session_date === dateStr)
       const distributions = report?.tip_distributions.filter(d => d.employee_id === emp.id) ?? []
       const amount = distributions.length > 0 ? distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0) : null
-      const hours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
+      const hours = getClockHoursForEmployeeDate(clockRecords, emp.id, dateStr)
       return {
         date: dateStr,
         amount,
@@ -330,7 +354,7 @@ export default function ReportingPage() {
     for (const report of tipRangeReports) {
       const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
       const dailyTips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
-      const dailyHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked), 0)
+      const dailyHours = getClockHoursForEmployeeDate(clockRecords, emp.id, report.session_date)
       const dailyBaseWages = dailyHours * (emp.hourly_wage ?? 0)
       const dailyGuaranteedTarget = dailyHours * (emp.guaranteed_hourly ?? 0)
 
@@ -351,6 +375,7 @@ export default function ReportingPage() {
       totalEarnings,
       tipRate: hours > 0 ? tips / hours : null,
       effectiveRate: hours > 0 ? totalEarnings / hours : null,
+      ...getClockWarningsForEmployeeRange(clockRecords, emp.id, tipRangeStart, tipRangeEnd),
     }
   }).filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
     .sort((a, b) => b.totalEarnings - a.totalEarnings)
@@ -943,6 +968,7 @@ export default function ReportingPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Clock Status</TableHead>
                   <TableHead className="text-right">Hours</TableHead>
                   <TableHead className="text-right">Tips</TableHead>
                   <TableHead className="text-right">Tip / Hr</TableHead>
@@ -964,6 +990,15 @@ export default function ReportingPage() {
                   <TableRow key={row.emp.id}>
                     <TableCell className="font-medium">{row.emp.name}</TableCell>
                     <TableCell className="capitalize text-muted-foreground">{row.emp.role}</TableCell>
+                    <TableCell>
+                      {row.hasOpenClock ? (
+                        <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge>
+                      ) : row.hasAutoClockOut ? (
+                        <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">{row.hours.toFixed(1)}h</TableCell>
                     <TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
                     <TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
@@ -986,15 +1021,60 @@ export default function ReportingPage() {
                 ))}
                 {displayedTipSummaryRows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={tipReportView === 'earnings' ? 12 : 6} className="text-center text-muted-foreground py-6">
+                    <TableCell colSpan={tipReportView === 'earnings' ? 13 : 7} className="text-center text-muted-foreground py-6">
                       No tip or wage data for this {tipReportPeriod}
                     </TableCell>
                   </TableRow>
                 )}
               </TableBody>
+              {displayedTipSummaryRows.length > 0 && (
+                <tfoot>
+                  <TableRow>
+                    <TableCell className="font-semibold">Daily Total</TableCell>
+                    <TableCell />
+                    <TableCell />
+                    <TableCell className="text-right font-semibold">
+                      {displayedTipSummaryRows.reduce((sum, row) => sum + row.hours, 0).toFixed(1)}h
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-green-700">
+                      {formatCurrency(displayedTipSummaryRows.reduce((sum, row) => sum + row.tips, 0))}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {(() => {
+                        const totalHours = displayedTipSummaryRows.reduce((sum, row) => sum + row.hours, 0)
+                        const totalTips = displayedTipSummaryRows.reduce((sum, row) => sum + row.tips, 0)
+                        return totalHours > 0 ? formatCurrency(totalTips / totalHours) : '—'
+                      })()}
+                    </TableCell>
+                    {tipReportView === 'earnings' && (
+                      <>
+                        <TableCell />
+                        <TableCell className="text-right font-semibold">
+                          {formatCurrency(displayedTipSummaryRows.reduce((sum, row) => sum + row.baseWages, 0))}
+                        </TableCell>
+                        <TableCell />
+                        <TableCell className="text-right font-semibold text-violet-700">
+                          {formatCurrency(displayedTipSummaryRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0))}
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {formatCurrency(displayedTipSummaryRows.reduce((sum, row) => sum + row.totalEarnings, 0))}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {(() => {
+                            const totalHours = displayedTipSummaryRows.reduce((sum, row) => sum + row.hours, 0)
+                            const totalEarnings = displayedTipSummaryRows.reduce((sum, row) => sum + row.totalEarnings, 0)
+                            return totalHours > 0 ? formatCurrency(totalEarnings / totalHours) : '—'
+                          })()}
+                        </TableCell>
+                      </>
+                    )}
+                    <TableCell />
+                  </TableRow>
+                </tfoot>
+              )}
             </Table>
             <p className="mt-4 text-xs text-muted-foreground">
-              Guaranteed top-up is calculated from verified tip distribution hours. Each day is checked separately: if hourly wage plus tips falls below the guaranteed hourly minimum, the difference is added for that day.
+              Wage hours come from verified clock in / clock out records. Tips come from tip distribution. If an employee has an open or auto clock-out warning, their hours may still need review.
             </p>
           </div>
         </TabsContent>

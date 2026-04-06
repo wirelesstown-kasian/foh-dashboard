@@ -11,7 +11,7 @@ interface Props {
 }
 
 function isBohRole(role: Employee['role']) {
-  return role === 'kitchen_staff' || role === 'manager'
+  return role === 'kitchen_staff'
 }
 
 export function StaffSidebar({ schedules, employees, clockRecords }: Props) {

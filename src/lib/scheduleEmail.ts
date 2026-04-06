@@ -62,6 +62,12 @@ export async function sendWeeklyScheduleEmails({
   }
 
   const emailPromises: Promise<void>[] = []
+  const fohSchedules = (schedules as Array<{
+    date: string
+    start_time: string
+    end_time: string
+    employee: { id: string; name: string; email: string | null; role: string } | null
+  }>).filter(schedule => schedule.employee && schedule.employee.role !== 'kitchen_staff')
 
   for (const { employee, shifts } of empMap.values()) {
     if (!employee.email) continue
@@ -93,6 +99,40 @@ export async function sendWeeklyScheduleEmails({
       `
     }).join('')
 
+    const fohTeamRows = Array.from(
+      fohSchedules.reduce((map, schedule) => {
+        const name = schedule.employee?.name ?? 'Unknown Staff'
+        const existing = map.get(name) ?? []
+        existing.push(schedule)
+        map.set(name, existing)
+        return map
+      }, new Map<string, Array<{ date: string; start_time: string; end_time: string }>>())
+    )
+      .sort(([nameA], [nameB]) => nameA.localeCompare(nameB))
+      .map(([name, teamShifts]) => {
+        const byDate = new Map(teamShifts.map(shift => [shift.date, shift]))
+        const cells = weekDates.map(date => {
+          const shift = byDate.get(date)
+          return `
+            <td style="border:1px solid #e5e7eb;padding:8px;text-align:center;background:${shift ? '#eef7ff' : '#fafafa'}">
+              ${shift ? `
+                <div style="font-size:12px;font-weight:600;color:#1d4ed8">${formatTime(shift.start_time)} – ${formatTime(shift.end_time)}</div>
+                <div style="font-size:11px;color:#475569;margin-top:2px">${formatHours(calcHours(shift.start_time, shift.end_time))}</div>
+              ` : `
+                <div style="font-size:11px;color:#9ca3af">Off</div>
+              `}
+            </td>
+          `
+        }).join('')
+
+        return `
+          <tr>
+            <td style="border:1px solid #e5e7eb;padding:8px;font-size:12px;font-weight:700;background:${name === employee.name ? '#dbeafe' : '#f8fafc'}">${name}</td>
+            ${cells}
+          </tr>
+        `
+      }).join('')
+
     const html = renderEmailShell(logoUrl, `
         <h2 style="color:#1a1a1a;margin-bottom:4px">Your Schedule</h2>
         <p style="color:#666;margin-top:0">${weekLabel}</p>
@@ -108,6 +148,25 @@ export async function sendWeeklyScheduleEmails({
             </tr>
           </tbody>
         </table>
+        <div style="margin-top:22px">
+          <h3 style="color:#1a1a1a;margin:0 0 8px">FOH Team Calendar</h3>
+          <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px">
+            <thead>
+              <tr>
+                <th style="border:1px solid #e5e7eb;padding:8px;text-align:left;background:#f8fafc">Staff</th>
+                ${weekDates.map(date => `
+                  <th style="border:1px solid #e5e7eb;padding:8px;background:#f8fafc">
+                    <div style="font-size:11px;font-weight:700;color:#111827">${formatCalendarDay(date)}</div>
+                    <div style="font-size:10px;color:#6b7280">${formatDisplayDate(date)}</div>
+                  </th>
+                `).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${fohTeamRows}
+            </tbody>
+          </table>
+        </div>
         <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
     `)
 
