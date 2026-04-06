@@ -660,43 +660,44 @@ export default function ReportingPage() {
               display: flex;
               justify-content: space-between;
               align-items: flex-start;
-              margin-bottom: 10px;
-              padding-bottom: 8px;
+              margin-bottom: 8px;
+              padding-bottom: 6px;
               border-bottom: 2px solid #e5e7eb;
             }
             .print-title {
-              font-size: 24px;
+              font-size: 20px;
               font-weight: 700;
               margin: 0;
             }
             .print-subtitle {
-              margin-top: 4px;
+              margin-top: 2px;
               color: #6b7280;
-              font-size: 12px;
+              font-size: 11px;
             }
             .metric-grid {
               display: grid;
               grid-template-columns: repeat(5, minmax(0, 1fr));
-              gap: 10px;
-              margin-bottom: 10px;
+              gap: 8px;
+              margin-bottom: 8px;
             }
             .rank-grid {
               display: grid;
               grid-template-columns: repeat(4, minmax(0, 1fr));
-              gap: 10px;
-              margin-bottom: 10px;
+              gap: 8px;
+              margin-bottom: 8px;
             }
             .detail-grid {
               display: grid;
               grid-template-columns: repeat(2, minmax(0, 1fr));
-              gap: 10px;
+              gap: 8px;
             }
             .card {
               border: 1px solid #d1d5db;
               border-radius: 16px;
-              padding: 14px;
+              padding: 10px;
               background: #fff;
               break-inside: avoid;
+              page-break-inside: avoid;
             }
             .score-card {
               background: #fef3c7;
@@ -706,33 +707,33 @@ export default function ReportingPage() {
               background: #f9fafb;
             }
             .label {
-              font-size: 12px;
+              font-size: 11px;
               color: #6b7280;
-              margin-bottom: 8px;
+              margin-bottom: 6px;
             }
             .value-lg {
-              font-size: 30px;
+              font-size: 24px;
               font-weight: 700;
               line-height: 1;
             }
             .value-md {
-              font-size: 22px;
+              font-size: 18px;
               font-weight: 700;
               line-height: 1.1;
             }
             .muted {
               color: #6b7280;
-              font-size: 11px;
-              margin-top: 6px;
+              font-size: 10px;
+              margin-top: 4px;
             }
             .card h3 {
-              margin: 0 0 10px 0;
-              font-size: 14px;
+              margin: 0 0 8px 0;
+              font-size: 13px;
             }
             .rows {
               display: grid;
-              gap: 7px;
-              font-size: 12px;
+              gap: 6px;
+              font-size: 11px;
             }
             .row {
               display: flex;
@@ -746,6 +747,12 @@ export default function ReportingPage() {
               body {
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
+                zoom: 0.78;
+                overflow: hidden;
+              }
+              .print-page {
+                page-break-inside: avoid;
+                break-inside: avoid;
               }
             }
           </style>
@@ -898,6 +905,7 @@ export default function ReportingPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead className="text-right">Tasks This Period</TableHead>
+                  <TableHead className="text-right">Performance Score</TableHead>
                   <TableHead className="text-right">Monthly Tasks</TableHead>
                   <TableHead className="text-right">Share</TableHead>
                   <TableHead className="text-right">Report</TableHead>
@@ -909,9 +917,19 @@ export default function ReportingPage() {
                     <TableCell>
                       {idx === 0 ? <Trophy className="w-4 h-4 text-amber-500" /> : <span className="text-muted-foreground">{idx + 1}</span>}
                     </TableCell>
-                    <TableCell className="font-medium">{emp.name}</TableCell>
+                    <TableCell>
+                      <button
+                        className="font-medium text-left hover:underline"
+                        onClick={() => setSelectedEmployeeId(emp.id)}
+                      >
+                        {emp.name}
+                      </button>
+                    </TableCell>
                     <TableCell className="capitalize text-muted-foreground">{emp.role}</TableCell>
                     <TableCell className="text-right font-semibold">{done}</TableCell>
+                    <TableCell className="text-right font-semibold text-amber-700">
+                      {employeeMonthStats.find(item => item.emp.id === emp.id)?.score ?? '—'}
+                    </TableCell>
                     <TableCell className="text-right text-muted-foreground">{allTime}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground">
                       {performanceTotalTasks > 0 ? getPercent((done / performanceTotalTasks) * 100) : '0.0%'}
@@ -925,7 +943,7 @@ export default function ReportingPage() {
                 ))}
                 {perfStats.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground py-6">No task data for this period</TableCell>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground py-6">No task data for this period</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -1529,7 +1547,7 @@ export default function ReportingPage() {
 
       <Dialog open={!!selectedEmployeeId} onOpenChange={open => { if (!open) setSelectedEmployeeId(null) }}>
         <DialogContent className="!top-4 !right-4 !bottom-4 !left-4 !grid !w-auto !max-w-none !translate-x-0 !translate-y-0 !grid-rows-[auto_1fr] overflow-hidden p-0">
-          <DialogHeader className="border-b px-8 py-5">
+          <DialogHeader className="border-b px-6 py-4">
             <div className="flex items-center justify-between gap-4">
               <DialogTitle>
                 {showEarningsReport
@@ -1539,11 +1557,11 @@ export default function ReportingPage() {
               {(selectedEmployeeStats || selectedTipSummary) && (
                 <div className="flex items-center gap-2">
                   {showEarningsReport && (
-                    <Button variant="outline" size="sm" onClick={sendSelectedReportEmail} disabled={sendingReportEmail}>
+                    <Button variant="outline" size="sm" className="h-8 px-3 text-xs" onClick={sendSelectedReportEmail} disabled={sendingReportEmail}>
                       <Mail className="w-4 h-4 mr-2" /> {sendingReportEmail ? 'Sending…' : 'Send Email'}
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" onClick={exportEmployeePdf}>
+                  <Button variant="outline" size="sm" className="h-8 px-3 text-xs" onClick={exportEmployeePdf}>
                     <Download className="w-4 h-4 mr-2" /> Export PDF
                   </Button>
                 </div>
