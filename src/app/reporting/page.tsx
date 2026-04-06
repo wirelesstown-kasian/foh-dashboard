@@ -295,15 +295,14 @@ export default function ReportingPage() {
     [completions, startDate, endDate, filteredEmployeeIds]
   )
 
-  const perfStats = useMemo(
+  const perfStatsUnsorted = useMemo(
     () =>
       filteredEmployees
         .map(emp => {
           const done = filteredCompletions.filter(c => c.employee_id === emp.id).length
           const allTime = completions.filter(c => c.employee_id === emp.id).length
           return { emp, done, allTime }
-        })
-        .sort((a, b) => b.done - a.done),
+        }),
     [filteredEmployees, filteredCompletions, completions]
   )
 
@@ -377,6 +376,16 @@ export default function ReportingPage() {
       }
     })
   }, [clockRecords, completions, eodReports, filteredEmployeeIds, filteredEmployees, monthEnd, monthStart])
+
+  const perfStats = useMemo(
+    () => [...perfStatsUnsorted].sort((a, b) => {
+      const scoreA = employeeMonthStats.find(item => item.emp.id === a.emp.id)?.score ?? -1
+      const scoreB = employeeMonthStats.find(item => item.emp.id === b.emp.id)?.score ?? -1
+      if (scoreA !== scoreB) return scoreB - scoreA
+      return b.done - a.done
+    }),
+    [perfStatsUnsorted, employeeMonthStats]
+  )
 
   const monthlyRankings = useMemo(() => (period === 'monthly' ? employeeMonthStats : null), [period, employeeMonthStats])
   const performanceLeader = perfStats[0] ?? null
