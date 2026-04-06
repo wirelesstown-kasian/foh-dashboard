@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, DailySession, EodReport, TipDistribution, ShiftClock } from '@/lib/types'
-import { calcHours, formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
+import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
+import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,9 +28,15 @@ import { PinModal } from '@/components/layout/PinModal'
 
 interface TipRow {
   employee_id: string
-  start_time: string
-  end_time: string
+  hours_worked: number
+  clock_in_at: string | null
+  clock_out_at: string | null
   name: string
+}
+
+function formatClockTime(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
 function isoToTimeValue(value: string | null) {
@@ -41,28 +48,6 @@ function isoToTimeValue(value: string | null) {
   return `${hours}:${minutes}:${seconds}`
 }
 
-function snapTimeToHalfHour(value: string) {
-  const [hourText = '0', minuteText = '0'] = value.split(':')
-  const hour = Number(hourText)
-  const minute = Number(minuteText)
-  const totalMinutes = hour * 60 + minute
-  const snappedMinutes = Math.round(totalMinutes / 30) * 30
-  const normalizedMinutes = ((snappedMinutes % (24 * 60)) + (24 * 60)) % (24 * 60)
-  const nextHour = Math.floor(normalizedMinutes / 60)
-  const nextMinute = normalizedMinutes % 60
-  return `${String(nextHour).padStart(2, '0')}:${String(nextMinute).padStart(2, '0')}`
-}
-
-function getAllowedTimeOptions() {
-  const options: string[] = []
-  for (let minutes = 15 * 60; minutes <= 27 * 60; minutes += 30) {
-    const normalized = minutes % (24 * 60)
-    const hour = Math.floor(normalized / 60)
-    const minute = normalized % 60
-    options.push(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`)
-  }
-  return options
-}
 
 function getTipDraftKey(sessionDate: string) {
   return `eod-tip-distribution:${sessionDate}`
@@ -74,11 +59,11 @@ function getFinancialDraftKey(sessionDate: string) {
 
 function getClockTipRow(record: ShiftClock, employees: Employee[]): TipRow {
   const employee = employees.find(item => item.id === record.employee_id)
-  const startTime = isoToTimeValue(record.clock_in_at)
   return {
     employee_id: record.employee_id,
-    start_time: startTime,
-    end_time: record.clock_out_at ? isoToTimeValue(record.clock_out_at) : startTime,
+    hours_worked: getEffectiveClockHours(record),
+    clock_in_at: record.clock_in_at,
+    clock_out_at: record.clock_out_at,
     name: employee?.name ?? '',
   }
 }
@@ -166,7 +151,6 @@ export default function EodPage() {
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
   const tipEligibleEmployees = employees.filter(employee => isTipEligibleRole(employee.role))
   const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
-  const allowedTimeOptions = getAllowedTimeOptions()
 
   const load = useCallback(async () => {
     const [sessRes, empRes, eodRes, clockRes] = await Promise.all([
@@ -200,16 +184,15 @@ export default function EodPage() {
           return !!role && isTipEligibleRole(role)
         })
         .map((d: TipDistribution & { employee?: Employee }) => {
-        const clockRecord = (clockRes.records ?? []).find((record: ShiftClock) => record.employee_id === d.employee_id)
-        const fallbackStart = clockRecord ? isoToTimeValue(clockRecord.clock_in_at) : '00:00:00'
-        const fallbackEnd = clockRecord?.clock_out_at ? isoToTimeValue(clockRecord.clock_out_at) : fallbackStart
-        return {
-          employee_id: d.employee_id,
-          start_time: d.start_time ?? fallbackStart,
-          end_time: d.end_time ?? fallbackEnd,
-          name: d.employee?.name ?? '',
-        }
-      }))
+          const clockRecord = (clockRes.records ?? []).find((record: ShiftClock) => record.employee_id === d.employee_id)
+          return {
+            employee_id: d.employee_id,
+            hours_worked: Number(d.hours_worked ?? 0),
+            clock_in_at: clockRecord?.clock_in_at ?? null,
+            clock_out_at: clockRecord?.clock_out_at ?? null,
+            name: d.employee?.name ?? '',
+          }
+        }))
       setFinancialsSaved(true)
       setTipDistributionSaved(true)
     } else {
@@ -272,7 +255,7 @@ export default function EodPage() {
     tipTotal,
     tipRows.map(r => ({
       employee_id: r.employee_id,
-      hours_worked: calcHours(r.start_time, r.end_time),
+      hours_worked: r.hours_worked,
     }))
   )
 
@@ -288,8 +271,9 @@ export default function EodPage() {
     const clockRecord = clockRecords.find(record => record.employee_id === unusedEmp.id)
     setTipRows(prev => [...prev, {
       employee_id: unusedEmp.id,
-      start_time: clockRecord ? isoToTimeValue(clockRecord.clock_in_at) : '00:00:00',
-      end_time: clockRecord?.clock_out_at ? isoToTimeValue(clockRecord.clock_out_at) : (clockRecord ? isoToTimeValue(clockRecord.clock_in_at) : '00:00:00'),
+      hours_worked: clockRecord ? getEffectiveClockHours(clockRecord) : 0,
+      clock_in_at: clockRecord?.clock_in_at ?? null,
+      clock_out_at: clockRecord?.clock_out_at ?? null,
       name: unusedEmp.name,
     }])
   }
@@ -299,22 +283,20 @@ export default function EodPage() {
     setTipRows(prev => prev.filter((_, i) => i !== idx))
   }
 
-  const updateTipRow = (idx: number, field: 'employee_id' | 'start_time' | 'end_time', value: string) => {
+  const updateTipRowEmployee = (idx: number, value: string) => {
     setTipDistributionSaved(false)
     setTipRows(prev => prev.map((r, i) => {
       if (i !== idx) return r
-      if (field === 'employee_id') {
-        const emp = tipEligibleEmployees.find(e => e.id === value)
-        const clockRecord = clockRecords.find(record => record.employee_id === value)
-        return {
-          ...r,
-          employee_id: value,
-          name: emp?.name ?? '',
-          start_time: clockRecord ? isoToTimeValue(clockRecord.clock_in_at) : '00:00:00',
-          end_time: clockRecord?.clock_out_at ? isoToTimeValue(clockRecord.clock_out_at) : (clockRecord ? isoToTimeValue(clockRecord.clock_in_at) : '00:00:00'),
-        }
+      const emp = tipEligibleEmployees.find(e => e.id === value)
+      const clockRecord = clockRecords.find(record => record.employee_id === value)
+      return {
+        ...r,
+        employee_id: value,
+        name: emp?.name ?? '',
+        hours_worked: clockRecord ? getEffectiveClockHours(clockRecord) : 0,
+        clock_in_at: clockRecord?.clock_in_at ?? null,
+        clock_out_at: clockRecord?.clock_out_at ?? null,
       }
-      return { ...r, [field]: value }
     }))
   }
 
@@ -334,37 +316,22 @@ export default function EodPage() {
   const saveTipDistributions = async (reportId: string) => {
     if (tipRows.length === 0) return
 
-    const rowsWithShiftTimes = tipRows.map(row => {
+    const rows = tipRows.map(row => {
       const result = tipResults.find(r => r.employee_id === row.employee_id)
-      const hoursWorked = calcHours(row.start_time, row.end_time)
       return {
         eod_report_id: reportId,
         employee_id: row.employee_id,
-        start_time: row.start_time,
-        end_time: row.end_time,
-        hours_worked: hoursWorked,
+        start_time: row.clock_in_at ? isoToTimeValue(row.clock_in_at) : null,
+        end_time: row.clock_out_at ? isoToTimeValue(row.clock_out_at) : null,
+        hours_worked: row.hours_worked,
         tip_share: result?.tip_share ?? 0,
         house_deduction: result?.house_deduction ?? 0,
         net_tip: result?.net_tip ?? 0,
       }
     })
 
-    const insertWithTimes = await supabase.from('tip_distributions').insert(rowsWithShiftTimes)
-    if (!insertWithTimes.error) return
-
-    const isMissingShiftColumn = /start_time|end_time|schema cache|column/i.test(insertWithTimes.error.message)
-    if (!isMissingShiftColumn) throw insertWithTimes.error
-
-    const fallbackRows = rowsWithShiftTimes.map(row => ({
-      eod_report_id: row.eod_report_id,
-      employee_id: row.employee_id,
-      hours_worked: row.hours_worked,
-      tip_share: row.tip_share,
-      house_deduction: row.house_deduction,
-      net_tip: row.net_tip,
-    }))
-    const fallbackInsert = await supabase.from('tip_distributions').insert(fallbackRows)
-    if (fallbackInsert.error) throw fallbackInsert.error
+    const { error } = await supabase.from('tip_distributions').insert(rows)
+    if (error) throw error
   }
 
   const handleSave = async () => {
@@ -565,7 +532,7 @@ export default function EodPage() {
                           }
                         </div>
                         <div className="text-right">
-                          <span className="text-muted-foreground text-xs mr-3">{row ? formatHours(calcHours(row.start_time, row.end_time)) : ''}</span>
+                          <span className="text-muted-foreground text-xs mr-3">{row ? formatHours(row.hours_worked) : ''}</span>
                           <span className="font-semibold text-green-700">${r.net_tip.toFixed(2)}</span>
                         </div>
                       </div>
@@ -899,8 +866,7 @@ export default function EodPage() {
                 <thead>
                   <tr className="border-b text-muted-foreground">
                     <th className="text-left pb-2 font-medium">Name</th>
-                    <th className="text-left pb-2 font-medium w-28">Start</th>
-                    <th className="text-left pb-2 font-medium w-28">End</th>
+                    <th className="text-left pb-2 font-medium w-40">Clock In / Out</th>
                     <th className="text-left pb-2 font-medium w-20">Hrs</th>
                     <th className="text-left pb-2 font-medium w-20">Share %</th>
                     <th className="text-left pb-2 font-medium w-28">Tip Amount</th>
@@ -911,12 +877,11 @@ export default function EodPage() {
                 <tbody>
                   {tipRows.map((row, idx) => {
                     const result = tipResults.find(r => r.employee_id === row.employee_id)
-                    const hrs = calcHours(row.start_time, row.end_time)
-                    const tipPerHour = hrs > 0 && result ? result.net_tip / hrs : null
+                    const tipPerHour = row.hours_worked > 0 && result ? result.net_tip / row.hours_worked : null
                     return (
                       <tr key={idx} className="border-b">
                         <td className="py-2 pr-3">
-                          <Select value={row.employee_id} onValueChange={(v: string | null) => v && updateTipRow(idx, 'employee_id', v)}>
+                          <Select value={row.employee_id} onValueChange={(v: string | null) => v && updateTipRowEmployee(idx, v)}>
                             <SelectTrigger className="h-8">
                               <span className={row.employee_id ? '' : 'text-muted-foreground'}>
                                 {employeeNameById.get(row.employee_id) ?? row.name ?? 'Select staff'}
@@ -927,33 +892,12 @@ export default function EodPage() {
                             </SelectContent>
                           </Select>
                         </td>
-                        <td className="py-2 pr-2">
-                          <select
-                            className="h-8 w-24 rounded-md border border-input bg-background px-2 text-sm"
-                            value={row.start_time.slice(0, 5)}
-                            onChange={e => updateTipRow(idx, 'start_time', snapTimeToHalfHour(e.target.value) + ':00')}
-                          >
-                            {allowedTimeOptions.map(option => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
+                        <td className="py-2 pr-3 text-xs text-muted-foreground">
+                          {row.clock_in_at ? formatClockTime(row.clock_in_at) : '—'}
+                          {' – '}
+                          {row.clock_out_at ? formatClockTime(row.clock_out_at) : <span className="text-amber-500">open</span>}
                         </td>
-                        <td className="py-2 pr-2">
-                          <select
-                            className="h-8 w-24 rounded-md border border-input bg-background px-2 text-sm"
-                            value={row.end_time.slice(0, 5)}
-                            onChange={e => updateTipRow(idx, 'end_time', snapTimeToHalfHour(e.target.value) + ':00')}
-                          >
-                            {allowedTimeOptions.map(option => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="py-2 pr-3 text-muted-foreground text-xs">{formatHours(hrs)}</td>
+                        <td className="py-2 pr-3 text-muted-foreground text-xs">{formatHours(row.hours_worked)}</td>
                         <td className="py-2 pr-3 text-muted-foreground">{result ? (result.tip_share * 100).toFixed(1) + '%' : '—'}</td>
                         <td className="py-2 font-semibold text-green-700">{result ? `$${result.net_tip.toFixed(2)}` : '—'}</td>
                         <td className="py-2 text-sm text-gray-700">{tipPerHour !== null ? `$${tipPerHour.toFixed(2)}` : '—'}</td>
@@ -973,8 +917,8 @@ export default function EodPage() {
                   <tfoot>
                     <tr className="border-t">
                       <td className="pt-2 font-semibold">Total</td>
-                      <td /><td />
-                      <td className="pt-2 text-muted-foreground text-xs">{formatHours(tipRows.reduce((s, r) => s + calcHours(r.start_time, r.end_time), 0))}</td>
+                      <td />
+                      <td className="pt-2 text-muted-foreground text-xs">{formatHours(tipRows.reduce((s, r) => s + r.hours_worked, 0))}</td>
                       <td />
                       <td className="pt-2 font-bold text-green-700">${tipResults.reduce((s, r) => s + r.net_tip, 0).toFixed(2)}</td>
                       <td />
