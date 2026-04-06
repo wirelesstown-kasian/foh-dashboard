@@ -27,7 +27,9 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
   const [loading, setLoading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
   const [allowHardwareKeyboard, setAllowHardwareKeyboard] = useState(false)
+  const [pressedKey, setPressedKey] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const pressedKeyTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -38,13 +40,44 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
     if (open) {
       setPin('')
       setLocalError(null)
+      setPressedKey(null)
       if (allowHardwareKeyboard) {
         window.setTimeout(() => inputRef.current?.focus(), 50)
       }
     }
   }, [allowHardwareKeyboard, open])
 
+  useEffect(() => {
+    return () => {
+      if (pressedKeyTimeoutRef.current) {
+        window.clearTimeout(pressedKeyTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const pulseKey = (key: string) => {
+    setPressedKey(key)
+    if (typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches) {
+      navigator.vibrate?.(10)
+    }
+    if (pressedKeyTimeoutRef.current) {
+      window.clearTimeout(pressedKeyTimeoutRef.current)
+    }
+    pressedKeyTimeoutRef.current = window.setTimeout(() => {
+      setPressedKey(null)
+    }, 120)
+  }
+
+  const queueSubmit = (value: string) => {
+    if (loading) return
+    window.requestAnimationFrame(() => {
+      void submit(value)
+    })
+  }
+
   const handleKey = (key: string) => {
+    if (loading) return
+    pulseKey(key)
     if (key === 'del') {
       setPin(p => p.slice(0, -1))
       setLocalError(null)
@@ -55,11 +88,12 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
     setPin(next)
     setLocalError(null)
     if (next.length === 4) {
-      submit(next)
+      queueSubmit(next)
     }
   }
 
   const submit = async (value: string) => {
+    if (loading) return
     setLoading(true)
     try {
       await onConfirm(value)
@@ -78,11 +112,12 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
   }
 
   const handleInputChange = (value: string) => {
+    if (loading) return
     const digitsOnly = value.replace(/\D/g, '').slice(0, 4)
     setPin(digitsOnly)
     setLocalError(null)
     if (digitsOnly.length === 4) {
-      submit(digitsOnly)
+      queueSubmit(digitsOnly)
     }
   }
 
@@ -160,7 +195,10 @@ export function PinModal({ open, title = 'Enter PIN', description, onConfirm, on
               <Button
                 key={idx}
                 variant={key === 'del' ? 'ghost' : 'outline'}
-                className="h-14 text-xl font-semibold"
+                className={cn(
+                  'h-14 text-xl font-semibold transition-transform duration-75 active:scale-95',
+                  pressedKey === key && 'scale-95 bg-amber-50 border-amber-300'
+                )}
                 onClick={() => handleKey(key)}
                 disabled={loading}
               >

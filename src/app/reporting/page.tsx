@@ -178,6 +178,12 @@ export default function ReportingPage() {
   const [clockEdits, setClockEdits] = useState<Record<string, { clockIn: string; clockOut: string; note: string }>>({})
   const [savingClockId, setSavingClockId] = useState<string | null>(null)
   const [clockStatus, setClockStatus] = useState<string | null>(null)
+  const [loadedData, setLoadedData] = useState({
+    employees: false,
+    completions: false,
+    eodReports: false,
+    clockRecords: false,
+  })
   const employeeReportRef = useRef<HTMLDivElement | null>(null)
   const isCompletedTask = (completion: TaskCompletion) => completion.status !== 'incomplete'
 
@@ -185,26 +191,73 @@ export default function ReportingPage() {
     let mounted = true
 
     void (async () => {
-      const [empRes, compRes, eodRes] = await Promise.all([
-        supabase.from('employees').select('*').eq('is_active', true).order('name'),
-        supabase.from('task_completions').select('*'),
-        supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').order('session_date', { ascending: false }),
-      ])
-      const clockRes = await fetch('/api/clock-events', { cache: 'no-store' })
-      const clockJson = (await clockRes.json().catch(() => ({}))) as { records?: ShiftClock[] }
+      const empRes = await supabase.from('employees').select('*').eq('is_active', true).order('name')
 
       if (!mounted) return
 
       setEmployees(empRes.data ?? [])
-      setCompletions(compRes.data ?? [])
-      setEodReports(eodRes.data ?? [])
-      setClockRecords(clockJson.records ?? [])
+      setLoadedData(current => ({ ...current, employees: true }))
     })()
 
     return () => {
       mounted = false
     }
   }, [])
+
+  useEffect(() => {
+    if (loadedData.completions || reportTab !== 'performance') return
+
+    let mounted = true
+
+    void (async () => {
+      const compRes = await supabase.from('task_completions').select('*')
+      if (!mounted) return
+      setCompletions(compRes.data ?? [])
+      setLoadedData(current => ({ ...current, completions: true }))
+    })()
+
+    return () => {
+      mounted = false
+    }
+  }, [loadedData.completions, reportTab])
+
+  useEffect(() => {
+    if (loadedData.eodReports || !['performance', 'wages', 'eod'].includes(reportTab)) return
+
+    let mounted = true
+
+    void (async () => {
+      const eodRes = await supabase
+        .from('eod_reports')
+        .select('*, tip_distributions(*, employee:employees(*))')
+        .order('session_date', { ascending: false })
+      if (!mounted) return
+      setEodReports(eodRes.data ?? [])
+      setLoadedData(current => ({ ...current, eodReports: true }))
+    })()
+
+    return () => {
+      mounted = false
+    }
+  }, [loadedData.eodReports, reportTab])
+
+  useEffect(() => {
+    if (loadedData.clockRecords || !['performance', 'wages', 'clock'].includes(reportTab)) return
+
+    let mounted = true
+
+    void (async () => {
+      const clockRes = await fetch('/api/clock-events', { cache: 'no-store' })
+      const clockJson = (await clockRes.json().catch(() => ({}))) as { records?: ShiftClock[] }
+      if (!mounted) return
+      setClockRecords(clockJson.records ?? [])
+      setLoadedData(current => ({ ...current, clockRecords: true }))
+    })()
+
+    return () => {
+      mounted = false
+    }
+  }, [loadedData.clockRecords, reportTab])
 
   const [startDate, endDate] = useMemo<[string, string]>(() => {
     if (period === 'daily') {
@@ -1418,23 +1471,43 @@ export default function ReportingPage() {
                             </Button>
                           </div>
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setClockEdits(prev => ({
-                                ...prev,
-                                [record.id]: {
-                                  clockIn: isoToTimeInput(record.clock_in_at),
-                                  clockOut: isoToTimeInput(record.clock_out_at),
-                                  note: record.manager_note ?? '',
-                                },
-                              }))
-                              setEditingClockId(record.id)
-                            }}
-                          >
-                            Edit Times
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            {record.clock_in_photo_path && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}
+                              >
+                                In Photo
+                              </Button>
+                            )}
+                            {record.clock_out_photo_path && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}
+                              >
+                                Out Photo
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setClockEdits(prev => ({
+                                  ...prev,
+                                  [record.id]: {
+                                    clockIn: isoToTimeInput(record.clock_in_at),
+                                    clockOut: isoToTimeInput(record.clock_out_at),
+                                    note: record.manager_note ?? '',
+                                  },
+                                }))
+                                setEditingClockId(record.id)
+                              }}
+                            >
+                              Edit Times
+                            </Button>
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
