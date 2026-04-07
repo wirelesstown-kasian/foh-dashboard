@@ -5,18 +5,26 @@ interface AdminSubpageHeaderProps {
   title: string
   subtitle?: string
   rightSlot?: React.ReactNode
+  backHref?: string
+  backLabel?: string
 }
 
-export function AdminSubpageHeader({ title, subtitle, rightSlot }: AdminSubpageHeaderProps) {
+export function AdminSubpageHeader({
+  title,
+  subtitle,
+  rightSlot,
+  backHref = '/admin',
+  backLabel = 'Back to Admin Board',
+}: AdminSubpageHeaderProps) {
   return (
     <div className="mb-5 flex items-start justify-between gap-4">
       <div>
         <Link
-          href="/admin"
+          href={backHref}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Admin Board
+          {backLabel}
         </Link>
         <h1 className="text-2xl font-bold mt-2">{title}</h1>
         {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}

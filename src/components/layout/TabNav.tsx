@@ -100,7 +100,7 @@ export function TabNav() {
     throw new Error(data.error ?? 'Incorrect manager PIN')
   }
 
-  const isOnAdminPage = adminPaths.includes(pathname)
+  const isOnAdminPage = adminPaths.some(path => pathname === path || pathname.startsWith(`${path}/`))
 
   return (
     <>
