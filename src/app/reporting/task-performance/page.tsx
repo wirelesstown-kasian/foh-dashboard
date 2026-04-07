@@ -2,14 +2,14 @@
 
 import { useMemo, useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
-import { Button } from '@/components/ui/button'
+import { useAppSettings } from '@/components/useAppSettings'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, formatCurrency, getPercent, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getRoleLabel } from '@/lib/organization'
 import { Trophy } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -28,6 +28,7 @@ export default function TaskPerformancePage() {
   const completions = useTaskCompletions()
   const eodReports = useEodReports()
   const { clockRecords } = useClockRecords()
+  const { roleDefinitions } = useAppSettings()
 
   const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
@@ -139,7 +140,6 @@ export default function TaskPerformancePage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <ReportingNav />
       <DepartmentTabs department={department} onChange={setDepartment} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
@@ -205,7 +205,7 @@ export default function TaskPerformancePage() {
                     {row.emp.name}
                   </a>
                 </TableCell>
-                <TableCell className="capitalize text-muted-foreground">{row.emp.role}</TableCell>
+                <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
                 <TableCell className="text-right font-semibold">{row.done}</TableCell>
                 <TableCell className="text-right font-semibold text-amber-700">{row.monthly?.score ?? '—'}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{row.monthly?.tasks ?? 0}</TableCell>

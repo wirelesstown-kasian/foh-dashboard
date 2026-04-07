@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useEodReports } from '@/components/reporting/useReportingData'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -47,7 +46,6 @@ export default function EodHistoryPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <ReportingNav />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
           period={period}

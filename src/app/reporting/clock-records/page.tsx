@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
-import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useClockRecords, useEmployees } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
@@ -102,7 +101,6 @@ export default function ClockRecordsPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <ReportingNav />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar

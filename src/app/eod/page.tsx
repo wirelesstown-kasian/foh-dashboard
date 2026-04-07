@@ -155,7 +155,7 @@ export default function EodPage() {
   const load = useCallback(async () => {
     const [sessRes, empRes, eodRes, clockRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
-      supabase.from('employees').select('*').eq('is_active', true).order('name'),
+      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
       supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }

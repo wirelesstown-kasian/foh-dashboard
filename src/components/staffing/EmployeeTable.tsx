@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Employee, EmployeeRole } from '@/lib/types'
+import { AppSettings, DepartmentDefinition, RoleDefinition } from '@/lib/appSettings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,21 +30,14 @@ import {
 import { Plus, Pencil, Trash2, Gift } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
-
-const ROLES: EmployeeRole[] = ['manager', 'server', 'busser', 'runner', 'kitchen_staff']
-const ROLE_COLORS: Record<EmployeeRole, string> = {
-  manager: 'bg-purple-100 text-purple-800',
-  server: 'bg-blue-100 text-blue-800',
-  busser: 'bg-green-100 text-green-800',
-  runner: 'bg-orange-100 text-orange-800',
-  kitchen_staff: 'bg-rose-100 text-rose-800',
-}
+import { getDepartmentLabel, getPrimaryDepartmentBadge, getRoleLabel, sortDefinitionsByOrder } from '@/lib/organization'
 
 interface FormState {
   name: string
   phone: string
   email: string
   role: EmployeeRole
+  primary_department: 'foh' | 'boh' | 'hybrid'
   hourly_wage: string
   guaranteed_hourly: string
   birth_date: string
@@ -54,13 +48,29 @@ interface FormState {
 
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
-const ROLE_LABELS: Record<EmployeeRole, string> = {
-  manager: 'Manager',
-  server: 'Server',
-  busser: 'Busser',
-  runner: 'Runner',
-  kitchen_staff: 'Kitchen Staff',
+const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
+
+const DEFAULT_ROLE_DEFINITIONS: RoleDefinition[] = [
+  { key: 'manager', label: 'Manager', is_active: true, display_order: 0 },
+  { key: 'server', label: 'Server', is_active: true, display_order: 1 },
+  { key: 'busser', label: 'Busser', is_active: true, display_order: 2 },
+  { key: 'runner', label: 'Runner', is_active: true, display_order: 3 },
+  { key: 'kitchen_staff', label: 'Kitchen Staff', is_active: true, display_order: 4 },
+]
+
+const DEFAULT_DEPARTMENT_DEFINITIONS: DepartmentDefinition[] = [
+  { key: 'foh', label: 'FOH', is_active: true, display_order: 0 },
+  { key: 'boh', label: 'BOH', is_active: true, display_order: 1 },
+  { key: 'hybrid', label: 'Hybrid', is_active: true, display_order: 2 },
+]
+
+function getRoleBadgeClass(role: string) {
+  if (role === 'manager') return 'bg-purple-100 text-purple-800'
+  if (role === 'server') return 'bg-blue-100 text-blue-800'
+  if (role === 'busser') return 'bg-green-100 text-green-800'
+  if (role === 'runner') return 'bg-orange-100 text-orange-800'
+  if (role === 'kitchen_staff') return 'bg-rose-100 text-rose-800'
+  return 'bg-slate-100 text-slate-700'
 }
 
 export function EmployeeTable() {
@@ -73,17 +83,27 @@ export function EmployeeTable() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [filterRole, setFilterRole] = useState<string>('all')
   const [sortBy, setSortBy] = useState<SortOption>('name_asc')
+  const [roleDefinitions, setRoleDefinitions] = useState<RoleDefinition[]>(DEFAULT_ROLE_DEFINITIONS)
+  const [departmentDefinitions, setDepartmentDefinitions] = useState<DepartmentDefinition[]>(DEFAULT_DEPARTMENT_DEFINITIONS)
 
   const load = useCallback(async () => {
-    const res = await fetch('/api/employees', { cache: 'no-store' })
-    const data = (await res.json().catch(() => ({}))) as { employees?: Employee[]; error?: string }
-    if (!res.ok) {
-      setSaveError(data.error ?? 'Failed to load employees')
+    const [employeesRes, settingsRes] = await Promise.all([
+      fetch('/api/employees', { cache: 'no-store' }),
+      fetch('/api/app-settings', { cache: 'no-store' }),
+    ])
+    const employeeData = (await employeesRes.json().catch(() => ({}))) as { employees?: Employee[]; error?: string }
+    const settingsData = (await settingsRes.json().catch(() => ({}))) as { settings?: AppSettings; error?: string }
+    if (!employeesRes.ok) {
+      setSaveError(employeeData.error ?? 'Failed to load employees')
       setEmployees([])
       setLoading(false)
       return
     }
-    setEmployees(data.employees ?? [])
+    setEmployees(employeeData.employees ?? [])
+    if (settingsRes.ok && settingsData.settings) {
+      setRoleDefinitions(sortDefinitionsByOrder(settingsData.settings.role_definitions.filter(definition => definition.is_active)))
+      setDepartmentDefinitions(sortDefinitionsByOrder(settingsData.settings.primary_department_definitions.filter(definition => definition.is_active)))
+    }
     setLoading(false)
   }, [])
 
@@ -91,7 +111,7 @@ export function EmployeeTable() {
 
   const openAdd = () => {
     setEditTarget(null)
-    setForm(EMPTY_FORM)
+    setForm({ ...EMPTY_FORM })
     setDialogOpen(true)
   }
 
@@ -102,6 +122,7 @@ export function EmployeeTable() {
       phone: emp.phone ?? '',
       email: emp.email ?? '',
       role: emp.role,
+      primary_department: (emp.primary_department as 'foh' | 'boh' | 'hybrid') ?? 'foh',
       hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       birth_date: emp.birth_date ?? '',
@@ -161,7 +182,7 @@ export function EmployeeTable() {
       case 'name_desc':
         return b.name.localeCompare(a.name)
       case 'role':
-        return ROLE_LABELS[a.role].localeCompare(ROLE_LABELS[b.role]) || a.name.localeCompare(b.name)
+        return getRoleLabel(a.role, roleDefinitions).localeCompare(getRoleLabel(b.role, roleDefinitions)) || a.name.localeCompare(b.name)
       case 'birthday': {
         const aValue = a.birth_date ?? '9999-12-31'
         const bValue = b.birth_date ?? '9999-12-31'
@@ -183,13 +204,13 @@ export function EmployeeTable() {
           <Select value={filterRole} onValueChange={(v: string | null) => v && setFilterRole(v)}>
             <SelectTrigger className="w-36">
               <span className={filterRole === 'all' ? 'text-muted-foreground' : ''}>
-                {filterRole === 'all' ? 'All Roles' : ROLE_LABELS[filterRole as EmployeeRole]}
+                {filterRole === 'all' ? 'All Roles' : getRoleLabel(filterRole, roleDefinitions)}
               </span>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Roles</SelectItem>
-              {ROLES.map(r => (
-                <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>
+              {roleDefinitions.map(r => (
+                <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -227,6 +248,7 @@ export function EmployeeTable() {
               <TableHead>Role</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Email</TableHead>
+              <TableHead>Department</TableHead>
               <TableHead>Hourly Wage</TableHead>
               <TableHead>Guaranteed / Hr</TableHead>
               <TableHead>Birthday</TableHead>
@@ -247,12 +269,13 @@ export function EmployeeTable() {
                   </span>
                 </TableCell>
                 <TableCell>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${ROLE_COLORS[emp.role]}`}>
-                    {emp.role}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getRoleBadgeClass(emp.role)}`}>
+                    {getRoleLabel(emp.role, roleDefinitions)}
                   </span>
                 </TableCell>
                 <TableCell>{emp.phone ?? '—'}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{emp.email ?? '—'}</TableCell>
+                <TableCell>{getPrimaryDepartmentBadge(emp.primary_department, departmentDefinitions)}</TableCell>
                 <TableCell>{emp.hourly_wage !== null ? `$${emp.hourly_wage.toFixed(2)}` : '—'}</TableCell>
                 <TableCell>{emp.guaranteed_hourly !== null ? `$${emp.guaranteed_hourly.toFixed(2)}` : '—'}</TableCell>
                 <TableCell>
@@ -280,7 +303,7 @@ export function EmployeeTable() {
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   No employees found
                 </TableCell>
               </TableRow>
@@ -307,6 +330,19 @@ export function EmployeeTable() {
             <div>
               <Label>Email</Label>
               <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@email.com" />
+            </div>
+            <div>
+              <Label>Primary Department</Label>
+              <Select value={form.primary_department} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, primary_department: v as 'foh' | 'boh' | 'hybrid' }))}>
+                <SelectTrigger>
+                  <span>{getDepartmentLabel(form.primary_department, departmentDefinitions)}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {departmentDefinitions.map(definition => (
+                    <SelectItem key={definition.key} value={definition.key}>{definition.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -338,11 +374,11 @@ export function EmployeeTable() {
               <Label>Role</Label>
               <Select value={form.role} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
                 <SelectTrigger>
-                  <span>{ROLE_LABELS[form.role]}</span>
+                  <span>{getRoleLabel(form.role, roleDefinitions)}</span>
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLES.map(r => (
-                    <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>
+                  {roleDefinitions.map(r => (
+                    <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

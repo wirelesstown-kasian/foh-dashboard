@@ -1,5 +1,6 @@
 import { addDays, addMonths, addWeeks, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays, subMonths, subWeeks } from 'date-fns'
 import { Employee } from '@/lib/types'
+import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 
 export type ReportPeriod = 'daily' | 'weekly' | 'monthly' | 'custom'
 export type ReportDepartment = 'foh' | 'boh'
@@ -13,9 +14,7 @@ export function getPercent(value: number) {
 }
 
 export function isEmployeeInDepartment(employee: Employee, department: ReportDepartment) {
-  return department === 'boh'
-    ? employee.role === 'kitchen_staff' || employee.role === 'manager'
-    : employee.role !== 'kitchen_staff'
+  return employeeMatchesScheduleDepartment(employee, department)
 }
 
 export function getReportRange(period: ReportPeriod, refDate: Date, customStart: string, customEnd: string): [string, string] {

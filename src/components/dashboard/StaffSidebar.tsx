@@ -2,7 +2,9 @@
 
 import { Employee, Schedule, ShiftClock } from '@/lib/types'
 import { formatTime, calcHours, formatHours, getBusinessDate, isBirthdayToday } from '@/lib/dateUtils'
+import { getDepartmentLabel, getFallbackScheduleDepartment, getRoleLabel } from '@/lib/organization'
 import { Gift, Phone } from 'lucide-react'
+import { useAppSettings } from '@/components/useAppSettings'
 
 interface Props {
   schedules: Schedule[]
@@ -10,11 +12,9 @@ interface Props {
   clockRecords: ShiftClock[]
 }
 
-function isBohRole(role: Employee['role']) {
-  return role === 'kitchen_staff'
-}
-
 export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
+  const { roleDefinitions, departmentDefinitions } = useAppSettings()
+
   const businessDate = getBusinessDate()
   const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
   const clockActivityEmployeeIds = new Set(clockRecords.map(record => record.employee_id))
@@ -27,8 +27,8 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
   }).filter(entry => entry.employee)
 
   const groupedStaff = {
-    foh: staffOnToday.filter(({ employee }) => !isBohRole(employee!.role)),
-    boh: staffOnToday.filter(({ employee }) => isBohRole(employee!.role)),
+    foh: staffOnToday.filter(({ employee, schedule }) => (schedule?.department ?? getFallbackScheduleDepartment(employee!)) === 'foh'),
+    boh: staffOnToday.filter(({ employee, schedule }) => (schedule?.department ?? getFallbackScheduleDepartment(employee!)) === 'boh'),
   }
 
   return (
@@ -92,7 +92,7 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                         <Gift className="w-3.5 h-3.5 text-pink-500" />
                       )}
                     </div>
-                    <span className="text-[11px] uppercase tracking-wide text-slate-500">{employee!.role.replace('_', ' ')}</span>
+                    <span className="text-[11px] uppercase tracking-wide text-slate-500">{getRoleLabel(employee!.role, roleDefinitions)}</span>
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-700">
                     {schedule ? (
@@ -102,7 +102,7 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                       </>
                     ) : (
                       <>
-                        <span className="text-slate-500">No schedule</span>
+                        <span className="text-slate-500">{getDepartmentLabel(employee?.primary_department ?? 'foh', departmentDefinitions)}</span>
                         <span className="text-slate-500">Clock-in only</span>
                       </>
                     )}

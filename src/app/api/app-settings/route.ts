@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { getEmailSettings, saveEmailSettings } from '@/lib/appSettings'
+import { getAppSettings, saveAppSettings } from '@/lib/appSettings'
 
 async function requireAdmin() {
   const cookieStore = await cookies()
@@ -14,7 +14,7 @@ export async function GET() {
   }
 
   try {
-    return NextResponse.json({ settings: await getEmailSettings() })
+    return NextResponse.json({ settings: await getAppSettings() })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load email settings' }, { status: 500 })
   }
@@ -27,7 +27,7 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const settings = await saveEmailSettings(body)
+    const settings = await saveAppSettings(body)
     return NextResponse.json({ success: true, settings })
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to save email settings' }, { status: 500 })

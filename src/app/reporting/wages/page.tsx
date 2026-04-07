@@ -3,14 +3,15 @@
 import { useMemo, useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
-import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
+import { useAppSettings } from '@/components/useAppSettings'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { getRoleLabel } from '@/lib/organization'
 
 type TipReportView = 'earnings' | 'tips'
 
@@ -18,6 +19,7 @@ export default function WageReportPage() {
   const employees = useEmployees()
   const eodReports = useEodReports()
   const { clockRecords } = useClockRecords()
+  const { roleDefinitions } = useAppSettings()
 
   const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
@@ -93,7 +95,6 @@ export default function WageReportPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <ReportingNav />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
@@ -148,7 +149,7 @@ export default function WageReportPage() {
             {displayedRows.map(row => (
               <TableRow key={row.emp.id}>
                 <TableCell className="font-medium">{row.emp.name}</TableCell>
-                <TableCell className="capitalize text-muted-foreground">{row.emp.role}</TableCell>
+                <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
                 <TableCell>
                   {row.hasOpenClock ? (
                     <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge>

@@ -42,7 +42,7 @@ export default function DashboardPage() {
       setLoadError(null)
 
       const [empRes, schRes, catRes, taskRes, compRes, sessRes, clockRes] = await Promise.all([
-        supabase.from('employees').select('*').eq('is_active', true),
+        supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true),
         supabase.from('schedules').select('*').eq('date', today),
         supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
         supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),

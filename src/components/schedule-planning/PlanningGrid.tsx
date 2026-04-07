@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, Schedule, ScheduleDepartment } from '@/lib/types'
+import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 import {
   getWeekDays, getPrevWeek, getNextWeek, formatDate,
   formatDisplayDate, formatWeekRange, getDayName, calcHours, formatHours, formatTime
@@ -15,6 +16,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download } from 'lucide-react'
+import { useAppSettings } from '@/components/useAppSettings'
+import { getRoleLabel } from '@/lib/organization'
 
 type ShiftDraft = {
   id?: string
@@ -121,18 +124,13 @@ async function saveServerDrafts(
   if (insertDrafts.error) throw insertDrafts.error
 }
 
-function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartment) {
-  return department === 'boh'
-    ? employee.role === 'kitchen_staff' || employee.role === 'manager'
-    : employee.role !== 'kitchen_staff'
-}
-
 interface PlanningGridProps {
   department: ScheduleDepartment
   rightSlot?: React.ReactNode
 }
 
 export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
+  const { roleDefinitions } = useAppSettings()
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -210,12 +208,12 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const key = `${draftKey(days[0])}_${department}`
 
     const [empRes, schRes, draftWeekRes, draftRes] = await Promise.all([
-      supabase.from('employees').select('*').eq('is_active', true).order('name'),
-      supabase.from('schedules').select('*, employee:employees(id, name, role, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
+      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
       supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('display_order').order('date'),
     ])
-    const activeEmployees = (empRes.data ?? []).filter(employee => isEmployeeInDepartment(employee, department))
+    const activeEmployees = (empRes.data ?? []).filter(employee => employeeMatchesScheduleDepartment(employee, department))
     // schedules query is already filtered by department — no role-based filtering needed
     const departmentSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
     const namesById = new Map<string, string>()
@@ -239,10 +237,14 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               id: schedule.employee_id,
               name: namesById.get(schedule.employee_id) ?? `Staff ${schedule.employee_id.slice(0, 6)}`,
               role: 'server',
+              primary_department: department,
               phone: null,
               email: null,
+              hourly_wage: null,
+              guaranteed_hourly: null,
               pin_hash: '',
               birth_date: null,
+              login_enabled: false,
               is_active: false,
               created_at: '',
             },
@@ -485,7 +487,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         <tr>
           <td>
             <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
-            <div class="muted">${employee.role.replace('_', ' ')}</div>
+            <div class="muted">${getRoleLabel(employee.role, roleDefinitions)}</div>
           </td>
           ${dayCells}
           <td class="weekly-total">${formatHours(getWeeklyHours(employee.id))}</td>
@@ -993,7 +995,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                                   onChange={e => setStaffToAdd(cur => e.target.checked ? [...cur, employee.id] : cur.filter(id => id !== employee.id))}
                                 />
                                 <span>{employee.name}</span>
-                                <span className="text-xs text-slate-500 capitalize">{employee.role.replace('_', ' ')}</span>
+                                <span className="text-xs text-slate-500">{getRoleLabel(employee.role, roleDefinitions)}</span>
                               </label>
                             )
                           })}

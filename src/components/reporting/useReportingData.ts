@@ -10,7 +10,7 @@ export function useEmployees() {
   useEffect(() => {
     let mounted = true
     void (async () => {
-      const res = await supabase.from('employees').select('*').eq('is_active', true).order('name')
+      const res = await supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name')
       if (!mounted) return
       setEmployees(res.data ?? [])
     })()

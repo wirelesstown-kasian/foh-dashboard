@@ -6,16 +6,24 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { EmployeeRole } from '@/lib/types'
 import { isValidPin } from '@/lib/validation'
 import { hashPassword } from '@/lib/password'
-
-const VALID_ROLES: EmployeeRole[] = ['manager', 'server', 'busser', 'runner', 'kitchen_staff']
+import { getAppSettings } from '@/lib/appSettings'
 
 async function requireAdmin() {
   const cookieStore = await cookies()
   return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
-function isValidRole(role: unknown): role is EmployeeRole {
-  return typeof role === 'string' && VALID_ROLES.includes(role as EmployeeRole)
+async function getValidRoles() {
+  const settings = await getAppSettings()
+  return settings.role_definitions.filter(definition => definition.is_active).map(definition => definition.key)
+}
+
+async function isValidRole(role: unknown): Promise<boolean> {
+  return typeof role === 'string' && (await getValidRoles()).includes(role as EmployeeRole)
+}
+
+function isValidPrimaryDepartment(primaryDepartment: unknown) {
+  return primaryDepartment === 'foh' || primaryDepartment === 'boh' || primaryDepartment === 'hybrid'
 }
 
 export async function GET() {
@@ -25,7 +33,7 @@ export async function GET() {
 
   const { data, error } = await supabaseAdmin
     .from('employees')
-    .select('id, name, phone, email, role, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at')
+    .select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at')
     .eq('is_active', true)
     .order('name')
 
@@ -41,12 +49,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, role, birth_date, pin, hourly_wage, guaranteed_hourly, login_enabled, login_password } = await req.json()
+  const { name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, login_enabled, login_password } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
-  if (!isValidRole(role)) {
+  if (!(await isValidRole(role))) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+  }
+  if (!isValidPrimaryDepartment(primary_department)) {
+    return NextResponse.json({ error: 'Invalid primary department' }, { status: 400 })
   }
   if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'PIN must be 4 digits' }, { status: 400 })
@@ -74,6 +85,7 @@ export async function POST(req: NextRequest) {
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null,
     role,
+    primary_department,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
@@ -94,15 +106,18 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, role, birth_date, pin, hourly_wage, guaranteed_hourly, login_enabled, login_password } = await req.json()
+  const { id, name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, login_enabled, login_password } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
-  if (!isValidRole(role)) {
+  if (!(await isValidRole(role))) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+  }
+  if (!isValidPrimaryDepartment(primary_department)) {
+    return NextResponse.json({ error: 'Invalid primary department' }, { status: 400 })
   }
   if (login_enabled === true && !(typeof email === 'string' && email.trim())) {
     return NextResponse.json({ error: 'Email is required when app login is enabled' }, { status: 400 })
@@ -122,6 +137,7 @@ export async function PATCH(req: NextRequest) {
     phone: string | null
     email: string | null
     role: EmployeeRole
+    primary_department: 'foh' | 'boh' | 'hybrid'
     hourly_wage: number | null
     guaranteed_hourly: number | null
     birth_date: string | null
@@ -133,6 +149,7 @@ export async function PATCH(req: NextRequest) {
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null,
     role,
+    primary_department,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,

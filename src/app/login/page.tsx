@@ -1,8 +1,9 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { LockKeyhole, Mail } from 'lucide-react'
+import { ArrowLeft, LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -68,6 +69,19 @@ export default function LoginPage() {
           </p>
         </div>
 
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <div className="flex items-start gap-2">
+            <ShieldCheck className="mt-0.5 h-4 w-4 text-violet-600" />
+            <div>
+              <p className="font-medium text-slate-800">Existing manager PIN access still works.</p>
+              <p className="mt-1">
+                Managers can go back to the dashboard and open <span className="font-medium">Admin Board</span> with the
+                usual PIN. Use this page only after an app login has been enabled in Staffing.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="space-y-4">
           <div>
             <Label>Email</Label>
@@ -104,9 +118,15 @@ export default function LoginPage() {
           >
             {saving ? 'Signing In…' : 'Sign In'}
           </Button>
+          <Link
+            href="/"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back To Dashboard
+          </Link>
         </div>
       </div>
     </div>
   )
 }
-

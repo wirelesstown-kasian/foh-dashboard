@@ -1,7 +1,8 @@
-export type EmployeeRole = 'manager' | 'server' | 'busser' | 'runner' | 'kitchen_staff'
+export type EmployeeRole = string
 export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
 export type SessionPhase = 'pre_shift' | 'operation' | 'closing' | 'complete'
 export type ScheduleDepartment = 'foh' | 'boh'
+export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
 export type TaskCompletionStatus = 'complete' | 'incomplete'
 export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
 
@@ -12,6 +13,7 @@ export interface Employee {
   email: string | null
   pin_hash?: string
   role: EmployeeRole
+  primary_department?: PrimaryDepartment
   hourly_wage: number | null
   guaranteed_hourly: number | null
   birth_date: string | null
@@ -26,6 +28,7 @@ export interface Schedule {
   date: string
   start_time: string
   end_time: string
+  department?: ScheduleDepartment
   created_at: string
   employee?: Employee
 }

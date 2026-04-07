@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 
-const ADMIN_PATHS = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/reporting', '/email-settings']
+const ADMIN_PATHS = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/roles-departments', '/reporting', '/email-settings']
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -23,5 +23,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/task-admin/:path*', '/staffing/:path*', '/schedule-planning/:path*', '/reporting/:path*', '/email-settings/:path*'],
+  matcher: ['/admin/:path*', '/task-admin/:path*', '/staffing/:path*', '/schedule-planning/:path*', '/roles-departments/:path*', '/reporting/:path*', '/email-settings/:path*'],
 }

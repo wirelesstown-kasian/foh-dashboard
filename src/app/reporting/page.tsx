@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { BarChart3, ClipboardCheck, DollarSign, FileClock, ReceiptText } from 'lucide-react'
 
 const reportingCards = [
@@ -47,7 +46,6 @@ export default function ReportingHomePage() {
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
-      <ReportingNav />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {reportingCards.map(card => {
           const Icon = card.icon

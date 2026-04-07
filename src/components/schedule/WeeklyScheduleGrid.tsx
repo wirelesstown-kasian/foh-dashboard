@@ -3,18 +3,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, Schedule, ScheduleDepartment } from '@/lib/types'
+import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 import {
   getWeekDays, getPrevWeek, getNextWeek, formatDate,
   formatDisplayDate, formatWeekRange, getDayName, calcHours, formatHours, formatTime
 } from '@/lib/dateUtils'
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
-
-function isEmployeeInDepartment(employee: Employee, department: ScheduleDepartment) {
-  return department === 'boh'
-    ? employee.role === 'kitchen_staff' || employee.role === 'manager'
-    : employee.role !== 'kitchen_staff'
-}
+import { useAppSettings } from '@/components/useAppSettings'
+import { getRoleLabel } from '@/lib/organization'
 
 interface WeeklyScheduleGridProps {
   department: ScheduleDepartment
@@ -22,6 +19,7 @@ interface WeeklyScheduleGridProps {
 }
 
 export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGridProps) {
+  const { roleDefinitions } = useAppSettings()
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -40,12 +38,12 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     const endDate = formatDate(days[6])
 
     const [empRes, schRes, draftRes] = await Promise.all([
-      supabase.from('employees').select('*').eq('is_active', true).order('name'),
-      supabase.from('schedules').select('*, employee:employees(id, name, role, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
+      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_drafts').select('employee_id, display_order').eq('week_start', startDate).eq('department', department).order('display_order'),
     ])
 
-    const activeEmployees = (empRes.data ?? []).filter(employee => isEmployeeInDepartment(employee, department))
+    const activeEmployees = (empRes.data ?? []).filter(employee => employeeMatchesScheduleDepartment(employee, department))
     // schedules query is already filtered by department — no role-based filtering needed
     const departmentSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
     const namesById = new Map<string, string>()
@@ -69,10 +67,14 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
               id: schedule.employee_id,
               name: namesById.get(schedule.employee_id) ?? `Staff ${schedule.employee_id.slice(0, 6)}`,
               role: department === 'boh' ? 'kitchen_staff' : 'server',
+              primary_department: department,
               phone: null,
               email: null,
+              hourly_wage: null,
+              guaranteed_hourly: null,
               pin_hash: '',
               birth_date: null,
+              login_enabled: false,
               is_active: false,
               created_at: '',
             },
@@ -141,7 +143,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
         <tr>
           <td>
             <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
-            <div class="muted">${employee.role.replace('_', ' ')}</div>
+            <div class="muted">${getRoleLabel(employee.role, roleDefinitions)}</div>
           </td>
           ${dayCells}
         </tr>
@@ -272,7 +274,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                   <tr key={emp.id} className="border-b border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-slate-100">
                     <td className="sticky left-0 z-[1] p-3.5 align-top border-r border-slate-200 bg-inherit">
                       <div className="font-semibold text-[15px] text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
-                      <div className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">{emp.role.replace('_', ' ')}{!emp.is_active ? ' • archived' : ''}</div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">{getRoleLabel(emp.role, roleDefinitions)}{!emp.is_active ? ' • archived' : ''}</div>
                     </td>
                     {renderedDays.map(d => {
                       const dateStr = formatDate(d)

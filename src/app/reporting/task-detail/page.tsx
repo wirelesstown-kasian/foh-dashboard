@@ -1,10 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { format, getDay } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
-import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useEmployees, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
@@ -22,29 +21,32 @@ type TaskDetailRow = {
   completedAt: string | null
 }
 
+type TaskViewMode = 'employee' | 'task'
+
+type TaskSummaryRow = {
+  key: string
+  date: string
+  task: Task
+  completeNames: string[]
+  incompleteNames: string[]
+  openNames: string[]
+}
+
 export default function TaskDetailPage() {
   const employees = useEmployees()
   const completions = useTaskCompletions()
   const tasks = useTasks() as (Task & { category?: { type?: string } })[]
+  const initialParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
 
-  const [department, setDepartment] = useState<ReportDepartment>('foh')
+  const [department, setDepartment] = useState<ReportDepartment>(
+    initialParams?.get('department') === 'boh' ? 'boh' : 'foh'
+  )
   const [period, setPeriod] = useState<ReportPeriod>('daily')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
-  const [employeeFilter, setEmployeeFilter] = useState('all')
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const nextDepartment = params.get('department')
-    const nextEmployee = params.get('employee')
-    if (nextDepartment === 'foh' || nextDepartment === 'boh') {
-      setDepartment(nextDepartment)
-    }
-    if (nextEmployee) {
-      setEmployeeFilter(nextEmployee)
-    }
-  }, [])
+  const [viewMode, setViewMode] = useState<TaskViewMode>('employee')
+  const [employeeFilter, setEmployeeFilter] = useState(initialParams?.get('employee') ?? 'all')
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -107,6 +109,37 @@ export default function TaskDetailPage() {
     () => (employeeFilter === 'all' ? detailRows : detailRows.filter(row => row.employee.id === employeeFilter)),
     [detailRows, employeeFilter]
   )
+  const taskSummaryRows = useMemo<TaskSummaryRow[]>(() => {
+    const grouped = new Map<string, TaskSummaryRow>()
+
+    for (const row of detailRows) {
+      const key = `${row.date}:${row.task.id}`
+      const existing = grouped.get(key) ?? {
+        key,
+        date: row.date,
+        task: row.task,
+        completeNames: [],
+        incompleteNames: [],
+        openNames: [],
+      }
+
+      if (employeeFilter !== 'all' && row.employee.id !== employeeFilter) {
+        grouped.set(key, existing)
+        continue
+      }
+
+      if (row.status === 'complete') existing.completeNames.push(row.employee.name)
+      else if (row.status === 'incomplete') existing.incompleteNames.push(row.employee.name)
+      else existing.openNames.push(row.employee.name)
+
+      grouped.set(key, existing)
+    }
+
+    return [...grouped.values()].sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? -1 : 1
+      return a.task.title.localeCompare(b.task.title)
+    })
+  }, [detailRows, employeeFilter])
 
   return (
     <div className="p-6">
@@ -116,7 +149,6 @@ export default function TaskDetailPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <ReportingNav />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
@@ -129,61 +161,106 @@ export default function TaskDetailPage() {
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
           leftSlot={
-            <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)}>
-              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Staff</SelectItem>
-                {filteredEmployees.map(employee => (
-                  <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <>
+              <Select value={viewMode} onValueChange={(value: string | null) => value && setViewMode(value as TaskViewMode)}>
+                <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="employee">By Employee</SelectItem>
+                  <SelectItem value="task">By Task</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)}>
+                <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Staff</SelectItem>
+                  {filteredEmployees.map(employee => (
+                    <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
           }
         />
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Employee</TableHead>
-              <TableHead>Task</TableHead>
-              <TableHead>Phase</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Completed At</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {displayedRows.map(row => (
-              <TableRow key={row.id}>
-                <TableCell className="font-medium">{format(new Date(`${row.date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
-                <TableCell>{row.employee.name}</TableCell>
-                <TableCell>{row.task.title}</TableCell>
-                <TableCell className="capitalize text-muted-foreground">{row.task.category?.type?.replace('_', ' ') ?? '—'}</TableCell>
-                <TableCell>
-                  <Badge
-                    variant="outline"
-                    className={
-                      row.status === 'complete'
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                        : row.status === 'incomplete'
-                          ? 'border-red-300 bg-red-50 text-red-700'
-                          : 'border-amber-300 bg-amber-50 text-amber-800'
-                    }
-                  >
-                    {row.status === 'open' ? 'Open' : row.status === 'incomplete' ? 'Incomplete' : 'Complete'}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right text-muted-foreground">
-                  {row.completedAt ? format(new Date(row.completedAt), 'p') : '—'}
-                </TableCell>
-              </TableRow>
-            ))}
-            {displayedRows.length === 0 && (
+        {viewMode === 'employee' ? (
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No task rows for this range</TableCell>
+                <TableHead>Date</TableHead>
+                <TableHead>Employee</TableHead>
+                <TableHead>Task</TableHead>
+                <TableHead>Phase</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Completed At</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {displayedRows.map(row => (
+                <TableRow key={row.id}>
+                  <TableCell className="font-medium">{format(new Date(`${row.date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
+                  <TableCell>{row.employee.name}</TableCell>
+                  <TableCell>{row.task.title}</TableCell>
+                  <TableCell className="capitalize text-muted-foreground">{row.task.category?.type?.replace('_', ' ') ?? '—'}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={
+                        row.status === 'complete'
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                          : row.status === 'incomplete'
+                            ? 'border-red-300 bg-red-50 text-red-700'
+                            : 'border-amber-300 bg-amber-50 text-amber-800'
+                      }
+                    >
+                      {row.status === 'open' ? 'Open' : row.status === 'incomplete' ? 'Incomplete' : 'Complete'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {row.completedAt ? format(new Date(row.completedAt), 'p') : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {displayedRows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No task rows for this range</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Task</TableHead>
+                <TableHead>Phase</TableHead>
+                <TableHead>Complete</TableHead>
+                <TableHead>Incomplete</TableHead>
+                <TableHead>Open</TableHead>
+                <TableHead className="text-right">Summary</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {taskSummaryRows.map(row => (
+                <TableRow key={row.key}>
+                  <TableCell className="font-medium">{format(new Date(`${row.date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
+                  <TableCell>{row.task.title}</TableCell>
+                  <TableCell className="capitalize text-muted-foreground">{row.task.category?.type?.replace('_', ' ') ?? '—'}</TableCell>
+                  <TableCell className="text-sm text-emerald-700">{row.completeNames.length > 0 ? row.completeNames.join(', ') : '—'}</TableCell>
+                  <TableCell className="text-sm text-red-700">{row.incompleteNames.length > 0 ? row.incompleteNames.join(', ') : '—'}</TableCell>
+                  <TableCell className="text-sm text-amber-800">{row.openNames.length > 0 ? row.openNames.join(', ') : '—'}</TableCell>
+                  <TableCell className="text-right text-sm text-muted-foreground">
+                    {row.completeNames.length} complete / {row.incompleteNames.length} incomplete / {row.openNames.length} open
+                  </TableCell>
+                </TableRow>
+              ))}
+              {taskSummaryRows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-6 text-center text-muted-foreground">No task summary for this range</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        )}
       </div>
     </div>
   )

@@ -22,7 +22,7 @@ const publicTabs = [
   { label: 'EOD', href: '/eod', icon: FileText },
 ]
 
-const adminPaths = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/reporting', '/email-settings']
+const adminPaths = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/roles-departments', '/reporting', '/email-settings']
 
 export function TabNav() {
   const pathname = usePathname()
