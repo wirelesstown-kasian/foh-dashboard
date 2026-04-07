@@ -2,13 +2,14 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ClipboardList, Users, CalendarDays, BarChart3, LogOut } from 'lucide-react'
+import { ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck } from 'lucide-react'
 
 const adminCards = [
   { label: 'Task Admin', href: '/task-admin', icon: ClipboardList, description: 'Manage task categories and daily assignments' },
-  { label: 'Staffing', href: '/staffing', icon: Users, description: 'Manage employees, roles, and PINs' },
+  { label: 'Staffing', href: '/staffing', icon: Users, description: 'Manage employees, roles, PINs, and app logins' },
   { label: 'Schedule Planner', href: '/schedule-planning', icon: CalendarDays, description: 'Build and publish weekly schedules' },
   { label: 'Reporting', href: '/reporting', icon: BarChart3, description: 'View EOD reports and analytics' },
+  { label: 'Email Settings', href: '/email-settings', icon: MailCheck, description: 'Control sender details and email triggers' },
 ]
 
 export default function AdminPage() {

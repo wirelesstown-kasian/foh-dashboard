@@ -57,7 +57,23 @@ export function renderEmailShell(logoUrl: string, content: string, maxWidth = 52
   `
 }
 
-export async function sendEmail(resendKey: string, to: string, subject: string, html: string) {
+export async function sendEmail({
+  resendKey,
+  to,
+  subject,
+  html,
+  fromName = 'FOH Dashboard',
+  fromEmail = 'noreply@mail.newvillagepub.com',
+  replyTo,
+}: {
+  resendKey: string
+  to: string
+  subject: string
+  html: string
+  fromName?: string
+  fromEmail?: string
+  replyTo?: string | null
+}) {
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -65,8 +81,9 @@ export async function sendEmail(resendKey: string, to: string, subject: string, 
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: 'FOH Dashboard <noreply@mail.newvillagepub.com>',
+      from: `${fromName} <${fromEmail}>`,
       to: [to],
+      reply_to: replyTo && replyTo.trim() ? replyTo.trim() : undefined,
       subject,
       html,
     }),

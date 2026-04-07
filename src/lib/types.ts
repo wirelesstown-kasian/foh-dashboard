@@ -10,11 +10,12 @@ export interface Employee {
   name: string
   phone: string | null
   email: string | null
-  pin_hash: string
+  pin_hash?: string
   role: EmployeeRole
   hourly_wage: number | null
   guaranteed_hourly: number | null
   birth_date: string | null
+  login_enabled?: boolean
   is_active: boolean
   created_at: string
 }

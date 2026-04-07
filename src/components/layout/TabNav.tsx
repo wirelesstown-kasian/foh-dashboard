@@ -12,6 +12,8 @@ import {
   FileText,
   ShieldCheck,
   Lock,
+  UserRound,
+  LogOut,
 } from 'lucide-react'
 
 const publicTabs = [
@@ -20,11 +22,12 @@ const publicTabs = [
   { label: 'EOD', href: '/eod', icon: FileText },
 ]
 
-const adminPaths = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/reporting']
+const adminPaths = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/reporting', '/email-settings']
 
 export function TabNav() {
   const pathname = usePathname()
   const router = useRouter()
+  const [appUserName, setAppUserName] = useState<string | null>(null)
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [adminNeedsSetup, setAdminNeedsSetup] = useState(false)
   const [adminAvailable, setAdminAvailable] = useState(false)
@@ -72,6 +75,32 @@ export function TabNav() {
     }
   }, [])
 
+  useEffect(() => {
+    let mounted = true
+
+    void (async () => {
+      const res = await fetch('/api/app-session', { cache: 'no-store' })
+      const data = res.ok
+        ? await res.json() as { authenticated?: boolean; employee?: { name?: string } }
+        : {}
+
+      if (!mounted) return
+      setAppUserName(data.authenticated ? data.employee?.name ?? 'Signed In' : null)
+    })()
+
+    return () => {
+      mounted = false
+    }
+  }, [pathname])
+
+  const handleLogout = async () => {
+    await fetch('/api/app-session', { method: 'DELETE' })
+    setAppUserName(null)
+    setAdminUnlocked(false)
+    router.push('/')
+    router.refresh()
+  }
+
   const handleAdminClick = () => {
     if (adminNeedsSetup) {
       router.push('/setup-admin')
@@ -101,6 +130,10 @@ export function TabNav() {
   }
 
   const isOnAdminPage = adminPaths.some(path => pathname === path || pathname.startsWith(`${path}/`))
+
+  if (pathname === '/login') {
+    return null
+  }
 
   return (
     <>
@@ -165,6 +198,32 @@ export function TabNav() {
               : <Lock className="w-3 h-3 ml-1" />
             }
           </button>
+
+          <div className="ml-auto flex items-center gap-2">
+            {appUserName ? (
+              <>
+                <div className="hidden rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 md:flex md:items-center md:gap-2">
+                  <UserRound className="h-4 w-4 text-amber-400" />
+                  {appUserName}
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/login"
+                className="flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+              >
+                <UserRound className="h-4 w-4" />
+                Login
+              </Link>
+            )}
+          </div>
         </div>
       </nav>
 

@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getEmailSettings } from '@/lib/appSettings'
 
 type WageReportPeriod = 'daily' | 'weekly' | 'monthly'
 type WageReportView = 'earnings' | 'tips'
@@ -59,6 +60,10 @@ export async function POST(req: NextRequest) {
 
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })
+  const emailSettings = await getEmailSettings()
+  if (!emailSettings.wage_report_emails_enabled) {
+    return NextResponse.json({ success: true, skipped: true, message: 'Wage report emails are disabled in Email Settings' })
+  }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
@@ -149,12 +154,15 @@ export async function POST(req: NextRequest) {
     </table>
   `, 520)
 
-  await sendEmail(
+  await sendEmail({
     resendKey,
-    employee.email,
-    `${view === 'earnings' ? 'Earnings' : 'Tip'} Report — ${label}`,
-    html
-  )
+    to: employee.email,
+    subject: `${view === 'earnings' ? 'Earnings' : 'Tip'} Report — ${label}`,
+    html,
+    fromName: emailSettings.from_name,
+    fromEmail: emailSettings.from_email,
+    replyTo: emailSettings.reply_to,
+  })
 
   return NextResponse.json({ success: true })
 }

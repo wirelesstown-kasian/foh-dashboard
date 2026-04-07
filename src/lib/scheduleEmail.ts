@@ -8,6 +8,7 @@ import {
   renderEmailShell,
   sendEmail,
 } from '@/lib/emailUtils'
+import { getEmailSettings } from '@/lib/appSettings'
 
 export async function sendWeeklyScheduleEmails({
   weekStart,
@@ -20,6 +21,10 @@ export async function sendWeeklyScheduleEmails({
 }) {
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) throw new Error('RESEND_API_KEY not configured')
+  const emailSettings = await getEmailSettings()
+  if (!emailSettings.schedule_emails_enabled) {
+    return { success: true, sent: 0, message: 'Schedule emails are disabled in Email Settings' }
+  }
 
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
@@ -169,7 +174,15 @@ export async function sendWeeklyScheduleEmails({
 
     const weekStartShort = weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     emailPromises.push(
-      sendEmail(resendKey, employee.email, `Your Schedule — Week of ${weekStartShort}`, html)
+      sendEmail({
+        resendKey,
+        to: employee.email,
+        subject: `Your Schedule — Week of ${weekStartShort}`,
+        html,
+        fromName: emailSettings.from_name,
+        fromEmail: emailSettings.from_email,
+        replyTo: emailSettings.reply_to,
+      })
     )
   }
 

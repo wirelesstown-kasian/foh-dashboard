@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { getEmailSettings } from '@/lib/appSettings'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-
-const ADMIN_EMAIL = 'admin@newvillagepub.com'
 
 type TipDist = {
   employee_id: string
@@ -62,6 +61,7 @@ export async function POST(req: NextRequest) {
 
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })
+  const emailSettings = await getEmailSettings()
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
@@ -257,13 +257,23 @@ export async function POST(req: NextRequest) {
         <p style="color:#6b7280;font-size:12px;margin-top:16px;line-height:1.7">
           Please do not reply to this email. If you have any questions about your tip summary,
           speak with your manager or reach us at
-          <a href="mailto:admin@newvillagepub.com" style="color:#374151">admin@newvillagepub.com</a>.
+          <a href="mailto:${emailSettings.reply_to}" style="color:#374151">${emailSettings.reply_to}</a>.
         </p>
         <p style="color:#aaa;font-size:11px;margin-top:4px">New Village Pub · FOH Dashboard</p>
     `, 480)
-    emailPromises.push(
-      sendEmail(resendKey, dist.employee.email, `Your Tip — ${report.session_date}`, html)
-    )
+    if (emailSettings.eod_tip_emails_enabled) {
+      emailPromises.push(
+        sendEmail({
+          resendKey,
+          to: dist.employee.email,
+          subject: `Your Tip — ${report.session_date}`,
+          html,
+          fromName: emailSettings.from_name,
+          fromEmail: emailSettings.from_email,
+          replyTo: emailSettings.reply_to,
+        })
+      )
+    }
   }
 
   // 2. Full revenue and tip settlement report to admin only
@@ -304,9 +314,19 @@ export async function POST(req: NextRequest) {
       </table>
       <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
   `)
-  emailPromises.push(
-    sendEmail(resendKey, ADMIN_EMAIL, `EOD Report — ${report.session_date}`, adminEodHtml)
-  )
+  if (emailSettings.eod_admin_summary_enabled) {
+    emailPromises.push(
+      sendEmail({
+        resendKey,
+        to: emailSettings.eod_report_email,
+        subject: `EOD Report — ${report.session_date}`,
+        html: adminEodHtml,
+        fromName: emailSettings.from_name,
+        fromEmail: emailSettings.from_email,
+        replyTo: emailSettings.reply_to,
+      })
+    )
+  }
 
   // 3. Sunday weekly summary to admin
   const sessionDay = new Date(report.session_date + 'T12:00:00').getDay() // 0 = Sunday
@@ -398,9 +418,19 @@ export async function POST(req: NextRequest) {
           <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
       `, 640)
 
-      emailPromises.push(
-        sendEmail(resendKey, ADMIN_EMAIL, `Weekly Summary — ${summaryWeekStart} to ${summaryWeekEnd}`, weeklyHtml)
-      )
+      if (emailSettings.eod_admin_summary_enabled) {
+        emailPromises.push(
+          sendEmail({
+            resendKey,
+            to: emailSettings.eod_report_email,
+            subject: `Weekly Summary — ${summaryWeekStart} to ${summaryWeekEnd}`,
+            html: weeklyHtml,
+            fromName: emailSettings.from_name,
+            fromEmail: emailSettings.from_email,
+            replyTo: emailSettings.reply_to,
+          })
+        )
+      }
     }
   }
 

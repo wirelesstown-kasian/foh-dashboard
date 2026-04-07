@@ -48,11 +48,13 @@ interface FormState {
   guaranteed_hourly: string
   birth_date: string
   pin: string
+  login_enabled: 'enabled' | 'disabled'
+  login_password: string
 }
 
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '' }
+const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
 const ROLE_LABELS: Record<EmployeeRole, string> = {
   manager: 'Manager',
   server: 'Server',
@@ -104,6 +106,8 @@ export function EmployeeTable() {
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       birth_date: emp.birth_date ?? '',
       pin: '',
+      login_enabled: emp.login_enabled ? 'enabled' : 'disabled',
+      login_password: '',
     })
     setDialogOpen(true)
   }
@@ -121,6 +125,7 @@ export function EmployeeTable() {
           body: JSON.stringify({
             id: editTarget.id,
             ...form,
+            login_enabled: form.login_enabled === 'enabled',
           }),
         })
         const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -129,7 +134,10 @@ export function EmployeeTable() {
         const res = await fetch('/api/employees', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
+          body: JSON.stringify({
+            ...form,
+            login_enabled: form.login_enabled === 'enabled',
+          }),
         })
         const data = (await res.json().catch(() => ({}))) as { error?: string }
         if (!res.ok) { setSaveError(data.error ?? 'Failed to create employee'); return }
@@ -223,6 +231,7 @@ export function EmployeeTable() {
               <TableHead>Guaranteed / Hr</TableHead>
               <TableHead>Birthday</TableHead>
               <TableHead>PIN</TableHead>
+              <TableHead>App Login</TableHead>
               <TableHead className="w-24">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -253,6 +262,11 @@ export function EmployeeTable() {
                   <Badge variant="outline">••••</Badge>
                 </TableCell>
                 <TableCell>
+                  <Badge variant={emp.login_enabled ? 'default' : 'outline'}>
+                    {emp.login_enabled ? 'Enabled' : 'Disabled'}
+                  </Badge>
+                </TableCell>
+                <TableCell>
                   <div className="flex gap-2">
                     <Button size="sm" variant="ghost" onClick={() => openEdit(emp)}>
                       <Pencil className="w-4 h-4" />
@@ -266,7 +280,7 @@ export function EmployeeTable() {
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No employees found
                 </TableCell>
               </TableRow>
@@ -294,6 +308,32 @@ export function EmployeeTable() {
               <Label>Email</Label>
               <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@email.com" />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>App Login</Label>
+                <Select value={form.login_enabled} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, login_enabled: v as 'enabled' | 'disabled' }))}>
+                  <SelectTrigger>
+                    <span>{form.login_enabled === 'enabled' ? 'Enabled' : 'Disabled'}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                    <SelectItem value="enabled">Enabled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>{editTarget ? 'Reset Login Password' : 'Login Password'}</Label>
+                <Input
+                  type="password"
+                  value={form.login_password}
+                  onChange={e => setForm(f => ({ ...f, login_password: e.target.value }))}
+                  placeholder={editTarget ? 'Leave blank to keep current' : 'At least 8 chars'}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Enable app login for people who should sign into the web app with email and password. Managers who sign in this way also unlock Admin Board access.
+            </p>
             <div>
               <Label>Role</Label>
               <Select value={form.role} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
