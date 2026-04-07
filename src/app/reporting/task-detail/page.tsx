@@ -7,6 +7,7 @@ import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useEmployees, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { Task } from '@/lib/types'
@@ -18,6 +19,15 @@ type TaskSummaryRow = {
   completeEntries: string[]
   incompleteEntries: string[]
   status: 'complete' | 'incomplete' | 'mixed' | 'open'
+}
+
+type TaskSortOption = 'date' | 'phase' | 'status' | 'completed_by' | 'incomplete_by'
+
+const STATUS_ORDER: Record<TaskSummaryRow['status'], number> = {
+  complete: 0,
+  mixed: 1,
+  incomplete: 2,
+  open: 3,
 }
 
 export default function TaskDetailPage() {
@@ -33,6 +43,7 @@ export default function TaskDetailPage() {
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
+  const [sortBy, setSortBy] = useState<TaskSortOption>('date')
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -104,8 +115,31 @@ export default function TaskDetailPage() {
       }
     }
 
-    return rows
-  }, [completions, endDate, filteredEmployees, filteredTasks, startDate])
+    return rows.sort((a, b) => {
+      if (sortBy === 'phase') {
+        const phaseCompare = (a.task.category?.type ?? '').localeCompare(b.task.category?.type ?? '')
+        if (phaseCompare !== 0) return phaseCompare
+      }
+
+      if (sortBy === 'status') {
+        const statusCompare = STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
+        if (statusCompare !== 0) return statusCompare
+      }
+
+      if (sortBy === 'completed_by') {
+        const completeCompare = (a.completeEntries[0] ?? 'zzz').localeCompare(b.completeEntries[0] ?? 'zzz')
+        if (completeCompare !== 0) return completeCompare
+      }
+
+      if (sortBy === 'incomplete_by') {
+        const incompleteCompare = (a.incompleteEntries[0] ?? 'zzz').localeCompare(b.incompleteEntries[0] ?? 'zzz')
+        if (incompleteCompare !== 0) return incompleteCompare
+      }
+
+      if (a.date !== b.date) return a.date.localeCompare(b.date)
+      return a.task.title.localeCompare(b.task.title)
+    })
+  }, [completions, endDate, filteredEmployees, filteredTasks, sortBy, startDate])
 
   return (
     <div className="p-6">
@@ -126,6 +160,18 @@ export default function TaskDetailPage() {
           onRefDateChange={setRefDate}
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
+          leftSlot={
+            <Select value={sortBy} onValueChange={(value: string | null) => value && setSortBy(value as TaskSortOption)}>
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="date">Sort: Date</SelectItem>
+                <SelectItem value="phase">Sort: Phase</SelectItem>
+                <SelectItem value="status">Sort: Status</SelectItem>
+                <SelectItem value="completed_by">Sort: Completed By</SelectItem>
+                <SelectItem value="incomplete_by">Sort: Incompleted By</SelectItem>
+              </SelectContent>
+            </Select>
+          }
         />
         <Table>
           <TableHeader>
