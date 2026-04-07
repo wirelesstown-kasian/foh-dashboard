@@ -367,7 +367,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
             <Button
               size="sm"
               variant={selectionMode ? 'default' : 'outline'}
-              className="h-7 px-2 text-xs"
+              className="hidden md:inline-flex h-7 px-2 text-xs"
               onClick={() => {
                 setSelectionMode(value => !value)
                 setSelectedTaskIds([])
@@ -382,7 +382,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-7 px-2 text-xs text-red-400 hover:text-red-600"
+                className="hidden md:inline-flex h-7 px-2 text-xs text-red-400 hover:text-red-600"
                 onClick={() => setShowPhaseResetPin(true)}
               >
                 <RotateCcw className="mr-1 h-3 w-3" /> Reset
@@ -419,13 +419,13 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
           </div>
         )}
 
-        <div className="overflow-y-auto p-3" style={{ maxHeight: 'calc(100vh - 340px)' }}>
+        <div className="overflow-y-auto p-3 max-h-[calc(100vh-220px)] md:max-h-[calc(100vh-340px)]">
           {currentTasks.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No tasks in this phase. Add tasks in Task Admin.
             </p>
           )}
-          <div className="grid grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             {currentTasks.map(task => {
               const status = getTaskStatus(task.id)
               const completion = getCompletion(task.id)

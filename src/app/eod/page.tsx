@@ -750,7 +750,7 @@ export default function EodPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Revenue */}
               <div className={`rounded-xl border p-5 ${financialStyles.card}`}>
                 <h2 className="font-semibold mb-4">Revenue</h2>
@@ -862,7 +862,8 @@ export default function EodPage() {
                   </Button>
                 </div>
               </div>
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-135">
                 <thead>
                   <tr className="border-b text-muted-foreground">
                     <th className="text-left pb-2 font-medium">Name</th>
@@ -927,6 +928,7 @@ export default function EodPage() {
                   </tfoot>
                 )}
               </table>
+              </div>
               <div className={`mt-5 rounded-xl border px-4 py-4 text-center ${
                 tipDistributionSaved ? 'border-emerald-200 bg-emerald-50' : 'border-blue-200 bg-blue-50'
               }`}>

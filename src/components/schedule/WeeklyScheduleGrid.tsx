@@ -245,7 +245,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             </span>
           </div>
           {/* 5. Export */}
-          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportDepartmentPdf}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex h-8 rounded-lg px-3" onClick={exportDepartmentPdf}>
             <Download className="w-4 h-4 mr-1.5" />
             Export PDF
           </Button>

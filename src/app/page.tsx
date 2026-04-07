@@ -153,7 +153,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <PerformanceBar employees={employees} completions={completions} today={today} />
+        <div className="hidden md:block">
+          <PerformanceBar employees={employees} completions={completions} today={today} />
+        </div>
         {doneTasks !== completedTasks && (
           <p className="text-xs text-muted-foreground">
             {completedTasks} completed, {doneTasks - completedTasks} marked incomplete
@@ -165,7 +167,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="flex items-start gap-4">
+        <div className="hidden md:flex items-start gap-4">
           <TaskRoadmap
             session={session}
             taskCounts={{
@@ -187,8 +189,10 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <StaffSidebar schedules={schedules} employees={employees} clockRecords={clockRecords} />
+      <div className="flex flex-1 md:overflow-hidden">
+        <div className="hidden md:block shrink-0">
+          <StaffSidebar schedules={schedules} employees={employees} clockRecords={clockRecords} />
+        </div>
         <TaskFlow
           key={today}
           categories={categories}
