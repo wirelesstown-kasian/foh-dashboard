@@ -28,6 +28,7 @@ export function TabNav() {
   const pathname = usePathname()
   const router = useRouter()
   const [appUserName, setAppUserName] = useState<string | null>(null)
+  const [loginReady, setLoginReady] = useState(false)
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [adminNeedsSetup, setAdminNeedsSetup] = useState(false)
   const [adminAvailable, setAdminAvailable] = useState(false)
@@ -81,11 +82,12 @@ export function TabNav() {
     void (async () => {
       const res = await fetch('/api/app-session', { cache: 'no-store' })
       const data = res.ok
-        ? await res.json() as { authenticated?: boolean; employee?: { name?: string } }
+        ? await res.json() as { authenticated?: boolean; login_ready?: boolean; employee?: { name?: string } }
         : {}
 
       if (!mounted) return
       setAppUserName(data.authenticated ? data.employee?.name ?? 'Signed In' : null)
+      setLoginReady(data.login_ready === true)
     })()
 
     return () => {
@@ -214,7 +216,7 @@ export function TabNav() {
                   Logout
                 </button>
               </>
-            ) : (
+            ) : loginReady ? (
               <Link
                 href="/login"
                 className="flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
@@ -222,6 +224,10 @@ export function TabNav() {
                 <UserRound className="h-4 w-4" />
                 Login
               </Link>
+            ) : (
+              <div className="hidden rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-400 md:block">
+                Enable app login in Staffing
+              </div>
             )}
           </div>
         </div>
