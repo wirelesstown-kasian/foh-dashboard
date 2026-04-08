@@ -81,6 +81,7 @@ export default function ClockRecordsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: record.id,
+        action: 'adjust',
         clock_in_at: timeInputToIso(record.session_date, currentEdit.clockIn),
         clock_out_at: timeInputToIso(record.session_date, currentEdit.clockOut),
         manager_note: currentEdit.note,
@@ -101,9 +102,14 @@ export default function ClockRecordsPage() {
       setSavingClockId(null)
       return
     }
+    setClockEdits(prev => {
+      const next = { ...prev }
+      delete next[record.id]
+      return next
+    })
     setEditingClockId(null)
     setSavingClockId(null)
-    setStatus('Clock record updated.')
+    setStatus('Clock record saved successfully.')
   }
 
   const recomputeSessionTips = async (sessionDate: string) => {
@@ -290,7 +296,22 @@ export default function ClockRecordsPage() {
                   <TableCell className="text-right">
                     {isEditing ? (
                       <div className="flex justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setEditingClockId(null)} disabled={savingClockId === record.id}>Cancel</Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setClockEdits(prev => {
+                              const next = { ...prev }
+                              delete next[record.id]
+                              return next
+                            })
+                            setEditingClockId(null)
+                            setStatus('Edit canceled.')
+                          }}
+                          disabled={savingClockId === record.id}
+                        >
+                          Cancel
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => saveClockAdjustment(record)} disabled={savingClockId === record.id}>{savingClockId === record.id ? 'Saving…' : 'Save'}</Button>
                       </div>
                     ) : (

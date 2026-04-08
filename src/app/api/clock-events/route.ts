@@ -304,17 +304,16 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, approved_hours, manager_note, action, clock_in_at, clock_out_at } = await req.json() as {
+  const { id, approved_hours, manager_note, clock_in_at, clock_out_at } = await req.json() as {
     id?: string
     approved_hours?: number | string | null
     manager_note?: string | null
-    action?: 'approve' | 'adjust'
     clock_in_at?: string | null
     clock_out_at?: string | null
   }
 
-  if (!id || !action) {
-    return NextResponse.json({ error: 'Missing manager approval payload' }, { status: 400 })
+  if (!id) {
+    return NextResponse.json({ error: 'Missing clock record id' }, { status: 400 })
   }
 
   const numericHours = typeof approved_hours === 'number'
