@@ -311,24 +311,46 @@ export default function ClockRecordsPage() {
                   </TableCell>
                   <TableCell className="align-top">
                     {isEditing ? (
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setClockEdits(prev => {
-                              const next = { ...prev }
-                              delete next[record.id]
-                              return next
-                            })
-                            setEditingClockId(null)
-                            setStatus('Edit canceled.')
-                          }}
-                          disabled={savingClockId === record.id}
-                        >
-                          Cancel
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => saveClockAdjustment(record)} disabled={savingClockId === record.id}>{savingClockId === record.id ? 'Saving…' : 'Save'}</Button>
+                      <div className="flex items-start gap-3">
+                        <div className="flex gap-2">
+                          {record.clock_in_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}>In Photo</Button>}
+                          {record.clock_out_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => saveClockAdjustment(record)}
+                            disabled={savingClockId === record.id}
+                          >
+                            {savingClockId === record.id ? 'Saving…' : 'Save'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-700 hover:text-red-800"
+                            onClick={() => setDeleteTarget(record)}
+                            disabled={savingClockId === record.id}
+                          >
+                            Delete
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setClockEdits(prev => {
+                                const next = { ...prev }
+                                delete next[record.id]
+                                return next
+                              })
+                              setEditingClockId(null)
+                              setStatus('Edit canceled.')
+                            }}
+                            disabled={savingClockId === record.id}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
                       </div>
                     ) : (
                       <div className="flex items-start gap-3">
@@ -338,7 +360,6 @@ export default function ClockRecordsPage() {
                         </div>
                         <div className="flex flex-col gap-2">
                           <Button size="sm" variant="outline" onClick={() => { setClockEdits(prev => ({ ...prev, [record.id]: { clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at), note: record.manager_note ?? '' } })); setEditingClockId(record.id) }}>Edit Times</Button>
-                          <Button size="sm" variant="outline" className="text-red-700 hover:text-red-800" onClick={() => setDeleteTarget(record)}>Delete</Button>
                         </div>
                       </div>
                     )}
