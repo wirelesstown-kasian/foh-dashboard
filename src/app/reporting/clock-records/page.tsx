@@ -17,6 +17,7 @@ import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/l
 import { ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
 import { supabase } from '@/lib/supabase'
+import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 
 function isoToTimeInput(value: string | null) {
   if (!value) return ''
@@ -168,7 +169,8 @@ export default function ClockRecordsPage() {
 
     if (tipRows.length === 0) return
 
-    const insertRes = await supabase.from('tip_distributions').insert(
+    await insertTipDistributionsWithFallback(
+      supabase,
       tipRows.map(row => {
         const result = tipResults.find(item => item.employee_id === row.employee_id)
         return {
@@ -183,8 +185,6 @@ export default function ClockRecordsPage() {
         }
       })
     )
-
-    if (insertRes.error) throw new Error(insertRes.error.message)
   }
 
   const deleteClockRecord = async () => {
@@ -264,8 +264,8 @@ export default function ClockRecordsPage() {
               <TableHead className="text-right">Clock In</TableHead>
               <TableHead className="text-right">Clock Out</TableHead>
               <TableHead className="text-right">Worked Hrs</TableHead>
-              <TableHead>Note</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className="w-36">Note</TableHead>
+              <TableHead>Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -297,11 +297,21 @@ export default function ClockRecordsPage() {
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">{workedHours.toFixed(2)}</TableCell>
                   <TableCell>
-                    {isEditing ? <Input value={currentEdit.note} onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, note: event.target.value } }))} className="h-8 min-w-40" /> : <span className="text-sm text-muted-foreground">{record.manager_note ?? '—'}</span>}
-                  </TableCell>
-                  <TableCell className="text-right">
                     {isEditing ? (
-                      <div className="flex justify-end gap-2">
+                      <Input
+                        value={currentEdit.note}
+                        onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, note: event.target.value } }))}
+                        className="h-8 w-32"
+                      />
+                    ) : (
+                      <span className="inline-block max-w-32 truncate text-sm text-muted-foreground">
+                        {record.manager_note ?? '—'}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="align-top">
+                    {isEditing ? (
+                      <div className="flex gap-2">
                         <Button
                           size="sm"
                           variant="outline"
@@ -321,11 +331,15 @@ export default function ClockRecordsPage() {
                         <Button size="sm" variant="outline" onClick={() => saveClockAdjustment(record)} disabled={savingClockId === record.id}>{savingClockId === record.id ? 'Saving…' : 'Save'}</Button>
                       </div>
                     ) : (
-                      <div className="flex justify-end gap-2">
-                        {record.clock_in_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}>In Photo</Button>}
-                        {record.clock_out_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
-                        <Button size="sm" variant="outline" onClick={() => { setClockEdits(prev => ({ ...prev, [record.id]: { clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at), note: record.manager_note ?? '' } })); setEditingClockId(record.id) }}>Edit Times</Button>
-                        <Button size="sm" variant="outline" className="text-red-700 hover:text-red-800" onClick={() => setDeleteTarget(record)}>Delete</Button>
+                      <div className="flex items-start gap-3">
+                        <div className="flex gap-2">
+                          {record.clock_in_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}>In Photo</Button>}
+                          {record.clock_out_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <Button size="sm" variant="outline" onClick={() => { setClockEdits(prev => ({ ...prev, [record.id]: { clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at), note: record.manager_note ?? '' } })); setEditingClockId(record.id) }}>Edit Times</Button>
+                          <Button size="sm" variant="outline" className="text-red-700 hover:text-red-800" onClick={() => setDeleteTarget(record)}>Delete</Button>
+                        </div>
                       </div>
                     )}
                   </TableCell>

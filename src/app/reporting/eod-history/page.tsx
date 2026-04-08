@@ -29,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
+import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import { Employee, EodReport, ShiftClock } from '@/lib/types'
 
 function isEodCloserRole(role: Employee['role']) {
@@ -208,24 +209,25 @@ export default function EodHistoryPage() {
       }
 
       if (tipResults.length > 0) {
-        const insertTips = await supabase.from('tip_distributions').insert(
-          eligibleRows.map(row => {
-            const result = tipResults.find(item => item.employee_id === row.employee_id)
-            return {
-              eod_report_id: reportId,
-              employee_id: row.employee_id,
-              start_time: row.start_time,
-              end_time: row.end_time,
-              hours_worked: row.hours_worked,
-              tip_share: result?.tip_share ?? 0,
-              house_deduction: result?.house_deduction ?? 0,
-              net_tip: result?.net_tip ?? 0,
-            }
-          })
-        )
-
-        if (insertTips.error) {
-          setSaveError(insertTips.error.message)
+        try {
+          await insertTipDistributionsWithFallback(
+            supabase,
+            eligibleRows.map(row => {
+              const result = tipResults.find(item => item.employee_id === row.employee_id)
+              return {
+                eod_report_id: reportId,
+                employee_id: row.employee_id,
+                start_time: row.start_time,
+                end_time: row.end_time,
+                hours_worked: row.hours_worked,
+                tip_share: result?.tip_share ?? 0,
+                house_deduction: result?.house_deduction ?? 0,
+                net_tip: result?.net_tip ?? 0,
+              }
+            })
+          )
+        } catch (error) {
+          setSaveError(error instanceof Error ? error.message : 'Failed to save tip distributions')
           return
         }
       }

@@ -32,6 +32,7 @@ export default function WageReportPage() {
   const [employeeFilter, setEmployeeFilter] = useState('all')
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null)
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -95,9 +96,11 @@ export default function WageReportPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true)
+    setRefreshMessage(null)
     notifyReportingDataChanged()
     await new Promise(resolve => window.setTimeout(resolve, 350))
     setLastRefreshedAt(new Date())
+    setRefreshMessage('Reloaded clock records and tip distributions.')
     setRefreshing(false)
   }
 
@@ -111,6 +114,11 @@ export default function WageReportPage() {
       />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
+        {refreshMessage && (
+          <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
+            {refreshMessage}
+          </div>
+        )}
         <ReportingToolbar
           period={period}
           refDate={refDate}

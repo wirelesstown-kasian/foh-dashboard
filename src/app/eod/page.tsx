@@ -6,6 +6,7 @@ import { Employee, DailySession, EodReport, TipDistribution, ShiftClock } from '
 import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
+import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -346,8 +347,7 @@ export default function EodPage() {
       }
     })
 
-    const { error } = await supabase.from('tip_distributions').insert(rows)
-    if (error) throw error
+    await insertTipDistributionsWithFallback(supabase, rows)
   }
 
   const handleSave = async () => {
