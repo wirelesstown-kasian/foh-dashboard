@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getRoleLabel } from '@/lib/organization'
+import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 
 interface WeeklyScheduleGridProps {
   department: ScheduleDepartment
@@ -125,12 +125,13 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     const title = `${department.toUpperCase()} Schedule`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = employees.map(employee => {
+      const roleTheme = getRoleColorTheme(employee.role)
       const dayCells = renderedDays.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
           <td>
             ${shifts.length === 0 ? '<div class="muted">Off</div>' : shifts.map(shift => `
-              <div class="shift">
+              <div class="shift" style="background:${roleTheme.pdfShiftBackground};border-color:${roleTheme.pdfShiftBorder};">
                 <div>${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}</div>
                 <div class="muted">${formatHours(calcHours(shift.start_time, shift.end_time))}</div>
               </div>
@@ -141,9 +142,11 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
 
       return `
         <tr>
-          <td>
+          <td style="border-left: 4px solid ${roleTheme.pdfShiftBorder};">
             <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
-            <div class="muted">${getRoleLabel(employee.role, roleDefinitions)}</div>
+            <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
+              ${getRoleLabel(employee.role, roleDefinitions)}
+            </div>
           </td>
           ${dayCells}
         </tr>
@@ -167,6 +170,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             th { background: #edf1f5; font-weight: 700; }
             .employee-name { font-weight: 800; font-size: 15px; margin-bottom: 2px; }
             .muted { color: #475569; font-size: 12px; }
+            .role-badge { display: inline-block; margin-top: 6px; padding: 3px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
             .shift { background: #f7f7f5; border: 1.5px solid #64748b; border-radius: 8px; padding: 6px; margin-bottom: 5px; }
             .totals-row td { background: #e5e7eb; text-align: center; vertical-align: middle; }
             .totals-label { font-weight: 700; text-align: left; }
@@ -270,11 +274,21 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             </thead>
             <tbody>
               {employees.map(emp => {
+                const roleTheme = getRoleColorTheme(emp.role)
                 return (
-                  <tr key={emp.id} className="border-b border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-slate-100">
-                    <td className="sticky left-0 z-[1] p-3.5 align-top border-r border-slate-200 bg-inherit">
+                  <tr key={emp.id} className={`border-b border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-slate-100`}>
+                    <td className={`sticky left-0 z-[1] border-l-4 p-3.5 align-top border-r border-slate-200 bg-inherit ${roleTheme.rowAccentClassName}`}>
                       <div className="font-semibold text-[15px] text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
-                      <div className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">{getRoleLabel(emp.role, roleDefinitions)}{!emp.is_active ? ' • archived' : ''}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] ${roleTheme.badgeClassName}`}>
+                          {getRoleLabel(emp.role, roleDefinitions)}
+                        </span>
+                        {!emp.is_active && (
+                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                            Archived
+                          </span>
+                        )}
+                      </div>
                     </td>
                     {renderedDays.map(d => {
                       const dateStr = formatDate(d)
@@ -287,7 +301,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                             </div>
                           ) : (
                             shifts.map((s, i) => (
-                              <div key={i} className="mb-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5 text-sm">
+                              <div key={i} className={`mb-2 rounded-xl border p-2.5 text-sm ${roleTheme.shiftCardClassName}`}>
                                 <div className="whitespace-nowrap font-semibold text-[14px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>

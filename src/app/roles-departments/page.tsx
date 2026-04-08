@@ -35,6 +35,7 @@ export default function RolesDepartmentsPage() {
   const [roles, setRoles] = useState<RoleDefinition[]>(DEFAULT_ROLES)
   const [departments, setDepartments] = useState<DepartmentDefinition[]>(DEFAULT_DEPARTMENTS)
   const [newRole, setNewRole] = useState('')
+  const [newDepartment, setNewDepartment] = useState('')
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -109,6 +110,26 @@ export default function RolesDepartmentsPage() {
     )))
   }
 
+  const addDepartment = () => {
+    if (!newDepartment.trim()) return
+    const key = slugifyRoleKey(newDepartment)
+    if (!key || departments.some(department => department.key === key)) {
+      setError('Department key already exists or is invalid')
+      return
+    }
+    setDepartments(currentDepartments => [
+      ...currentDepartments,
+      {
+        key,
+        label: titleCaseWords(newDepartment),
+        is_active: true,
+        display_order: currentDepartments.length,
+      },
+    ])
+    setNewDepartment('')
+    setError(null)
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setError(null)
@@ -129,6 +150,7 @@ export default function RolesDepartmentsPage() {
       }
       setRoles(sortDefinitionsByOrder(data.settings.role_definitions))
       setDepartments(sortDefinitionsByOrder(data.settings.primary_department_definitions))
+      window.dispatchEvent(new Event('app-settings-updated'))
       setSaved('Roles and departments saved')
     } finally {
       setSaving(false)
@@ -203,6 +225,17 @@ export default function RolesDepartmentsPage() {
                   <Input value={department.label} onChange={(event) => updateDepartment(department.key, event.target.value)} />
                 </div>
               ))}
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 pt-2">
+                <Input
+                  value={newDepartment}
+                  onChange={(event) => setNewDepartment(event.target.value)}
+                  placeholder="Add a new department label"
+                />
+                <Button type="button" onClick={addDepartment}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Department
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 `foh` and `boh` keep the operational tabs consistent. `hybrid` lets a person appear as a fallback in both schedule filters while still being grouped cleanly on the dashboard.
               </p>

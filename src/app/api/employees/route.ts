@@ -22,8 +22,13 @@ async function isValidRole(role: unknown): Promise<boolean> {
   return typeof role === 'string' && (await getValidRoles()).includes(role as EmployeeRole)
 }
 
-function isValidPrimaryDepartment(primaryDepartment: unknown) {
-  return primaryDepartment === 'foh' || primaryDepartment === 'boh' || primaryDepartment === 'hybrid'
+async function getValidPrimaryDepartments() {
+  const settings = await getAppSettings()
+  return settings.primary_department_definitions.filter(definition => definition.is_active).map(definition => definition.key)
+}
+
+async function isValidPrimaryDepartment(primaryDepartment: unknown) {
+  return typeof primaryDepartment === 'string' && (await getValidPrimaryDepartments()).includes(primaryDepartment)
 }
 
 export async function GET() {
@@ -56,7 +61,7 @@ export async function POST(req: NextRequest) {
   if (!(await isValidRole(role))) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   }
-  if (!isValidPrimaryDepartment(primary_department)) {
+  if (!(await isValidPrimaryDepartment(primary_department))) {
     return NextResponse.json({ error: 'Invalid primary department' }, { status: 400 })
   }
   if (!isValidPin(pin)) {
@@ -116,7 +121,7 @@ export async function PATCH(req: NextRequest) {
   if (!(await isValidRole(role))) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   }
-  if (!isValidPrimaryDepartment(primary_department)) {
+  if (!(await isValidPrimaryDepartment(primary_department))) {
     return NextResponse.json({ error: 'Invalid primary department' }, { status: 400 })
   }
   if (login_enabled === true && !(typeof email === 'string' && email.trim())) {
@@ -137,7 +142,7 @@ export async function PATCH(req: NextRequest) {
     phone: string | null
     email: string | null
     role: EmployeeRole
-    primary_department: 'foh' | 'boh' | 'hybrid'
+    primary_department: string
     hourly_wage: number | null
     guaranteed_hourly: number | null
     birth_date: string | null

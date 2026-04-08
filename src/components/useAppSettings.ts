@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { DepartmentDefinition, RoleDefinition } from '@/lib/appSettings'
 import { sortDefinitionsByOrder } from '@/lib/organization'
 
@@ -22,10 +22,23 @@ export function useAppSettings() {
   const [roleDefinitions, setRoleDefinitions] = useState<RoleDefinition[]>(DEFAULT_ROLE_DEFINITIONS)
   const [departmentDefinitions, setDepartmentDefinitions] = useState<DepartmentDefinition[]>(DEFAULT_DEPARTMENT_DEFINITIONS)
 
+  const loadSettings = useCallback(async () => {
+    const res = await fetch('/api/org-settings', { cache: 'no-store' })
+    const data = res.ok
+      ? await res.json() as { role_definitions?: RoleDefinition[]; primary_department_definitions?: DepartmentDefinition[] }
+      : {}
+    if (data.role_definitions) {
+      setRoleDefinitions(sortDefinitionsByOrder(data.role_definitions.filter(definition => definition.is_active)))
+    }
+    if (data.primary_department_definitions) {
+      setDepartmentDefinitions(sortDefinitionsByOrder(data.primary_department_definitions.filter(definition => definition.is_active)))
+    }
+  }, [])
+
   useEffect(() => {
     let mounted = true
 
-    void (async () => {
+    const safeLoadSettings = async () => {
       const res = await fetch('/api/org-settings', { cache: 'no-store' })
       const data = res.ok
         ? await res.json() as { role_definitions?: RoleDefinition[]; primary_department_definitions?: DepartmentDefinition[] }
@@ -37,15 +50,35 @@ export function useAppSettings() {
       if (data.primary_department_definitions) {
         setDepartmentDefinitions(sortDefinitionsByOrder(data.primary_department_definitions.filter(definition => definition.is_active)))
       }
-    })()
+    }
+
+    void safeLoadSettings()
+
+    const handleFocus = () => {
+      void safeLoadSettings()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void safeLoadSettings()
+      }
+    }
+
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('app-settings-updated', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       mounted = false
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('app-settings-updated', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [])
+  }, [loadSettings])
 
   return {
     roleDefinitions,
     departmentDefinitions,
+    reloadAppSettings: loadSettings,
   }
 }

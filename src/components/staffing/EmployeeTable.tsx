@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { Employee, EmployeeRole } from '@/lib/types'
-import { AppSettings, DepartmentDefinition, RoleDefinition } from '@/lib/appSettings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,14 +29,15 @@ import {
 import { Plus, Pencil, Trash2, Gift } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
-import { getDepartmentLabel, getPrimaryDepartmentBadge, getRoleLabel, sortDefinitionsByOrder } from '@/lib/organization'
+import { getDepartmentLabel, getPrimaryDepartmentBadge, getRoleLabel } from '@/lib/organization'
+import { useAppSettings } from '@/components/useAppSettings'
 
 interface FormState {
   name: string
   phone: string
   email: string
   role: EmployeeRole
-  primary_department: 'foh' | 'boh' | 'hybrid'
+  primary_department: string
   hourly_wage: string
   guaranteed_hourly: string
   birth_date: string
@@ -50,20 +50,6 @@ type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 
 const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
 
-const DEFAULT_ROLE_DEFINITIONS: RoleDefinition[] = [
-  { key: 'manager', label: 'Manager', is_active: true, display_order: 0 },
-  { key: 'server', label: 'Server', is_active: true, display_order: 1 },
-  { key: 'busser', label: 'Busser', is_active: true, display_order: 2 },
-  { key: 'runner', label: 'Runner', is_active: true, display_order: 3 },
-  { key: 'kitchen_staff', label: 'Kitchen Staff', is_active: true, display_order: 4 },
-]
-
-const DEFAULT_DEPARTMENT_DEFINITIONS: DepartmentDefinition[] = [
-  { key: 'foh', label: 'FOH', is_active: true, display_order: 0 },
-  { key: 'boh', label: 'BOH', is_active: true, display_order: 1 },
-  { key: 'hybrid', label: 'Hybrid', is_active: true, display_order: 2 },
-]
-
 function getRoleBadgeClass(role: string) {
   if (role === 'manager') return 'bg-purple-100 text-purple-800'
   if (role === 'server') return 'bg-blue-100 text-blue-800'
@@ -74,6 +60,7 @@ function getRoleBadgeClass(role: string) {
 }
 
 export function EmployeeTable() {
+  const { roleDefinitions, departmentDefinitions } = useAppSettings()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -83,16 +70,10 @@ export function EmployeeTable() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [filterRole, setFilterRole] = useState<string>('all')
   const [sortBy, setSortBy] = useState<SortOption>('name_asc')
-  const [roleDefinitions, setRoleDefinitions] = useState<RoleDefinition[]>(DEFAULT_ROLE_DEFINITIONS)
-  const [departmentDefinitions, setDepartmentDefinitions] = useState<DepartmentDefinition[]>(DEFAULT_DEPARTMENT_DEFINITIONS)
 
   const load = useCallback(async () => {
-    const [employeesRes, settingsRes] = await Promise.all([
-      fetch('/api/employees', { cache: 'no-store' }),
-      fetch('/api/app-settings', { cache: 'no-store' }),
-    ])
+    const employeesRes = await fetch('/api/employees', { cache: 'no-store' })
     const employeeData = (await employeesRes.json().catch(() => ({}))) as { employees?: Employee[]; error?: string }
-    const settingsData = (await settingsRes.json().catch(() => ({}))) as { settings?: AppSettings; error?: string }
     if (!employeesRes.ok) {
       setSaveError(employeeData.error ?? 'Failed to load employees')
       setEmployees([])
@@ -100,10 +81,6 @@ export function EmployeeTable() {
       return
     }
     setEmployees(employeeData.employees ?? [])
-    if (settingsRes.ok && settingsData.settings) {
-      setRoleDefinitions(sortDefinitionsByOrder(settingsData.settings.role_definitions.filter(definition => definition.is_active)))
-      setDepartmentDefinitions(sortDefinitionsByOrder(settingsData.settings.primary_department_definitions.filter(definition => definition.is_active)))
-    }
     setLoading(false)
   }, [])
 
@@ -122,7 +99,7 @@ export function EmployeeTable() {
       phone: emp.phone ?? '',
       email: emp.email ?? '',
       role: emp.role,
-      primary_department: (emp.primary_department as 'foh' | 'boh' | 'hybrid') ?? 'foh',
+      primary_department: emp.primary_department ?? 'foh',
       hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       birth_date: emp.birth_date ?? '',
@@ -333,7 +310,7 @@ export function EmployeeTable() {
             </div>
             <div>
               <Label>Primary Department</Label>
-              <Select value={form.primary_department} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, primary_department: v as 'foh' | 'boh' | 'hybrid' }))}>
+              <Select value={form.primary_department} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, primary_department: v }))}>
                 <SelectTrigger>
                   <span>{getDepartmentLabel(form.primary_department, departmentDefinitions)}</span>
                 </SelectTrigger>
