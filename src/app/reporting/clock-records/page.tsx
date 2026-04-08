@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { calculateClockHours, isClockPending } from '@/lib/clockUtils'
+import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
 import { supabase } from '@/lib/supabase'
@@ -31,6 +31,14 @@ function timeInputToIso(sessionDate: string, value: string) {
   date.setHours(Number(hour), Number(minute), 0, 0)
   if (Number(hour) < 3) date.setDate(date.getDate() + 1)
   return date.toISOString()
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') {
+    return error.message
+  }
+  return fallback
 }
 
 export default function ClockRecordsPage() {
@@ -98,7 +106,7 @@ export default function ClockRecordsPage() {
       await recomputeSessionTips(record.session_date)
       notifyReportingDataChanged()
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Clock record updated, but tip distribution refresh failed')
+      setStatus(getErrorMessage(error, 'Clock record updated, but tip distribution refresh failed'))
       setSavingClockId(null)
       return
     }
@@ -140,9 +148,7 @@ export default function ClockRecordsPage() {
         end_time: null,
       }
 
-      existing.hours_worked += record.approval_status === 'approved' || record.approval_status === 'adjusted'
-        ? Number(record.approved_hours ?? 0)
-        : 0
+      existing.hours_worked += getEffectiveClockHours(record)
       const startTime = format(new Date(record.clock_in_at), 'HH:mm:ss')
       const endTime = record.clock_out_at ? format(new Date(record.clock_out_at), 'HH:mm:ss') : null
       existing.start_time = !existing.start_time || startTime < existing.start_time ? startTime : existing.start_time
@@ -158,7 +164,7 @@ export default function ClockRecordsPage() {
     })))
 
     const deleteRes = await supabase.from('tip_distributions').delete().eq('eod_report_id', eodRes.data.id)
-    if (deleteRes.error) throw deleteRes.error
+    if (deleteRes.error) throw new Error(deleteRes.error.message)
 
     if (tipRows.length === 0) return
 
@@ -178,7 +184,7 @@ export default function ClockRecordsPage() {
       })
     )
 
-    if (insertRes.error) throw insertRes.error
+    if (insertRes.error) throw new Error(insertRes.error.message)
   }
 
   const deleteClockRecord = async () => {
@@ -206,7 +212,7 @@ export default function ClockRecordsPage() {
       setDeleteTarget(null)
       setStatus('Clock record deleted and tip distribution recalculated.')
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Clock record deleted, but tip distribution refresh failed')
+      setStatus(getErrorMessage(error, 'Clock record deleted, but tip distribution refresh failed'))
     } finally {
       setDeletingClockId(null)
     }

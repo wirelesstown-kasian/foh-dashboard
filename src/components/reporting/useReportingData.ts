@@ -34,17 +34,25 @@ export function useTaskCompletions() {
 
   useEffect(() => {
     let mounted = true
-    void (async () => {
+
+    const load = async () => {
       const res = await supabase.from('task_completions').select('*')
       if (!mounted) return
       setCompletions(res.data ?? [])
-    })()
+    }
+
+    void load()
+    const handleRefresh = () => {
+      void load()
+    }
+    window.addEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     return () => {
       mounted = false
+      window.removeEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     }
   }, [])
 
-  return completions
+  return { completions, setCompletions }
 }
 
 export function useTasks() {

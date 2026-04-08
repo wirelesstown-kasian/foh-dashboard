@@ -5,17 +5,20 @@ import { addDays, format, getDay } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useEmployees, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useEmployees, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { Task } from '@/lib/types'
+import { Task, TaskCompletion, TaskCompletionStatus } from '@/lib/types'
 
 type TaskSummaryRow = {
   key: string
   date: string
   task: Task
+  completion: TaskCompletion | null
   completeEntries: string[]
   incompleteEntries: string[]
   status: 'complete' | 'incomplete' | 'mixed' | 'open'
@@ -32,7 +35,7 @@ const STATUS_ORDER: Record<TaskSummaryRow['status'], number> = {
 
 export default function TaskDetailPage() {
   const employees = useEmployees()
-  const completions = useTaskCompletions()
+  const { completions, setCompletions } = useTaskCompletions()
   const tasks = useTasks() as (Task & { category?: { type?: string } })[]
   const initialParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
 
@@ -44,6 +47,11 @@ export default function TaskDetailPage() {
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [sortBy, setSortBy] = useState<TaskSortOption>('date')
+  const [editTarget, setEditTarget] = useState<TaskSummaryRow | null>(null)
+  const [editStatus, setEditStatus] = useState<'open' | TaskCompletionStatus>('open')
+  const [editEmployeeId, setEditEmployeeId] = useState('none')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -77,7 +85,14 @@ export default function TaskDetailPage() {
           return employeeMap.has(completion.employee_id)
         })
 
-        const completeEntries = taskCompletions
+        const sortedCompletions = [...taskCompletions].sort((a, b) => {
+          const left = a.completed_at ?? ''
+          const right = b.completed_at ?? ''
+          return right.localeCompare(left)
+        })
+        const primaryCompletion = sortedCompletions[0] ?? null
+
+        const completeEntries = sortedCompletions
           .filter(completion => completion.status !== 'incomplete')
           .map(completion => {
             const employee = employeeMap.get(completion.employee_id)
@@ -86,7 +101,7 @@ export default function TaskDetailPage() {
           })
           .filter((entry): entry is string => Boolean(entry))
 
-        const incompleteEntries = taskCompletions
+        const incompleteEntries = sortedCompletions
           .filter(completion => completion.status === 'incomplete')
           .map(completion => {
             const employee = employeeMap.get(completion.employee_id)
@@ -108,6 +123,7 @@ export default function TaskDetailPage() {
           key: `${sessionDate}:${task.id}`,
           date: sessionDate,
           task,
+          completion: primaryCompletion,
           completeEntries,
           incompleteEntries,
           status,
@@ -141,6 +157,56 @@ export default function TaskDetailPage() {
     })
   }, [completions, endDate, filteredEmployees, filteredTasks, sortBy, startDate])
 
+  const openEditDialog = (row: TaskSummaryRow) => {
+    setEditTarget(row)
+    setEditStatus(row.status === 'open' ? 'open' : row.status === 'incomplete' ? 'incomplete' : 'complete')
+    setEditEmployeeId(row.completion?.employee_id ?? 'none')
+    setStatusMessage(null)
+  }
+
+  const saveTaskDetailEdit = async () => {
+    if (!editTarget) return
+    if (editStatus !== 'open' && editEmployeeId === 'none') {
+      setStatusMessage('Select a staff member before saving.')
+      return
+    }
+
+    setSavingEdit(true)
+    setStatusMessage(null)
+
+    const res = await fetch('/api/task-completions', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        completion_id: editTarget.completion?.id,
+        task_id: editTarget.task.id,
+        session_date: editTarget.date,
+        employee_id: editStatus === 'open' ? null : editEmployeeId,
+        status: editStatus,
+      }),
+    })
+
+    const json = (await res.json().catch(() => ({}))) as { success?: boolean; completion?: TaskCompletion | null; error?: string }
+    if (!res.ok || !json.success) {
+      setStatusMessage(json.error ?? 'Failed to update task detail')
+      setSavingEdit(false)
+      return
+    }
+
+    setCompletions(current => {
+      const next = current.filter(completion => {
+        if (editTarget.completion?.id) return completion.id !== editTarget.completion.id
+        return !(completion.task_id === editTarget.task.id && completion.session_date === editTarget.date)
+      })
+      if (json.completion) next.push(json.completion)
+      return next
+    })
+    notifyReportingDataChanged()
+    setSavingEdit(false)
+    setEditTarget(null)
+    setStatusMessage('Task detail updated.')
+  }
+
   return (
     <div className="p-6">
       <AdminSubpageHeader
@@ -151,6 +217,7 @@ export default function TaskDetailPage() {
       />
       <DepartmentTabs department={department} onChange={setDepartment} />
       <div className="rounded-xl border bg-white p-5">
+        {statusMessage && <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{statusMessage}</div>}
         <ReportingToolbar
           period={period}
           refDate={refDate}
@@ -183,6 +250,7 @@ export default function TaskDetailPage() {
               <TableHead>Completed By</TableHead>
               <TableHead>Incomplete By</TableHead>
               <TableHead className="text-right">Summary</TableHead>
+              <TableHead className="text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -222,16 +290,65 @@ export default function TaskDetailPage() {
                 <TableCell className="text-right text-sm text-muted-foreground">
                   {row.completeEntries.length} complete / {row.incompleteEntries.length} incomplete
                 </TableCell>
+                <TableCell className="text-right">
+                  <Button size="sm" variant="outline" onClick={() => openEditDialog(row)}>
+                    Edit
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
             {taskSummaryRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="py-6 text-center text-muted-foreground">No tasks found for this range</TableCell>
+                <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">No tasks found for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Task Detail</DialogTitle>
+            <DialogDescription>
+              Change task status and who it is assigned to so reporting reflects the correction.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-muted/30 px-4 py-3">
+              <div className="text-sm font-medium">{editTarget?.task.title}</div>
+              <div className="text-xs text-muted-foreground">{editTarget ? format(new Date(`${editTarget.date}T12:00:00`), 'MMM d, yyyy') : ''}</div>
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Task Status</div>
+              <Select value={editStatus} onValueChange={(value: string | null) => value && setEditStatus(value as 'open' | TaskCompletionStatus)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="complete">Complete</SelectItem>
+                  <SelectItem value="incomplete">Incomplete</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium">{editStatus === 'incomplete' ? 'Incompleted By' : 'Completed By'}</div>
+              <Select value={editEmployeeId} onValueChange={(value: string | null) => value && setEditEmployeeId(value)} disabled={editStatus === 'open'}>
+                <SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select staff</SelectItem>
+                  {filteredEmployees.map(employee => (
+                    <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)} disabled={savingEdit}>Cancel</Button>
+            <Button onClick={saveTaskDetailEdit} disabled={savingEdit}>{savingEdit ? 'Saving…' : 'Save Changes'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

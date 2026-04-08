@@ -1,7 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
+import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+
+async function requireAdmin() {
+  const cookieStore = await cookies()
+  return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+}
+
+async function getCompletionById(id: string) {
+  const { data, error } = await supabaseAdmin
+    .from('task_completions')
+    .select('*, employee:employees(*)')
+    .eq('id', id)
+    .single()
+
+  if (error) throw new Error(error.message)
+  return data
+}
 
 async function getActiveClockRecord(employeeId: string, sessionDate: string) {
   const { data, error } = await supabaseAdmin
@@ -168,7 +186,96 @@ export async function DELETE(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { pin, completion_id, status } = await req.json()
+  const { pin, completion_id, task_id, session_date, employee_id, status } = await req.json() as {
+    pin?: string
+    completion_id?: string
+    task_id?: string
+    session_date?: string
+    employee_id?: string | null
+    status?: 'complete' | 'incomplete' | 'open'
+  }
+
+  const isAdminRequest = !pin && await requireAdmin()
+
+  if (isAdminRequest) {
+    if (status !== 'complete' && status !== 'incomplete' && status !== 'open') {
+      return NextResponse.json({ error: 'Invalid task completion status' }, { status: 400 })
+    }
+    if (!completion_id && !(typeof task_id === 'string' && typeof session_date === 'string')) {
+      return NextResponse.json({ error: 'Missing task completion target' }, { status: 400 })
+    }
+
+    let existingCompletionId = completion_id
+
+    if (!existingCompletionId && task_id && session_date) {
+      const { data: existing } = await supabaseAdmin
+        .from('task_completions')
+        .select('id')
+        .eq('task_id', task_id)
+        .eq('session_date', session_date)
+        .maybeSingle()
+      existingCompletionId = existing?.id
+    }
+
+    if (status === 'open') {
+      if (existingCompletionId) {
+        const { error } = await supabaseAdmin.from('task_completions').delete().eq('id', existingCompletionId)
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ success: true, completion: null })
+    }
+
+    if (!employee_id) {
+      return NextResponse.json({ error: 'Completed by is required' }, { status: 400 })
+    }
+
+    if (existingCompletionId) {
+      const { error } = await supabaseAdmin
+        .from('task_completions')
+        .update({
+          employee_id,
+          status,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', existingCompletionId)
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+      try {
+        const completion = await getCompletionById(existingCompletionId)
+        return NextResponse.json({ success: true, completion })
+      } catch (error) {
+        return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to reload completion' }, { status: 500 })
+      }
+    }
+
+    if (!task_id || !session_date) {
+      return NextResponse.json({ error: 'Missing task completion payload' }, { status: 400 })
+    }
+
+    const { data: inserted, error } = await supabaseAdmin
+      .from('task_completions')
+      .insert({
+        task_id,
+        employee_id,
+        session_date,
+        status,
+        completed_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+
+    if (error || !inserted) {
+      return NextResponse.json({ error: error?.message ?? 'Failed to create completion' }, { status: 500 })
+    }
+
+    try {
+      const completion = await getCompletionById(inserted.id)
+      return NextResponse.json({ success: true, completion })
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to reload completion' }, { status: 500 })
+    }
+  }
 
   if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
