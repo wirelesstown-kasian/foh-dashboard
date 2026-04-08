@@ -5,7 +5,7 @@ import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useEmployees, useEodReports } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -76,7 +76,7 @@ const EMPTY_FORM = {
 }
 
 export default function EodHistoryPage() {
-  const eodReports = useEodReports()
+  const { eodReports } = useEodReports()
   const employees = useEmployees()
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
   const [refDate, setRefDate] = useState(new Date())
@@ -246,6 +246,7 @@ export default function EodHistoryPage() {
         const remaining = current.filter(report => report.id !== nextReport.id)
         return [...remaining, nextReport].sort((a, b) => (a.session_date < b.session_date ? 1 : -1))
       })
+      notifyReportingDataChanged()
       setDialogOpen(false)
       setEditingReportId(null)
       setForm(EMPTY_FORM)

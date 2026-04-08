@@ -26,7 +26,7 @@ function scoreFromRank(rank: number, count: number) {
 export default function TaskPerformancePage() {
   const employees = useEmployees()
   const completions = useTaskCompletions()
-  const eodReports = useEodReports()
+  const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
   const { roleDefinitions } = useAppSettings()
 

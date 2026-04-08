@@ -17,7 +17,7 @@ type TipReportView = 'earnings' | 'tips'
 
 export default function WageReportPage() {
   const employees = useEmployees()
-  const eodReports = useEodReports()
+  const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
   const { roleDefinitions } = useAppSettings()
 
@@ -50,9 +50,11 @@ export default function WageReportPage() {
         for (const report of rangeReports) {
           const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
           const dailyTips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
-          const dailyHours = clockRecords
+          const clockHours = clockRecords
             .filter(record => record.employee_id === emp.id && record.session_date === report.session_date)
             .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+          const distributionHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked ?? 0), 0)
+          const dailyHours = clockHours > 0 ? clockHours : distributionHours
           const dailyBaseWages = dailyHours * (emp.hourly_wage ?? 0)
           const dailyGuaranteedTarget = dailyHours * (emp.guaranteed_hourly ?? 0)
 

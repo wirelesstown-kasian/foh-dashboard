@@ -5,7 +5,7 @@ import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useClockRecords, useEmployees } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -93,6 +93,14 @@ export default function ClockRecordsPage() {
       return
     }
     setClockRecords(prev => prev.map(item => item.id === record.id ? json.record! : item))
+    try {
+      await recomputeSessionTips(record.session_date)
+      notifyReportingDataChanged()
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Clock record updated, but tip distribution refresh failed')
+      setSavingClockId(null)
+      return
+    }
     setEditingClockId(null)
     setSavingClockId(null)
     setStatus('Clock record updated.')
@@ -188,6 +196,7 @@ export default function ClockRecordsPage() {
     try {
       await recomputeSessionTips(json.session_date)
       setClockRecords(prev => prev.filter(item => item.id !== deleteTarget.id))
+      notifyReportingDataChanged()
       setDeleteTarget(null)
       setStatus('Clock record deleted and tip distribution recalculated.')
     } catch (error) {

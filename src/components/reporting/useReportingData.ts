@@ -4,6 +4,13 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, EodReport, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
 
+const REPORTING_REFRESH_EVENT = 'reporting-data-refresh'
+
+export function notifyReportingDataChanged() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event(REPORTING_REFRESH_EVENT))
+}
+
 export function useEmployees() {
   const [employees, setEmployees] = useState<Employee[]>([])
 
@@ -67,20 +74,28 @@ export function useEodReports() {
 
   useEffect(() => {
     let mounted = true
-    void (async () => {
+
+    const load = async () => {
       const res = await supabase
         .from('eod_reports')
         .select('*, tip_distributions(*, employee:employees(*))')
         .order('session_date', { ascending: false })
       if (!mounted) return
       setEodReports(res.data ?? [])
-    })()
+    }
+
+    void load()
+    const handleRefresh = () => {
+      void load()
+    }
+    window.addEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     return () => {
       mounted = false
+      window.removeEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     }
   }, [])
 
-  return eodReports
+  return { eodReports, setEodReports }
 }
 
 export function useClockRecords() {
@@ -88,14 +103,22 @@ export function useClockRecords() {
 
   useEffect(() => {
     let mounted = true
-    void (async () => {
+
+    const load = async () => {
       const res = await fetch('/api/clock-events', { cache: 'no-store' })
       const json = (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
       if (!mounted) return
       setClockRecords(json.records ?? [])
-    })()
+    }
+
+    void load()
+    const handleRefresh = () => {
+      void load()
+    }
+    window.addEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     return () => {
       mounted = false
+      window.removeEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     }
   }, [])
 

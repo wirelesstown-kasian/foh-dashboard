@@ -133,6 +133,17 @@ async function getOpenClockRecord(employeeId: string, sessionDate: string) {
   return ((data ?? [])[0] ?? null) as ShiftClock | null
 }
 
+async function getClockRecordById(id: string) {
+  const { data, error } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('*, employee:employees!shift_clocks_employee_id_fkey(*)')
+    .eq('id', id)
+    .single()
+
+  if (error) throw new Error(error.message)
+  return data as ShiftClock
+}
+
 async function upsertClockTaskCompletion(taskId: string | null | undefined, employeeId: string, sessionDate: string) {
   if (!taskId) return
   const { data: existing } = await supabaseAdmin
@@ -354,7 +365,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true })
+  try {
+    const record = await getClockRecordById(id)
+    return NextResponse.json({ success: true, record })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to reload clock record' }, { status: 500 })
+  }
 }
 
 export async function DELETE(req: NextRequest) {
