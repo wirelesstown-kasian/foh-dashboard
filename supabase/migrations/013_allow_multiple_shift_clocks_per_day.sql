@@ -1,0 +1,2 @@
+alter table public.shift_clocks
+drop constraint if exists shift_clocks_session_date_employee_id_key;

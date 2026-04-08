@@ -8,12 +8,15 @@ import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useClockRecords, useEmployees } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { calculateClockHours, isClockPending } from '@/lib/clockUtils'
 import { ShiftClock } from '@/lib/types'
+import { calculateTips } from '@/lib/tipCalc'
+import { supabase } from '@/lib/supabase'
 
 function isoToTimeInput(value: string | null) {
   if (!value) return ''
@@ -44,6 +47,8 @@ export default function ClockRecordsPage() {
   const [clockEdits, setClockEdits] = useState<Record<string, { clockIn: string; clockOut: string; note: string }>>({})
   const [savingClockId, setSavingClockId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ShiftClock | null>(null)
+  const [deletingClockId, setDeletingClockId] = useState<string | null>(null)
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -91,6 +96,105 @@ export default function ClockRecordsPage() {
     setEditingClockId(null)
     setSavingClockId(null)
     setStatus('Clock record updated.')
+  }
+
+  const recomputeSessionTips = async (sessionDate: string) => {
+    const eodRes = await supabase
+      .from('eod_reports')
+      .select('id, cc_tip, cash_tip')
+      .eq('session_date', sessionDate)
+      .maybeSingle()
+
+    if (!eodRes.data?.id) return
+
+    const refreshedClockRes = await fetch(`/api/clock-events?session_date=${sessionDate}`, { cache: 'no-store' })
+    const refreshedClockJson = (await refreshedClockRes.json().catch(() => ({}))) as { records?: ShiftClock[]; error?: string }
+    if (!refreshedClockRes.ok) throw new Error(refreshedClockJson.error ?? 'Failed to reload clock records')
+
+    const refreshedClockRecords = refreshedClockJson.records ?? []
+    const grouped = new Map<string, { employee_id: string; hours_worked: number; start_time: string | null; end_time: string | null }>()
+
+    for (const record of refreshedClockRecords) {
+      const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
+      const isTipEligible = employee?.role === 'manager' || employee?.role === 'server' || employee?.role === 'busser' || employee?.role === 'runner'
+      if (!employee || !isTipEligible) continue
+
+      const existing = grouped.get(record.employee_id) ?? {
+        employee_id: record.employee_id,
+        hours_worked: 0,
+        start_time: null,
+        end_time: null,
+      }
+
+      existing.hours_worked += record.approval_status === 'approved' || record.approval_status === 'adjusted'
+        ? Number(record.approved_hours ?? 0)
+        : 0
+      const startTime = format(new Date(record.clock_in_at), 'HH:mm:ss')
+      const endTime = record.clock_out_at ? format(new Date(record.clock_out_at), 'HH:mm:ss') : null
+      existing.start_time = !existing.start_time || startTime < existing.start_time ? startTime : existing.start_time
+      existing.end_time = !existing.end_time || (endTime && endTime > existing.end_time) ? endTime : existing.end_time
+      grouped.set(record.employee_id, existing)
+    }
+
+    const tipRows = [...grouped.values()].filter(row => row.hours_worked > 0)
+    const totalTip = Number(eodRes.data.cc_tip ?? 0) + Number(eodRes.data.cash_tip ?? 0)
+    const tipResults = calculateTips(totalTip, tipRows.map(row => ({
+      employee_id: row.employee_id,
+      hours_worked: row.hours_worked,
+    })))
+
+    const deleteRes = await supabase.from('tip_distributions').delete().eq('eod_report_id', eodRes.data.id)
+    if (deleteRes.error) throw deleteRes.error
+
+    if (tipRows.length === 0) return
+
+    const insertRes = await supabase.from('tip_distributions').insert(
+      tipRows.map(row => {
+        const result = tipResults.find(item => item.employee_id === row.employee_id)
+        return {
+          eod_report_id: eodRes.data!.id,
+          employee_id: row.employee_id,
+          start_time: row.start_time,
+          end_time: row.end_time,
+          hours_worked: row.hours_worked,
+          tip_share: result?.tip_share ?? 0,
+          house_deduction: result?.house_deduction ?? 0,
+          net_tip: result?.net_tip ?? 0,
+        }
+      })
+    )
+
+    if (insertRes.error) throw insertRes.error
+  }
+
+  const deleteClockRecord = async () => {
+    if (!deleteTarget) return
+    setDeletingClockId(deleteTarget.id)
+    setStatus(null)
+
+    const res = await fetch('/api/clock-events', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: deleteTarget.id }),
+    })
+    const json = (await res.json().catch(() => ({}))) as { success?: boolean; session_date?: string; error?: string }
+
+    if (!res.ok || !json.success || !json.session_date) {
+      setStatus(json.error ?? 'Failed to delete clock record')
+      setDeletingClockId(null)
+      return
+    }
+
+    try {
+      await recomputeSessionTips(json.session_date)
+      setClockRecords(prev => prev.filter(item => item.id !== deleteTarget.id))
+      setDeleteTarget(null)
+      setStatus('Clock record deleted and tip distribution recalculated.')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Clock record deleted, but tip distribution refresh failed')
+    } finally {
+      setDeletingClockId(null)
+    }
   }
 
   return (
@@ -185,6 +289,7 @@ export default function ClockRecordsPage() {
                         {record.clock_in_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}>In Photo</Button>}
                         {record.clock_out_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
                         <Button size="sm" variant="outline" onClick={() => { setClockEdits(prev => ({ ...prev, [record.id]: { clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at), note: record.manager_note ?? '' } })); setEditingClockId(record.id) }}>Edit Times</Button>
+                        <Button size="sm" variant="outline" className="text-red-700 hover:text-red-800" onClick={() => setDeleteTarget(record)}>Delete</Button>
                       </div>
                     )}
                   </TableCell>
@@ -199,6 +304,28 @@ export default function ClockRecordsPage() {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Clock Record</DialogTitle>
+            <DialogDescription>
+              This will remove the selected clock record and recalculate tip distribution for that business day if an EOD report exists.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {deleteTarget
+              ? `${deleteTarget.employee?.name ?? employees.find(item => item.id === deleteTarget.employee_id)?.name ?? 'This employee'} • ${format(new Date(`${deleteTarget.session_date}T12:00:00`), 'MMM d, yyyy')} • ${format(new Date(deleteTarget.clock_in_at), 'p')}`
+              : 'Delete this clock record?'}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deletingClockId !== null}>Cancel</Button>
+            <Button variant="destructive" onClick={deleteClockRecord} disabled={deletingClockId !== null}>
+              {deletingClockId ? 'Deleting…' : 'Delete Record'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

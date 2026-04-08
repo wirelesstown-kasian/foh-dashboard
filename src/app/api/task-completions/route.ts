@@ -3,6 +3,20 @@ import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
 
+async function getActiveClockRecord(employeeId: string, sessionDate: string) {
+  const { data, error } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('clock_in_at, clock_out_at')
+    .eq('employee_id', employeeId)
+    .eq('session_date', sessionDate)
+    .is('clock_out_at', null)
+    .order('clock_in_at', { ascending: false })
+    .limit(1)
+
+  if (error) throw new Error(error.message)
+  return (data ?? [])[0] ?? null
+}
+
 export async function POST(req: NextRequest) {
   const { pin, task_id, session_date, status } = await req.json()
 
@@ -49,15 +63,11 @@ export async function POST(req: NextRequest) {
 
   const title = String(task.title).trim().toLowerCase()
   if (title !== 'clock in') {
-    const { data: clockRecord, error: clockError } = await supabaseAdmin
-      .from('shift_clocks')
-      .select('clock_in_at, clock_out_at')
-      .eq('employee_id', employeeId)
-      .eq('session_date', session_date)
-      .maybeSingle()
-
-    if (clockError) {
-      return NextResponse.json({ error: clockError.message }, { status: 500 })
+    let clockRecord
+    try {
+      clockRecord = await getActiveClockRecord(employeeId, session_date)
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load clock record' }, { status: 500 })
     }
     if (!clockRecord?.clock_in_at) {
       return NextResponse.json({ error: 'Clock in with photo before using your PIN for tasks' }, { status: 403 })
@@ -134,12 +144,12 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: completionError?.message ?? 'Completion not found' }, { status: 404 })
   }
 
-  const { data: clockRecord } = await supabaseAdmin
-    .from('shift_clocks')
-    .select('clock_in_at, clock_out_at')
-    .eq('employee_id', employeeId)
-    .eq('session_date', completion.session_date)
-    .maybeSingle()
+  let clockRecord
+  try {
+    clockRecord = await getActiveClockRecord(employeeId, completion.session_date)
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load clock record' }, { status: 500 })
+  }
 
   if (!clockRecord?.clock_in_at) {
     return NextResponse.json({ error: 'Clock in with photo before using your PIN for tasks' }, { status: 403 })
@@ -201,12 +211,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: completionError?.message ?? 'Completion not found' }, { status: 404 })
   }
 
-  const { data: clockRecord } = await supabaseAdmin
-    .from('shift_clocks')
-    .select('clock_in_at, clock_out_at')
-    .eq('employee_id', employeeId)
-    .eq('session_date', completion.session_date)
-    .maybeSingle()
+  let clockRecord
+  try {
+    clockRecord = await getActiveClockRecord(employeeId, completion.session_date)
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load clock record' }, { status: 500 })
+  }
 
   if (!clockRecord?.clock_in_at) {
     return NextResponse.json({ error: 'Clock in with photo before using your PIN for tasks' }, { status: 403 })

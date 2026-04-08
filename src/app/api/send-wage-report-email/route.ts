@@ -101,10 +101,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: clockError.message }, { status: 500 })
   }
 
-  const approvedClockHoursByDate = new Map(
-    ((clockRecords ?? []) as Array<{ session_date: string; approved_hours: number | null }>)
-      .map(record => [record.session_date, Number(record.approved_hours ?? 0)])
-  )
+  const approvedClockHoursByDate = ((clockRecords ?? []) as Array<{ session_date: string; approved_hours: number | null }>)
+    .reduce((map, record) => {
+      map.set(record.session_date, (map.get(record.session_date) ?? 0) + Number(record.approved_hours ?? 0))
+      return map
+    }, new Map<string, number>())
 
   const distributions = (reports ?? []).flatMap(report => {
     const dailyTips = (report.tip_distributions ?? [])

@@ -2,12 +2,55 @@ import { BUSINESS_DAY_CUTOFF_HOUR } from '@/lib/dateUtils'
 import { ShiftClock } from '@/lib/types'
 
 export const CLOCK_PHOTO_BUCKET = 'clock-photos'
+export const BUSINESS_TIMEZONE = 'America/Chicago'
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'shortOffset',
+  })
+  const zonePart = formatter.formatToParts(date).find(part => part.type === 'timeZoneName')?.value ?? 'GMT+0'
+  const match = zonePart.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/)
+
+  if (!match) return 0
+
+  const [, sign, hours, minutes = '0'] = match
+  const total = Number(hours) * 60 + Number(minutes)
+  return sign === '-' ? -total : total
+}
+
+function getZonedDateIso(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone: string
+) {
+  let utcGuess = Date.UTC(year, monthIndex, day, hour, minute, second, 0)
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const offsetMinutes = getTimeZoneOffsetMinutes(new Date(utcGuess), timeZone)
+    const adjusted = Date.UTC(year, monthIndex, day, hour, minute, second, 0) - offsetMinutes * 60_000
+    if (adjusted === utcGuess) break
+    utcGuess = adjusted
+  }
+
+  return new Date(utcGuess).toISOString()
+}
 
 export function getSessionCutoffIso(sessionDate: string) {
-  const cutoff = new Date(`${sessionDate}T00:00:00`)
-  cutoff.setDate(cutoff.getDate() + 1)
-  cutoff.setHours(BUSINESS_DAY_CUTOFF_HOUR, 0, 0, 0)
-  return cutoff.toISOString()
+  const [year, month, day] = sessionDate.split('-').map(Number)
+  return getZonedDateIso(
+    year,
+    month - 1,
+    day + 1,
+    BUSINESS_DAY_CUTOFF_HOUR,
+    0,
+    0,
+    BUSINESS_TIMEZONE
+  )
 }
 
 export function calculateClockHours(clockInAt: string, clockOutAt: string) {

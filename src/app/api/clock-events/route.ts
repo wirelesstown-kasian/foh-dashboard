@@ -119,6 +119,20 @@ async function processOverdueClockRecords() {
   }
 }
 
+async function getOpenClockRecord(employeeId: string, sessionDate: string) {
+  const { data, error } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .eq('session_date', sessionDate)
+    .is('clock_out_at', null)
+    .order('clock_in_at', { ascending: false })
+    .limit(1)
+
+  if (error) throw new Error(error.message)
+  return ((data ?? [])[0] ?? null) as ShiftClock | null
+}
+
 async function upsertClockTaskCompletion(taskId: string | null | undefined, employeeId: string, sessionDate: string) {
   if (!taskId) return
   const { data: existing } = await supabaseAdmin
@@ -200,15 +214,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
   }
 
-  const { data: existingRecord, error: recordError } = await supabaseAdmin
-    .from('shift_clocks')
-    .select('*')
-    .eq('employee_id', employee.id)
-    .eq('session_date', session_date)
-    .maybeSingle()
-
-  if (recordError) {
-    return NextResponse.json({ error: recordError.message }, { status: 500 })
+  let existingRecord: ShiftClock | null = null
+  try {
+    existingRecord = await getOpenClockRecord(employee.id, session_date)
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load clock record' }, { status: 500 })
   }
 
   const nowIso = new Date().toISOString()
@@ -345,4 +355,36 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json({ success: true })
+}
+
+export async function DELETE(req: NextRequest) {
+  if (!(await requireAdmin())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { id } = await req.json() as { id?: string }
+  if (!id) {
+    return NextResponse.json({ error: 'Missing clock record id' }, { status: 400 })
+  }
+
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('*')
+    .eq('id', id)
+    .single()
+
+  if (existingError || !existing) {
+    return NextResponse.json({ error: existingError?.message ?? 'Clock record not found' }, { status: 404 })
+  }
+
+  const { error } = await supabaseAdmin
+    .from('shift_clocks')
+    .delete()
+    .eq('id', id)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true, session_date: existing.session_date })
 }

@@ -22,7 +22,13 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
   const staffOnToday = staffIds.map(employeeId => {
     const employee = employees.find(item => item.id === employeeId)
     const schedule = schedules.find(item => item.employee_id === employeeId) ?? null
-    const record = clockRecords.find(item => item.employee_id === employeeId) ?? null
+    const record = [...clockRecords]
+      .filter(item => item.employee_id === employeeId)
+      .sort((a, b) => {
+        if (!a.clock_out_at && b.clock_out_at) return -1
+        if (a.clock_out_at && !b.clock_out_at) return 1
+        return b.clock_in_at.localeCompare(a.clock_in_at)
+      })[0] ?? null
     return { employee, schedule, record }
   }).filter(entry => entry.employee)
 

@@ -34,6 +34,36 @@ interface TipRow {
   name: string
 }
 
+function aggregateClockTipRows(records: ShiftClock[], employees: Employee[]): TipRow[] {
+  const grouped = new Map<string, TipRow>()
+
+  for (const record of records) {
+    const employee = employees.find(item => item.id === record.employee_id)
+    if (!employee || !isTipEligibleRole(employee.role)) continue
+
+    const existing = grouped.get(record.employee_id) ?? {
+      employee_id: record.employee_id,
+      hours_worked: 0,
+      clock_in_at: null,
+      clock_out_at: null,
+      name: employee.name,
+    }
+
+    existing.hours_worked += getEffectiveClockHours(record)
+    existing.clock_in_at = !existing.clock_in_at || new Date(record.clock_in_at) < new Date(existing.clock_in_at)
+      ? record.clock_in_at
+      : existing.clock_in_at
+    existing.clock_out_at = record.clock_out_at
+      ? (!existing.clock_out_at || new Date(record.clock_out_at) > new Date(existing.clock_out_at) ? record.clock_out_at : existing.clock_out_at)
+      : existing.clock_out_at
+    existing.name = employee.name
+
+    grouped.set(record.employee_id, existing)
+  }
+
+  return [...grouped.values()]
+}
+
 function formatClockTime(iso: string) {
   const d = new Date(iso)
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
@@ -55,17 +85,6 @@ function getTipDraftKey(sessionDate: string) {
 
 function getFinancialDraftKey(sessionDate: string) {
   return `eod-financials:${sessionDate}`
-}
-
-function getClockTipRow(record: ShiftClock, employees: Employee[]): TipRow {
-  const employee = employees.find(item => item.id === record.employee_id)
-  return {
-    employee_id: record.employee_id,
-    hours_worked: getEffectiveClockHours(record),
-    clock_in_at: record.clock_in_at,
-    clock_out_at: record.clock_out_at,
-    name: employee?.name ?? '',
-  }
 }
 
 function isTipEligibleRole(role: Employee['role']) {
@@ -196,12 +215,7 @@ export default function EodPage() {
       setFinancialsSaved(true)
       setTipDistributionSaved(true)
     } else {
-      const clockBasedRows: TipRow[] = ((clockRes.records ?? []) as ShiftClock[])
-        .filter(record => {
-          const emp = (empRes.data ?? []).find((employee: Employee) => employee.id === record.employee_id)
-          return !!emp && isTipEligibleRole(emp.role)
-        })
-        .map(record => getClockTipRow(record, empRes.data ?? []))
+      const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
 
       setTipRows(clockBasedRows)
       setFinancialsSaved(false)
@@ -265,13 +279,14 @@ export default function EodPage() {
   }
 
   const addTipRow = () => {
-    const unusedEmp = tipEligibleEmployees.find(e => !tipRows.some(r => r.employee_id === e.id))
+      const unusedEmp = tipEligibleEmployees.find(e => !tipRows.some(r => r.employee_id === e.id))
     if (!unusedEmp) return
     setTipDistributionSaved(false)
-    const clockRecord = clockRecords.find(record => record.employee_id === unusedEmp.id)
+    const employeeClockRows = aggregateClockTipRows(clockRecords.filter(record => record.employee_id === unusedEmp.id), employees)
+    const clockRecord = employeeClockRows[0]
     setTipRows(prev => [...prev, {
       employee_id: unusedEmp.id,
-      hours_worked: clockRecord ? getEffectiveClockHours(clockRecord) : 0,
+      hours_worked: clockRecord?.hours_worked ?? 0,
       clock_in_at: clockRecord?.clock_in_at ?? null,
       clock_out_at: clockRecord?.clock_out_at ?? null,
       name: unusedEmp.name,
@@ -288,12 +303,13 @@ export default function EodPage() {
     setTipRows(prev => prev.map((r, i) => {
       if (i !== idx) return r
       const emp = tipEligibleEmployees.find(e => e.id === value)
-      const clockRecord = clockRecords.find(record => record.employee_id === value)
+      const employeeClockRows = aggregateClockTipRows(clockRecords.filter(record => record.employee_id === value), employees)
+      const clockRecord = employeeClockRows[0]
       return {
         ...r,
         employee_id: value,
         name: emp?.name ?? '',
-        hours_worked: clockRecord ? getEffectiveClockHours(clockRecord) : 0,
+        hours_worked: clockRecord?.hours_worked ?? 0,
         clock_in_at: clockRecord?.clock_in_at ?? null,
         clock_out_at: clockRecord?.clock_out_at ?? null,
       }
