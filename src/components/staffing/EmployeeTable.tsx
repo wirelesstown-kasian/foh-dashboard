@@ -29,7 +29,7 @@ import {
 import { Plus, Pencil, Trash2, Gift } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
-import { getDepartmentLabel, getPrimaryDepartmentBadge, getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getPrimaryDepartmentBadge, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 import { useAppSettings } from '@/components/useAppSettings'
 
 interface FormState {
@@ -49,15 +49,6 @@ interface FormState {
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 
 const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
-
-function getRoleBadgeClass(role: string) {
-  if (role === 'manager') return 'bg-purple-100 text-purple-800'
-  if (role === 'server') return 'bg-blue-100 text-blue-800'
-  if (role === 'busser') return 'bg-green-100 text-green-800'
-  if (role === 'runner') return 'bg-orange-100 text-orange-800'
-  if (role === 'kitchen_staff') return 'bg-rose-100 text-rose-800'
-  return 'bg-slate-100 text-slate-700'
-}
 
 export function EmployeeTable() {
   const { roleDefinitions, departmentDefinitions } = useAppSettings()
@@ -246,7 +237,7 @@ export function EmployeeTable() {
                   </span>
                 </TableCell>
                 <TableCell>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getRoleBadgeClass(emp.role)}`}>
+                  <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={getRoleColorTheme(emp.role, roleDefinitions).badgeStyle}>
                     {getRoleLabel(emp.role, roleDefinitions)}
                   </span>
                 </TableCell>

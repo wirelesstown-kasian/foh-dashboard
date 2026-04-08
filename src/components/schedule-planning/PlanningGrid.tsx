@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getRoleLabel } from '@/lib/organization'
+import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 
 type ShiftDraft = {
   id?: string
@@ -469,12 +469,13 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const title = `${department.toUpperCase()} Planner`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = displayedEmployees.map(employee => {
+      const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
       const dayCells = days.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
           <td>
             ${shifts.length === 0 ? '<div class="muted">Off</div>' : shifts.map(shift => `
-              <div class="shift">
+              <div class="shift" style="background:${roleTheme.pdfShiftBackground};border-color:${roleTheme.pdfShiftBorder};">
                 <div class="time">${shift.is_off ? 'Off' : `${formatTime(shift.start_time)} - ${formatTime(shift.end_time)}`}</div>
                 ${shift.is_off ? '' : `<div class="muted">${formatHours(calcHours(shift.start_time, shift.end_time))}</div>`}
               </div>
@@ -485,9 +486,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
       return `
         <tr>
-          <td>
+          <td style="border-left: 4px solid ${roleTheme.pdfShiftBorder};">
             <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
-            <div class="muted">${getRoleLabel(employee.role, roleDefinitions)}</div>
+            <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
+              ${getRoleLabel(employee.role, roleDefinitions)}
+            </div>
           </td>
           ${dayCells}
           <td class="weekly-total">${formatHours(getWeeklyHours(employee.id))}</td>
@@ -512,6 +515,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             th { background: #edf1f5; font-weight: 700; }
             .employee-name { font-weight: 800; font-size: 15px; margin-bottom: 2px; }
             .muted { color: #475569; font-size: 12px; }
+            .role-badge { display: inline-block; margin-top: 6px; padding: 3px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
             .shift { background: #f7f7f5; border: 1.5px solid #64748b; border-radius: 8px; padding: 6px; margin-bottom: 5px; }
             .time { font-weight: 700; font-size: 14px; }
             .weekly-total { text-align: center; font-weight: 700; }
@@ -868,9 +872,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               </tr>
             </thead>
             <tbody>
-              {displayedEmployees.map((emp, rowIndex) => (
+              {displayedEmployees.map((emp, rowIndex) => {
+                const roleTheme = getRoleColorTheme(emp.role, roleDefinitions)
+                return (
                 <tr key={emp.id} className="border-b border-slate-200 hover:bg-slate-50/70">
-                  <td className="p-3.5 align-top">
+                  <td className="border-l-4 p-3.5 align-top" style={roleTheme.rowAccentStyle}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <div className="flex flex-col gap-2">
@@ -891,7 +897,16 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                         </div>
                         <div>
                           <div className="font-semibold text-[15px]">{employeeNamesById.get(emp.id) ?? emp.name}</div>
-                          <div className="text-[13px] text-muted-foreground capitalize">{emp.role}{!emp.is_active ? ' • archived' : ''}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
+                              {getRoleLabel(emp.role, roleDefinitions)}
+                            </span>
+                            {!emp.is_active && (
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                                Archived
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 pt-1">
@@ -916,7 +931,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                             <button
                               key={idx}
                               type="button"
-                              className="mb-2 block w-full rounded-xl border border-slate-300 bg-slate-100 p-2 text-center text-[15px] font-semibold text-slate-600 transition-colors hover:border-slate-500 hover:bg-slate-200"
+                              className="mb-2 block w-full rounded-xl border p-2 text-center text-[15px] font-semibold text-slate-700 transition-colors hover:brightness-[0.98]"
+                              style={roleTheme.shiftCardStyle}
                               disabled={!isEditableWeek}
                               onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
                             >
@@ -931,7 +947,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                             <button
                               key={idx}
                               type="button"
-                              className="mb-2 block w-full rounded-xl border border-slate-300 bg-white p-2 text-left text-sm shadow-sm transition-colors hover:border-slate-700 hover:bg-slate-50"
+                              className="mb-2 block w-full rounded-xl border p-2 text-left text-sm shadow-sm transition-colors hover:brightness-[0.98]"
+                              style={roleTheme.shiftCardStyle}
                               disabled={!isEditableWeek}
                               onClick={() => setShiftActionTarget({ draftIndex: globalIdx, employeeId: emp.id, date: dateStr })}
                             >
@@ -963,7 +980,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                     {formatHours(getWeeklyHours(emp.id))}
                   </td>
                 </tr>
-              ))}
+              )})}
               {displayedEmployees.length === 0 && !addStaffInlineOpen && (
                 <tr>
                   <td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">
@@ -983,6 +1000,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                         <div className="flex flex-wrap gap-2 mb-3">
                           {availableEmployeesToAdd.map(employee => {
                             const checked = staffToAdd.includes(employee.id)
+                            const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
                             return (
                               <label
                                 key={employee.id}
@@ -995,7 +1013,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                                   onChange={e => setStaffToAdd(cur => e.target.checked ? [...cur, employee.id] : cur.filter(id => id !== employee.id))}
                                 />
                                 <span>{employee.name}</span>
-                                <span className="text-xs text-slate-500">{getRoleLabel(employee.role, roleDefinitions)}</span>
+                                <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
+                                  {getRoleLabel(employee.role, roleDefinitions)}
+                                </span>
                               </label>
                             )
                           })}

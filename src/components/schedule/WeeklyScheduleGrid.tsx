@@ -125,7 +125,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     const title = `${department.toUpperCase()} Schedule`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = employees.map(employee => {
-      const roleTheme = getRoleColorTheme(employee.role)
+      const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
       const dayCells = renderedDays.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
@@ -274,13 +274,13 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             </thead>
             <tbody>
               {employees.map(emp => {
-                const roleTheme = getRoleColorTheme(emp.role)
+                const roleTheme = getRoleColorTheme(emp.role, roleDefinitions)
                 return (
                   <tr key={emp.id} className={`border-b border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-slate-100`}>
-                    <td className={`sticky left-0 z-[1] border-l-4 p-3.5 align-top border-r border-slate-200 bg-inherit ${roleTheme.rowAccentClassName}`}>
+                    <td className="sticky left-0 z-[1] border-l-4 border-r border-slate-200 bg-inherit p-3.5 align-top" style={roleTheme.rowAccentStyle}>
                       <div className="font-semibold text-[15px] text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] ${roleTheme.badgeClassName}`}>
+                        <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
                           {getRoleLabel(emp.role, roleDefinitions)}
                         </span>
                         {!emp.is_active && (
@@ -301,7 +301,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                             </div>
                           ) : (
                             shifts.map((s, i) => (
-                              <div key={i} className={`mb-2 rounded-xl border p-2.5 text-sm ${roleTheme.shiftCardClassName}`}>
+                              <div key={i} className="mb-2 rounded-xl border p-2.5 text-sm" style={roleTheme.shiftCardStyle}>
                                 <div className="whitespace-nowrap font-semibold text-[14px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>

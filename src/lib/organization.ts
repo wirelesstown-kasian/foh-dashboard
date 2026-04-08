@@ -2,71 +2,44 @@ import { DepartmentDefinition, RoleDefinition } from '@/lib/appSettings'
 import { Employee, PrimaryDepartment, ScheduleDepartment } from '@/lib/types'
 
 type RoleColorTheme = {
-  badgeClassName: string
-  rowAccentClassName: string
-  shiftCardClassName: string
+  badgeStyle: { backgroundColor: string; color: string }
+  rowAccentStyle: { borderLeftColor: string }
+  shiftCardStyle: { backgroundColor: string; borderColor: string }
   pdfBadgeBackground: string
   pdfBadgeText: string
   pdfShiftBackground: string
   pdfShiftBorder: string
 }
 
-const ROLE_COLOR_THEMES: Record<string, RoleColorTheme> = {
-  manager: {
-    badgeClassName: 'bg-violet-100 text-violet-800',
-    rowAccentClassName: 'border-l-violet-400',
-    shiftCardClassName: 'border-violet-200 bg-violet-50',
-    pdfBadgeBackground: '#ede9fe',
-    pdfBadgeText: '#6d28d9',
-    pdfShiftBackground: '#f5f3ff',
-    pdfShiftBorder: '#c4b5fd',
-  },
-  server: {
-    badgeClassName: 'bg-sky-100 text-sky-800',
-    rowAccentClassName: 'border-l-sky-400',
-    shiftCardClassName: 'border-sky-200 bg-sky-50',
-    pdfBadgeBackground: '#e0f2fe',
-    pdfBadgeText: '#0369a1',
-    pdfShiftBackground: '#f0f9ff',
-    pdfShiftBorder: '#7dd3fc',
-  },
-  busser: {
-    badgeClassName: 'bg-emerald-100 text-emerald-800',
-    rowAccentClassName: 'border-l-emerald-400',
-    shiftCardClassName: 'border-emerald-200 bg-emerald-50',
-    pdfBadgeBackground: '#d1fae5',
-    pdfBadgeText: '#047857',
-    pdfShiftBackground: '#ecfdf5',
-    pdfShiftBorder: '#86efac',
-  },
-  runner: {
-    badgeClassName: 'bg-amber-100 text-amber-800',
-    rowAccentClassName: 'border-l-amber-400',
-    shiftCardClassName: 'border-amber-200 bg-amber-50',
-    pdfBadgeBackground: '#fef3c7',
-    pdfBadgeText: '#b45309',
-    pdfShiftBackground: '#fffbeb',
-    pdfShiftBorder: '#fcd34d',
-  },
-  kitchen_staff: {
-    badgeClassName: 'bg-rose-100 text-rose-800',
-    rowAccentClassName: 'border-l-rose-400',
-    shiftCardClassName: 'border-rose-200 bg-rose-50',
-    pdfBadgeBackground: '#ffe4e6',
-    pdfBadgeText: '#be123c',
-    pdfShiftBackground: '#fff1f2',
-    pdfShiftBorder: '#fda4af',
-  },
+const DEFAULT_ROLE_COLORS: Record<string, string> = {
+  manager: '#8b5cf6',
+  server: '#0ea5e9',
+  busser: '#10b981',
+  runner: '#f59e0b',
+  kitchen_staff: '#f43f5e',
 }
 
-const DEFAULT_ROLE_COLOR_THEME: RoleColorTheme = {
-  badgeClassName: 'bg-slate-100 text-slate-700',
-  rowAccentClassName: 'border-l-slate-300',
-  shiftCardClassName: 'border-slate-300 bg-slate-50',
-  pdfBadgeBackground: '#e2e8f0',
-  pdfBadgeText: '#475569',
-  pdfShiftBackground: '#f8fafc',
-  pdfShiftBorder: '#cbd5e1',
+function hexToRgb(hexColor: string) {
+  const normalized = hexColor.replace('#', '')
+  const red = Number.parseInt(normalized.slice(0, 2), 16)
+  const green = Number.parseInt(normalized.slice(2, 4), 16)
+  const blue = Number.parseInt(normalized.slice(4, 6), 16)
+  return { red, green, blue }
+}
+
+function mixHex(hexColor: string, targetHex: string, weight: number) {
+  const source = hexToRgb(hexColor)
+  const target = hexToRgb(targetHex)
+  const mix = (left: number, right: number) => Math.round(left * (1 - weight) + right * weight)
+  return `#${[mix(source.red, target.red), mix(source.green, target.green), mix(source.blue, target.blue)]
+    .map(value => value.toString(16).padStart(2, '0'))
+    .join('')}`
+}
+
+function getContrastTextColor(hexColor: string) {
+  const { red, green, blue } = hexToRgb(hexColor)
+  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255
+  return luminance > 0.62 ? '#0f172a' : '#ffffff'
 }
 
 export function titleCaseWords(value: string) {
@@ -85,8 +58,39 @@ export function getDepartmentLabel(departmentKey: string, definitions: Departmen
   return definitions.find(definition => definition.key === departmentKey)?.label ?? titleCaseWords(departmentKey)
 }
 
-export function getRoleColorTheme(roleKey: string): RoleColorTheme {
-  return ROLE_COLOR_THEMES[roleKey] ?? DEFAULT_ROLE_COLOR_THEME
+export function getRoleColorTheme(roleKey: string, definitions: RoleDefinition[] = []): RoleColorTheme {
+  const definitionColor = definitions.find(definition => definition.key === roleKey)?.color
+  const baseColor = definitionColor ?? DEFAULT_ROLE_COLORS[roleKey] ?? '#64748b'
+  return {
+    badgeStyle: {
+      backgroundColor: mixHex(baseColor, '#ffffff', 0.84),
+      color: mixHex(baseColor, '#0f172a', 0.18),
+    },
+    rowAccentStyle: {
+      borderLeftColor: mixHex(baseColor, '#ffffff', 0.2),
+    },
+    shiftCardStyle: {
+      backgroundColor: mixHex(baseColor, '#ffffff', 0.9),
+      borderColor: mixHex(baseColor, '#ffffff', 0.72),
+    },
+    pdfBadgeBackground: mixHex(baseColor, '#ffffff', 0.84),
+    pdfBadgeText: mixHex(baseColor, '#0f172a', 0.18),
+    pdfShiftBackground: mixHex(baseColor, '#ffffff', 0.9),
+    pdfShiftBorder: mixHex(baseColor, '#ffffff', 0.72),
+  }
+}
+
+export function getRoleDefinition(roleKey: string, definitions: RoleDefinition[]) {
+  return definitions.find(definition => definition.key === roleKey) ?? null
+}
+
+export function getRoleDotStyle(roleKey: string, definitions: RoleDefinition[] = []) {
+  const definitionColor = definitions.find(definition => definition.key === roleKey)?.color
+  const backgroundColor = definitionColor ?? DEFAULT_ROLE_COLORS[roleKey] ?? '#64748b'
+  return {
+    backgroundColor,
+    color: getContrastTextColor(backgroundColor),
+  }
 }
 
 export function employeeMatchesScheduleDepartment(employee: Employee, department: ScheduleDepartment) {

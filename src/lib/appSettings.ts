@@ -14,6 +14,8 @@ export interface EmailSettings {
 export interface RoleDefinition {
   key: string
   label: string
+  description?: string
+  color?: string
   is_active: boolean
   display_order: number
 }
@@ -21,6 +23,7 @@ export interface RoleDefinition {
 export interface DepartmentDefinition {
   key: string
   label: string
+  description?: string
   is_active: boolean
   display_order: number
 }
@@ -40,16 +43,16 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   schedule_emails_enabled: true,
   wage_report_emails_enabled: true,
   role_definitions: [
-    { key: 'manager', label: 'Manager', is_active: true, display_order: 0 },
-    { key: 'server', label: 'Server', is_active: true, display_order: 1 },
-    { key: 'busser', label: 'Busser', is_active: true, display_order: 2 },
-    { key: 'runner', label: 'Runner', is_active: true, display_order: 3 },
-    { key: 'kitchen_staff', label: 'Kitchen Staff', is_active: true, display_order: 4 },
+    { key: 'manager', label: 'Manager', description: 'Admin access and oversight', color: '#8b5cf6', is_active: true, display_order: 0 },
+    { key: 'server', label: 'Server', description: 'Guest-facing service and table management', color: '#0ea5e9', is_active: true, display_order: 1 },
+    { key: 'busser', label: 'Busser', description: 'Table reset and dining room support', color: '#10b981', is_active: true, display_order: 2 },
+    { key: 'runner', label: 'Runner', description: 'Food running and service support', color: '#f59e0b', is_active: true, display_order: 3 },
+    { key: 'kitchen_staff', label: 'Kitchen Staff', description: 'Back-of-house prep and line work', color: '#f43f5e', is_active: true, display_order: 4 },
   ],
   primary_department_definitions: [
-    { key: 'foh', label: 'FOH', is_active: true, display_order: 0 },
-    { key: 'boh', label: 'BOH', is_active: true, display_order: 1 },
-    { key: 'hybrid', label: 'Hybrid', is_active: true, display_order: 2 },
+    { key: 'foh', label: 'FOH', description: 'Front-of-house staff and service floor', is_active: true, display_order: 0 },
+    { key: 'boh', label: 'BOH', description: 'Back-of-house kitchen operations', is_active: true, display_order: 1 },
+    { key: 'hybrid', label: 'Hybrid', description: 'Floats across both FOH and BOH', is_active: true, display_order: 2 },
   ],
 }
 
@@ -63,6 +66,14 @@ function normalizeString(value: unknown, fallback: string) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }
 
+function normalizeOptionalString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function normalizeOptionalHexColor(value: unknown) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim()) ? value.trim() : undefined
+}
+
 function normalizeDefinitions<T extends RoleDefinition | DepartmentDefinition>(value: unknown, fallback: T[]): T[] {
   if (!Array.isArray(value)) return fallback
   const normalized = value
@@ -73,6 +84,8 @@ function normalizeDefinitions<T extends RoleDefinition | DepartmentDefinition>(v
       return {
         key: maybeEntry.key.trim(),
         label: typeof maybeEntry.label === 'string' && maybeEntry.label.trim() ? maybeEntry.label.trim() : maybeEntry.key.trim(),
+        description: normalizeOptionalString(maybeEntry.description),
+        color: normalizeOptionalHexColor((maybeEntry as Partial<RoleDefinition>).color),
         is_active: typeof maybeEntry.is_active === 'boolean' ? maybeEntry.is_active : true,
         display_order: typeof maybeEntry.display_order === 'number' ? maybeEntry.display_order : index,
       } as T
