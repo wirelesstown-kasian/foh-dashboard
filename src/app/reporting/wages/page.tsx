@@ -1,11 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
+import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
@@ -28,6 +30,8 @@ export default function WageReportPage() {
   const [customEnd, setCustomEnd] = useState('')
   const [view, setView] = useState<TipReportView>('earnings')
   const [employeeFilter, setEmployeeFilter] = useState('all')
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -89,6 +93,14 @@ export default function WageReportPage() {
     [employeeFilter, rows]
   )
 
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    notifyReportingDataChanged()
+    await new Promise(resolve => window.setTimeout(resolve, 350))
+    setLastRefreshedAt(new Date())
+    setRefreshing(false)
+  }
+
   return (
     <div className="p-6">
       <AdminSubpageHeader
@@ -126,6 +138,18 @@ export default function WageReportPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </>
+          }
+          rightSlot={
+            <>
+              {lastRefreshedAt && (
+                <span className="text-xs text-muted-foreground">
+                  Updated {formatDistanceToNow(lastRefreshedAt, { addSuffix: true })}
+                </span>
+              )}
+              <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </Button>
             </>
           }
         />
