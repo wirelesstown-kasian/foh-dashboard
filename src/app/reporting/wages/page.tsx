@@ -476,6 +476,26 @@ export default function WageReportPage() {
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Performance Score</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf?.score ?? '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">monthly weighted KPI</div>
+                </div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Overall Rank</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf ? `#${perf.overallRank}` : '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">{perf ? `of ${perf.staffCount} staff` : 'no data'}</div>
+                </div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips / Hr</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
+                </div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">total earnings / hr</div>
+                </div>
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Hours Worked</div>
                   <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.hours.toFixed(2)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">hrs this period</div>
@@ -494,26 +514,6 @@ export default function WageReportPage() {
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total Earnings</div>
                   <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.totalEarnings)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">wages + tips + top-up</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips / Hr</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">total earnings / hr</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Performance Score</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf?.score ?? '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">monthly weighted KPI</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Overall Rank</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf ? `#${perf.overallRank}` : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">{perf ? `of ${perf.staffCount} staff` : 'no data'}</div>
                 </div>
               </div>
 
