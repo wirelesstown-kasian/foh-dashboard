@@ -149,35 +149,85 @@ export default function TaskPerformancePage() {
     const staffCount = perfRows.length
     const monthly = row.monthly
     const share = totalTasks > 0 ? getPercent((row.done / totalTasks) * 100) : '0.0%'
+
+    // Daily breakdown from filteredCompletions
+    const empCompletions = filteredCompletions.filter(c => c.employee_id === employeeId)
+    const dailyMap = new Map<string, number>()
+    for (const c of empCompletions) {
+      dailyMap.set(c.session_date, (dailyMap.get(c.session_date) ?? 0) + 1)
+    }
+    const dailyRows = Array.from(dailyMap.entries()).sort(([a], [b]) => b.localeCompare(a))
+    const dayTotalMap = new Map<string, number>()
+    for (const c of filteredCompletions) {
+      dayTotalMap.set(c.session_date, (dayTotalMap.get(c.session_date) ?? 0) + 1)
+    }
+
+    // Score breakdown
+    const rankCount = Math.max(employeeMonthStats.length, 1)
+    const taskScore = monthly ? Math.round(scoreFromRank(monthly.taskRank, rankCount) * 0.30) : 0
+    const taskRateScore = monthly ? Math.round(scoreFromRank(monthly.taskRateRank, rankCount) * 0.30) : 0
+    const tipRateScore = monthly ? Math.round(scoreFromRank(monthly.tipRateRank, rankCount) * 0.25) : 0
+    const hoursScore = monthly ? Math.round(scoreFromRank(monthly.hoursRank, rankCount) * 0.15) : 0
+
+    // Leaderboard rows
+    const leaderboardHtml = perfRows.map((r, idx) => {
+      const isMe = r.emp.id === employeeId
+      return `<tr style="${isMe ? 'background:#fef3c7;font-weight:600;' : ''}">
+        <td>${idx + 1}</td>
+        <td>${r.emp.name}${isMe ? ' ◀' : ''}</td>
+        <td class="right">${r.monthly?.score ?? '—'}</td>
+        <td class="right">${r.done}</td>
+        <td class="right">${r.monthly ? formatCurrency(r.monthly.tipRate) : '—'}</td>
+      </tr>`
+    }).join('')
+
+    const dailyHtml = dailyRows.length > 0
+      ? dailyRows.map(([date, count]) => {
+          const dayTotal = dayTotalMap.get(date) ?? 0
+          const pct = dayTotal > 0 ? getPercent((count / dayTotal) * 100) : '—'
+          return `<tr><td>${date}</td><td class="right">${count}</td><td class="right">${pct}</td></tr>`
+        }).join('')
+      : '<tr><td colspan="3" style="color:#6b7280">No tasks in period</td></tr>'
+
     return `
       <h1>${row.emp.name} Performance Report</h1>
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
+      <div class="summary">
+        <div class="card"><strong>Overall Rank</strong><div class="metric">#${overallRank}</div><div class="muted">of ${staffCount}</div></div>
+        <div class="card"><strong>Performance Score</strong><div class="metric">${monthly?.score ?? '—'}</div><div class="muted">Monthly weighted KPI</div></div>
+        <div class="card"><strong>Tasks This Period</strong><div class="metric">${row.done}</div><div class="muted">Share ${share}</div></div>
+        <div class="card"><strong>Total Tips</strong><div class="metric">${monthly ? formatCurrency(monthly.totalTips) : '—'}</div><div class="muted">This month</div></div>
+      </div>
+      <p>
+        ${row.emp.name} is ranked #${overallRank} of ${staffCount} in ${department.toUpperCase()}.
+        Monthly pace: ${monthly ? monthly.taskRate.toFixed(2) : '0.00'} tasks/hr — ${monthly?.hours.toFixed(2) ?? '0.00'} hrs worked — ${monthly ? formatCurrency(monthly.tipRate) : '$0.00'} tips/hr.
+      </p>
       <div class="report-grid">
         <div>
-          <div class="summary">
-            <div class="card"><strong>Overall Rank</strong><div class="metric">#${overallRank}</div><div class="muted">of ${staffCount}</div></div>
-            <div class="card"><strong>Performance Score</strong><div class="metric">${monthly?.score ?? '—'}</div><div class="muted">Monthly weighted KPI</div></div>
-            <div class="card"><strong>Tasks This Period</strong><div class="metric">${row.done}</div><div class="muted">Share ${share}</div></div>
-            <div class="card"><strong>Total Tips</strong><div class="metric">${monthly ? formatCurrency(monthly.totalTips) : '—'}</div><div class="muted">This month</div></div>
-          </div>
-          <h3>Performance Summary</h3>
-          <p>
-            ${row.emp.name} is currently ranked #${overallRank} out of ${staffCount} staff in ${department.toUpperCase()}.
-            Monthly pace is ${monthly ? monthly.taskRate.toFixed(2) : '0.00'} tasks/hr with ${monthly?.hours.toFixed(2) ?? '0.00'} hours worked
-            and ${monthly ? formatCurrency(monthly.tipRate) : '$0.00'} tips/hr.
-          </p>
+          <h3>Score Breakdown</h3>
+          <table class="compact-table">
+            <thead><tr><th>KPI</th><th class="right">Weight</th><th class="right">Rank</th><th class="right">Component</th></tr></thead>
+            <tbody>
+              <tr><td>Completed Tasks</td><td class="right">30%</td><td class="right">${monthly ? `#${monthly.taskRank}` : '—'}</td><td class="right">${taskScore}</td></tr>
+              <tr><td>Tasks / Hr</td><td class="right">30%</td><td class="right">${monthly ? `#${monthly.taskRateRank}` : '—'}</td><td class="right">${taskRateScore}</td></tr>
+              <tr><td>Tips / Hr</td><td class="right">25%</td><td class="right">${monthly ? `#${monthly.tipRateRank}` : '—'}</td><td class="right">${tipRateScore}</td></tr>
+              <tr><td>Hours Worked</td><td class="right">15%</td><td class="right">${monthly ? `#${monthly.hoursRank}` : '—'}</td><td class="right">${hoursScore}</td></tr>
+              <tr style="font-weight:700;border-top:2px solid #d1d5db"><td>Total Score</td><td></td><td></td><td class="right">${monthly?.score ?? '—'}</td></tr>
+            </tbody>
+          </table>
+          <h3>Daily Activity</h3>
+          <table class="compact-table">
+            <thead><tr><th>Date</th><th class="right">Tasks</th><th class="right">Day Share</th></tr></thead>
+            <tbody>${dailyHtml}</tbody>
+          </table>
         </div>
-        <table class="compact-table">
-          <thead>
-            <tr><th>KPI</th><th class="right">Value</th><th class="right">Rank</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Tasks / Hr</td><td class="right">${monthly ? monthly.taskRate.toFixed(2) : '—'}</td><td class="right">${monthly ? `#${monthly.taskRateRank}` : '—'}</td></tr>
-            <tr><td>Working Hours</td><td class="right">${monthly?.hours.toFixed(2) ?? '0.00'} hrs</td><td class="right">${monthly ? `#${monthly.hoursRank}` : '—'}</td></tr>
-            <tr><td>Completed Tasks</td><td class="right">${monthly?.tasks ?? 0}</td><td class="right">${monthly ? `#${monthly.taskRank}` : '—'}</td></tr>
-            <tr><td>Tips / Hr</td><td class="right">${monthly ? formatCurrency(monthly.tipRate) : '—'}</td><td class="right">${monthly ? `#${monthly.tipRateRank}` : '—'}</td></tr>
-          </tbody>
-        </table>
+        <div>
+          <h3>Team Leaderboard</h3>
+          <table class="compact-table">
+            <thead><tr><th>#</th><th>Name</th><th class="right">Score</th><th class="right">Tasks</th><th class="right">Tips/Hr</th></tr></thead>
+            <tbody>${leaderboardHtml}</tbody>
+          </table>
+        </div>
       </div>
     `
   }
@@ -296,7 +346,7 @@ export default function TaskPerformancePage() {
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
-        <DialogContent className="w-[calc(100vw-1rem)] h-[calc(100vh-1rem)] max-w-none max-h-none overflow-y-auto p-7">
+        <DialogContent className="w-[calc(100vw-1rem)] h-[calc(100vh-1rem)] max-w-none sm:max-w-none max-h-none overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Performance Report</DialogTitle>
           </DialogHeader>
@@ -388,6 +438,117 @@ export default function TaskPerformancePage() {
                   </div>
                 </div>
               </div>
+              {/* Score Breakdown */}
+              {detailTarget.monthly && (() => {
+                const m = detailTarget.monthly
+                const rankCount = Math.max(employeeMonthStats.length, 1)
+                const rows = [
+                  { label: 'Completed Tasks', weight: '30%', rank: m.taskRank, score: Math.round(scoreFromRank(m.taskRank, rankCount) * 0.30) },
+                  { label: 'Tasks / Hr',       weight: '30%', rank: m.taskRateRank, score: Math.round(scoreFromRank(m.taskRateRank, rankCount) * 0.30) },
+                  { label: 'Tips / Hr',         weight: '25%', rank: m.tipRateRank, score: Math.round(scoreFromRank(m.tipRateRank, rankCount) * 0.25) },
+                  { label: 'Hours Worked',      weight: '15%', rank: m.hoursRank, score: Math.round(scoreFromRank(m.hoursRank, rankCount) * 0.15) },
+                ]
+                return (
+                  <div className="rounded-2xl border bg-white p-5">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Score Breakdown</div>
+                    <Table className="mt-3">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>KPI</TableHead>
+                          <TableHead className="text-right">Weight</TableHead>
+                          <TableHead className="text-right">Rank</TableHead>
+                          <TableHead className="text-right">Component Score</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {rows.map(r => (
+                          <TableRow key={r.label}>
+                            <TableCell>{r.label}</TableCell>
+                            <TableCell className="text-right text-muted-foreground">{r.weight}</TableCell>
+                            <TableCell className="text-right">#{r.rank}</TableCell>
+                            <TableCell className="text-right font-semibold">{r.score}</TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="border-t-2 font-bold">
+                          <TableCell colSpan={3}>Total Score</TableCell>
+                          <TableCell className="text-right text-amber-700">{m.score}</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                )
+              })()}
+
+              {/* Daily Activity + Team Leaderboard */}
+              <div className="grid gap-5 lg:grid-cols-2">
+                {/* Daily breakdown */}
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Daily Activity — This Period</div>
+                  {(() => {
+                    const empCompletions = filteredCompletions.filter(c => c.employee_id === detailTarget.emp.id)
+                    const dailyMap = new Map<string, number>()
+                    for (const c of empCompletions) dailyMap.set(c.session_date, (dailyMap.get(c.session_date) ?? 0) + 1)
+                    const dayTotalMap = new Map<string, number>()
+                    for (const c of filteredCompletions) dayTotalMap.set(c.session_date, (dayTotalMap.get(c.session_date) ?? 0) + 1)
+                    const dailyRows = Array.from(dailyMap.entries()).sort(([a], [b]) => b.localeCompare(a))
+                    if (dailyRows.length === 0) return <p className="mt-3 text-sm text-muted-foreground">No tasks in selected period.</p>
+                    return (
+                      <Table className="mt-3">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead className="text-right">Tasks</TableHead>
+                            <TableHead className="text-right">Day Share</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {dailyRows.map(([date, count]) => {
+                            const dayTotal = dayTotalMap.get(date) ?? 0
+                            return (
+                              <TableRow key={date}>
+                                <TableCell>{date}</TableCell>
+                                <TableCell className="text-right font-semibold">{count}</TableCell>
+                                <TableCell className="text-right text-muted-foreground">{dayTotal > 0 ? getPercent((count / dayTotal) * 100) : '—'}</TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </TableBody>
+                      </Table>
+                    )
+                  })()}
+                </div>
+
+                {/* Team leaderboard */}
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Team Leaderboard</div>
+                  <Table className="mt-3">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10">#</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead className="text-right">Score</TableHead>
+                        <TableHead className="text-right">Tasks</TableHead>
+                        <TableHead className="text-right">Tips/Hr</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {perfRows.map((r, idx) => {
+                        const isMe = r.emp.id === detailTarget.emp.id
+                        return (
+                          <TableRow key={r.emp.id} className={isMe ? 'bg-amber-50 font-semibold' : ''}>
+                            <TableCell>{idx === 0 ? <Trophy className="h-4 w-4 text-amber-500" /> : idx + 1}</TableCell>
+                            <TableCell>{r.emp.name}{isMe ? ' ◀' : ''}</TableCell>
+                            <TableCell className="text-right">{r.monthly?.score ?? '—'}</TableCell>
+                            <TableCell className="text-right">{r.done}</TableCell>
+                            <TableCell className="text-right">{r.monthly ? formatCurrency(r.monthly.tipRate) : '—'}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Performance Report`, buildPerformanceReportHtml(detailTarget.emp.id))}>
                   PDF Export
