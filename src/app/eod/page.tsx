@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, DailySession, EodReport, TipDistribution, ShiftClock } from '@/lib/types'
+import { Employee, DailySession, EodReport, TipDistribution, ShiftClock, Schedule } from '@/lib/types'
 import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
@@ -26,6 +26,7 @@ import {
 import { Lock, Plus, Trash2, Send, CheckCircle2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { PinModal } from '@/components/layout/PinModal'
+import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 
 interface TipRow {
   employee_id: string
@@ -138,6 +139,7 @@ export default function EodPage() {
   const today = getBusinessDateString()
   const [session, setSession] = useState<DailySession | null>(null)
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [schedules, setSchedules] = useState<Schedule[]>([])
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [existing, setExisting] = useState<EodReport | null>(null)
   const [loading, setLoading] = useState(true)
@@ -173,9 +175,10 @@ export default function EodPage() {
   const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
 
   const load = useCallback(async () => {
-    const [sessRes, empRes, eodRes, clockRes] = await Promise.all([
+    const [sessRes, empRes, schRes, eodRes, clockRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
       supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+      supabase.from('schedules').select('*').eq('date', today),
       supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
@@ -183,6 +186,7 @@ export default function EodPage() {
     ])
     setSession(sessRes.data ?? null)
     setEmployees(empRes.data ?? [])
+    setSchedules(schRes.data ?? [])
     setClockRecords(clockRes.records ?? [])
 
     const eod = eodRes.data as EodReport | null
@@ -258,6 +262,11 @@ export default function EodPage() {
   }, [existing, loading, today])
 
   const openClockRecords = clockRecords.filter(record => !record.clock_out_at)
+  const openClockStaff = openClockRecords.map(record => ({
+    id: record.id,
+    employeeName: employeeNameById.get(record.employee_id) ?? 'Unknown staff',
+    clockInAt: record.clock_in_at,
+  }))
   const pendingApprovalRecords = clockRecords.filter(record => record.approval_status === 'pending_review')
   const hasOpenClockWarnings = openClockRecords.length > 0
   const isLocked = !managerOverride && (!!existing || !session || session.current_phase !== 'complete')
@@ -594,7 +603,7 @@ export default function EodPage() {
       <Dialog open={showFinancialConfirm} onOpenChange={setShowFinancialConfirm}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Revenue & Tips Saved</DialogTitle>
+            <DialogTitle>{hasOpenClockWarnings ? 'Clock-Out Check Required' : 'Revenue & Tips Saved'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 text-sm">
             <div className="rounded-lg border bg-amber-50 p-4">
@@ -610,7 +619,31 @@ export default function EodPage() {
               </div>
               <p className="mt-2">Next, complete the Tip Distribution section below. After Tip Distribution is saved, `Save EOD` will activate.</p>
             </div>
-            <Button className="w-full" onClick={() => setShowFinancialConfirm(false)}>
+
+            {hasOpenClockWarnings && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
+                <p className="font-medium">These staff members are still clocked in:</p>
+                <div className="mt-3 space-y-2">
+                  {openClockStaff.map((record) => (
+                    <div key={record.id} className="flex items-center justify-between rounded-md bg-white/70 px-3 py-2 text-sm">
+                      <span className="font-medium">{record.employeeName}</span>
+                      <span className="text-red-700">In since {formatClockTime(record.clockInAt)}</span>
+                    </div>
+                  ))}
+                </div>
+                <Button
+                  className="mt-4 w-full"
+                  onClick={() => {
+                    setShowFinancialConfirm(false)
+                    document.getElementById('clock-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }}
+                >
+                  Go to Clock In / Clock Out
+                </Button>
+              </div>
+            )}
+
+            <Button className="w-full" variant={hasOpenClockWarnings ? 'outline' : 'default'} onClick={() => setShowFinancialConfirm(false)}>
               Continue to Tip Distribution
             </Button>
           </div>
@@ -671,7 +704,16 @@ export default function EodPage() {
           </div>
         </DialogContent>
       </Dialog>
-      <div className="p-6 max-w-4xl">
+      <div className="max-w-4xl p-6">
+        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">End of Day — {format(businessDate, 'MMM d, yyyy')}</h1>
+          </div>
+          <div id="clock-actions" className="flex justify-start md:justify-end">
+            <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
+          </div>
+        </div>
+
         {submissionComplete ? (
           <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center p-8">
             <CheckCircle2 className="h-16 w-16 text-green-500" />
@@ -709,6 +751,14 @@ export default function EodPage() {
                 <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
                   Manager Edit Override
                 </Button>
+                {hasOpenClockWarnings && (
+                  <Button
+                    variant="outline"
+                    onClick={() => document.getElementById('clock-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  >
+                    Go to Clock In / Clock Out
+                  </Button>
+                )}
                 <Button variant="destructive" onClick={() => setShowResetConfirm(true)}>
                   Reset Saved EOD
                 </Button>
@@ -717,10 +767,6 @@ export default function EodPage() {
           </div>
         ) : (
           <>
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold">End of Day — {format(businessDate, 'MMM d, yyyy')}</h1>
-            </div>
-
             {(openClockRecords.length > 0 || pendingApprovalRecords.length > 0) && (
               <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-800">
                 <p className="font-semibold">Attendance Warning</p>
@@ -729,6 +775,15 @@ export default function EodPage() {
                 )}
                 {pendingApprovalRecords.length > 0 && (
                   <p className="mt-1">{pendingApprovalRecords.length} auto clock-out record{pendingApprovalRecords.length > 1 ? 's are' : ' is'} pending manager review. Those hours should be checked before payroll.</p>
+                )}
+                {openClockRecords.length > 0 && (
+                  <Button
+                    variant="outline"
+                    className="mt-3"
+                    onClick={() => document.getElementById('clock-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  >
+                    Open Clock In / Clock Out
+                  </Button>
                 )}
               </div>
             )}

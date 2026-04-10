@@ -38,14 +38,14 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
   }
 
   return (
-    <aside className="w-72 shrink-0 bg-white border-r flex flex-col">
+    <aside className="flex min-h-0 w-72 shrink-0 flex-col border-r bg-white">
       <div className="p-3 border-b">
         <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">Today&apos;s Staff</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
           {businessDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
         </p>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
         {staffOnToday.length === 0 && (
           <p className="text-xs text-muted-foreground text-center py-4">No scheduled or clocked-in staff today</p>
         )}

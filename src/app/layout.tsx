@@ -12,8 +12,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className="h-full">
       <body className="h-full flex flex-col bg-gray-50 antialiased overflow-hidden">
         <TabNav />
-        <main className="flex-1 overflow-auto">
-          <div className="mx-auto h-full w-full max-w-[1400px]">
+        <main className="min-h-0 flex-1 overflow-auto">
+          <div className="mx-auto min-h-full w-full max-w-[1400px]">
             {children}
           </div>
         </main>

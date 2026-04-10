@@ -90,6 +90,7 @@ export default function EmailSettingsPage() {
         return
       }
       setSettings(data.settings)
+      window.dispatchEvent(new Event('app-settings-updated'))
       setSaved('Email settings saved')
     } finally {
       setSaving(false)

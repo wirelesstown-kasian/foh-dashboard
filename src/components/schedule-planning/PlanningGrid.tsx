@@ -142,6 +142,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string; draftIndex?: number } | null>(null)
   const [addStaffInlineOpen, setAddStaffInlineOpen] = useState(false)
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
+  const [sendEmailOnPublish, setSendEmailOnPublish] = useState(true)
   const [staffToAdd, setStaffToAdd] = useState<string[]>([])
   const [addForm, setAddForm] = useState({ start_time: '15:30', end_time: '01:00', is_off: false })
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
@@ -149,6 +150,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [shiftActionTarget, setShiftActionTarget] = useState<{ draftIndex: number; employeeId: string; date: string } | null>(null)
   const [staffRemovalTarget, setStaffRemovalTarget] = useState<Employee | null>(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [publishFeedback, setPublishFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
   const allowedTimeOptions = getAllowedTimeOptions()
 
   useEffect(() => {
@@ -724,72 +726,103 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const handlePublish = async () => {
     if (days.length === 0 || !isEditableWeek) return
     setSaving(true)
-    const startDate = formatDate(days[0])
-    const endDate = formatDate(days[6])
-    const key = `${draftKey(days[0])}_${department}`
+    setPublishFeedback(null)
 
-    // Delete by department so FOH and BOH schedules don't interfere with each other.
-    // Managers can have independent shifts in each department.
-    await supabase
-      .from('schedules')
-      .delete()
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .eq('department', department)
+    try {
+      const startDate = formatDate(days[0])
+      const endDate = formatDate(days[6])
+      const key = `${draftKey(days[0])}_${department}`
 
-    const shiftsToPublish = drafts.filter(d => !d.is_off)
-    if (shiftsToPublish.length > 0) {
-      await supabase.from('schedules').insert(
-        shiftsToPublish.map(d => ({
-          employee_id: d.employee_id,
-          date: d.date,
-          start_time: d.start_time,
-          end_time: d.end_time,
-          department,
-        }))
-      )
-    }
+      // Delete by department so FOH and BOH schedules don't interfere with each other.
+      // Managers can have independent shifts in each department.
+      const deleteResult = await supabase
+        .from('schedules')
+        .delete()
+        .gte('date', startDate)
+        .lte('date', endDate)
+        .eq('department', department)
+      if (deleteResult.error) throw deleteResult.error
 
-    const scheduledSendDate = new Date(days[0])
-    scheduledSendDate.setDate(scheduledSendDate.getDate() - 1)
-    const scheduledSendDateStr = formatDate(scheduledSendDate)
-    const todayStr = formatDate(new Date())
+      const shiftsToPublish = drafts.filter(d => !d.is_off)
+      if (shiftsToPublish.length > 0) {
+        const insertResult = await supabase.from('schedules').insert(
+          shiftsToPublish.map(d => ({
+            employee_id: d.employee_id,
+            date: d.date,
+            start_time: d.start_time,
+            end_time: d.end_time,
+            department,
+          }))
+        )
+        if (insertResult.error) throw insertResult.error
+      }
 
-    await supabase
-      .from('schedule_publications')
-      .upsert({
-        week_start: startDate,
-        week_end: endDate,
-        scheduled_send_date: scheduledSendDateStr,
-        published_at: new Date().toISOString(),
-        email_sent_at: null,
-      }, { onConflict: 'week_start' })
+      const scheduledSendDate = new Date(days[0])
+      scheduledSendDate.setDate(scheduledSendDate.getDate() - 1)
+      const scheduledSendDateStr = formatDate(scheduledSendDate)
+      const todayStr = formatDate(new Date())
 
-    if (scheduledSendDateStr <= todayStr) {
-      fetch('/api/send-schedule-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ week_start: startDate, week_end: endDate }),
-      })
-        .then(async response => {
-          if (!response.ok) return
-          await supabase
-            .from('schedule_publications')
-            .update({ email_sent_at: new Date().toISOString() })
-            .eq('week_start', startDate)
+      const publicationResult = await supabase
+        .from('schedule_publications')
+        .upsert({
+          week_start: startDate,
+          week_end: endDate,
+          scheduled_send_date: scheduledSendDateStr,
+          published_at: new Date().toISOString(),
+          email_sent_at: sendEmailOnPublish ? null : new Date().toISOString(),
+        }, { onConflict: 'week_start' })
+      if (publicationResult.error) throw publicationResult.error
+
+      if (sendEmailOnPublish && scheduledSendDateStr <= todayStr) {
+        const response = await fetch('/api/send-schedule-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ week_start: startDate, week_end: endDate }),
         })
-        .catch(() => { /* fire and forget */ })
-    }
+        const payload = (await response.json().catch(() => ({}))) as { success?: boolean; sent?: number; error?: string; errors?: string[]; message?: string }
+        if (!response.ok || payload.success === false) {
+          throw new Error(payload.errors?.join(' ') || payload.error || payload.message || 'Failed to send schedule emails')
+        }
 
-    await saveServerDrafts(startDate, department, drafts, displayedEmployeeIds).catch(error => {
-      console.error('Failed to persist planner snapshot after publish', error)
-    })
-    localStorage.setItem(key, JSON.stringify(drafts))
-    localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
-    await loadData()
-    setIsDirty(false)
-    setPublishDialogOpen(false)
-    setSaving(false)
+        const markSentResult = await supabase
+          .from('schedule_publications')
+          .update({ email_sent_at: new Date().toISOString() })
+          .eq('week_start', startDate)
+        if (markSentResult.error) throw markSentResult.error
+
+        setPublishFeedback({
+          tone: 'success',
+          message: `Schedule published and emails sent${typeof payload.sent === 'number' ? ` (${payload.sent} sent)` : ''}.`,
+        })
+      } else if (sendEmailOnPublish) {
+        setPublishFeedback({
+          tone: 'success',
+          message: `Schedule published. Emails are queued for ${scheduledSendDateStr}.`,
+        })
+      } else {
+        setPublishFeedback({
+          tone: 'success',
+          message: 'Schedule published without sending emails.',
+        })
+      }
+
+      await saveServerDrafts(startDate, department, drafts, displayedEmployeeIds).catch(error => {
+        console.error('Failed to persist planner snapshot after publish', error)
+      })
+      localStorage.setItem(key, JSON.stringify(drafts))
+      localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
+      await loadData()
+      setIsDirty(false)
+      setPublishDialogOpen(false)
+      setSendEmailOnPublish(true)
+    } catch (error) {
+      setPublishFeedback({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Failed to publish schedule.',
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -846,6 +879,12 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           </Button>
         </div>
       </div>
+
+      {publishFeedback && (
+        <div className={`mb-4 rounded-xl border px-3 py-2 text-sm ${publishFeedback.tone === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+          {publishFeedback.message}
+        </div>
+      )}
 
       <div className="mb-5 rounded-2xl border bg-slate-50/80 p-4 md:p-5">
         <h2 className="text-lg font-semibold">{department === 'boh' ? 'BOH Staff Lines' : 'FOH Staff Lines'}</h2>
@@ -1147,8 +1186,29 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               Review once more before confirming. This will replace the published schedule for this department and week.
             </div>
+            <div className="rounded-lg border bg-white p-3 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium text-slate-900">Send schedule emails now</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Default is on. Turn this off if the schedule was already emailed and you only want to republish the board.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={sendEmailOnPublish}
+                  onClick={() => setSendEmailOnPublish(value => !value)}
+                  className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${sendEmailOnPublish ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 translate-y-0.5 rounded-full bg-white transition-transform ${sendEmailOnPublish ? 'translate-x-5' : 'translate-x-0.5'}`}
+                  />
+                </button>
+              </div>
+            </div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => setPublishDialogOpen(false)}>
+              <Button variant="outline" className="flex-1" onClick={() => { setPublishDialogOpen(false); setSendEmailOnPublish(true) }}>
                 Back
               </Button>
               <Button className="flex-1" onClick={handlePublish} disabled={saving}>

@@ -28,12 +28,16 @@ export async function sendWeeklyScheduleEmails({
 
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
-  const { data: schedules } = await supabaseAdmin
+  const { data: schedules, error: schedulesError } = await supabaseAdmin
     .from('schedules')
     .select('*, employee:employees(id, name, email, role)')
     .gte('date', weekStart)
     .lte('date', weekEnd)
     .order('date')
+
+  if (schedulesError) {
+    throw new Error(`Failed to load schedules: ${schedulesError.message}`)
+  }
 
   if (!schedules || schedules.length === 0) {
     return { success: true, sent: 0, message: 'No schedules to send' }
@@ -184,6 +188,10 @@ export async function sendWeeklyScheduleEmails({
         replyTo: emailSettings.reply_to,
       })
     )
+  }
+
+  if (emailPromises.length === 0) {
+    return { success: true, sent: 0, message: 'No scheduled employees have an email address' }
   }
 
   const results = await Promise.allSettled(emailPromises)

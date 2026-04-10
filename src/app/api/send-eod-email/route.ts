@@ -56,59 +56,60 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { eod_report_id } = await req.json()
-  if (!eod_report_id) return NextResponse.json({ error: 'Missing eod_report_id' }, { status: 400 })
+  try {
+    const { eod_report_id } = await req.json()
+    if (!eod_report_id) return NextResponse.json({ error: 'Missing eod_report_id' }, { status: 400 })
 
-  const resendKey = process.env.RESEND_API_KEY
-  if (!resendKey) return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })
-  const emailSettings = await getEmailSettings()
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
-  const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
+    const resendKey = process.env.RESEND_API_KEY
+    if (!resendKey) return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })
+    const emailSettings = await getEmailSettings()
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+    const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
-  const { data: report, error } = await supabaseAdmin
-    .from('eod_reports')
-    .select('*, closed_by:employees(*), tip_distributions(*, employee:employees(*))')
-    .eq('id', eod_report_id)
-    .single()
+    const { data: report, error } = await supabaseAdmin
+      .from('eod_reports')
+      .select('*, closed_by:employees(*), tip_distributions(*, employee:employees(*))')
+      .eq('id', eod_report_id)
+      .single()
 
-  if (error || !report) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
+    if (error || !report) return NextResponse.json({ error: 'Report not found' }, { status: 404 })
 
-  const rawTipDists = (report.tip_distributions ?? []) as TipDist[]
-  const { data: sessionSchedules } = await supabaseAdmin
-    .from('schedules')
-    .select('employee_id, start_time, end_time')
-    .eq('date', report.session_date)
+    const rawTipDists = (report.tip_distributions ?? []) as TipDist[]
+    const { data: sessionSchedules } = await supabaseAdmin
+      .from('schedules')
+      .select('employee_id, start_time, end_time')
+      .eq('date', report.session_date)
 
-  const scheduleByEmployee = new Map(
-    ((sessionSchedules ?? []) as Array<{ employee_id: string; start_time: string; end_time: string }>).map(schedule => [
-      schedule.employee_id,
-      schedule,
-    ])
-  )
+    const scheduleByEmployee = new Map(
+      ((sessionSchedules ?? []) as Array<{ employee_id: string; start_time: string; end_time: string }>).map(schedule => [
+        schedule.employee_id,
+        schedule,
+      ])
+    )
 
-  const tipDists = rawTipDists.map(dist => {
-    const schedule = scheduleByEmployee.get(dist.employee_id)
-    return {
-      ...dist,
-      // Worked time: tip_distribution explicit times (what was entered at EOD)
-      start_time: dist.start_time ?? null,
-      end_time: dist.end_time ?? null,
-      // Original scheduled shift from the schedules table; null means they were Off
-      scheduled_start: schedule?.start_time ?? null,
-      scheduled_end: schedule?.end_time ?? null,
-    }
-  })
-  const emailPromises: Promise<void>[] = []
+    const tipDists = rawTipDists.map(dist => {
+      const schedule = scheduleByEmployee.get(dist.employee_id)
+      return {
+        ...dist,
+        // Worked time: tip_distribution explicit times (what was entered at EOD)
+        start_time: dist.start_time ?? null,
+        end_time: dist.end_time ?? null,
+        // Original scheduled shift from the schedules table; null means they were Off
+        scheduled_start: schedule?.start_time ?? null,
+        scheduled_end: schedule?.end_time ?? null,
+      }
+    })
+    const emailPromises: Promise<void>[] = []
 
-  const { data: shiftClocks } = await supabaseAdmin
-    .from('shift_clocks')
-    .select('employee:employees(name), auto_clock_out, approval_status')
-    .eq('session_date', report.session_date)
+    const { data: shiftClocks } = await supabaseAdmin
+      .from('shift_clocks')
+      .select('employee:employees(name), auto_clock_out, approval_status')
+      .eq('session_date', report.session_date)
 
-  const attendanceWarnings = ((shiftClocks ?? []) as Array<{ employee?: { name?: string } | null; auto_clock_out: boolean; approval_status: string }>)
-    .filter(clock => clock.auto_clock_out || clock.approval_status === 'pending_review' || clock.approval_status === 'open')
-  const attendanceWarningHtml = attendanceWarnings.length > 0
-    ? `
+    const attendanceWarnings = ((shiftClocks ?? []) as Array<{ employee?: { name?: string } | null; auto_clock_out: boolean; approval_status: string }>)
+      .filter(clock => clock.auto_clock_out || clock.approval_status === 'pending_review' || clock.approval_status === 'open')
+    const attendanceWarningHtml = attendanceWarnings.length > 0
+      ? `
       <div style="margin:0 0 18px;padding:14px 16px;border:2px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:12px">
         <div style="font-size:18px;font-weight:700;margin-bottom:8px">ATTENDANCE WARNING</div>
         <div style="font-size:13px;line-height:1.6">
@@ -116,16 +117,16 @@ export async function POST(req: NextRequest) {
         </div>
       </div>
     `
-    : ''
+      : ''
 
-  const employeeIds = Array.from(new Set(tipDists.map(dist => dist.employee_id)))
-  const { weekStart, weekEnd } = getWeekRange(report.session_date)
-  const { monthStart, monthEnd } = getMonthRange(report.session_date)
-  const weeklyTotals = new Map<string, { hours: number; netTip: number }>()
-  const monthlyTaskTotals = new Map<string, number>()
-  const monthlyPerformanceTotals = new Map<string, { tasks: number; hours: number; netTip: number }>()
+    const employeeIds = Array.from(new Set(tipDists.map(dist => dist.employee_id)))
+    const { weekStart, weekEnd } = getWeekRange(report.session_date)
+    const { monthStart, monthEnd } = getMonthRange(report.session_date)
+    const weeklyTotals = new Map<string, { hours: number; netTip: number }>()
+    const monthlyTaskTotals = new Map<string, number>()
+    const monthlyPerformanceTotals = new Map<string, { tasks: number; hours: number; netTip: number }>()
 
-  if (employeeIds.length > 0) {
+    if (employeeIds.length > 0) {
     // Batch all date-range queries in parallel
     const [monthlyTaskRes, monthlyReportsRes, weeklyReportsRes] = await Promise.all([
       supabaseAdmin
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const monthlyRankings = employeeIds.map(employeeId => {
+    const monthlyRankings = employeeIds.map(employeeId => {
     const totals = monthlyPerformanceTotals.get(employeeId) ?? { tasks: 0, hours: 0, netTip: 0 }
     const tasks = monthlyTaskTotals.get(employeeId) ?? 0
     return {
@@ -201,7 +202,7 @@ export async function POST(req: NextRequest) {
   })
 
   // 1. Individual tip emails only to staff who actually received tips
-  for (const dist of tipDists) {
+    for (const dist of tipDists) {
     if (!dist.employee?.email || Number(dist.net_tip) <= 0) continue
     const weeklyTotal = weeklyTotals.get(dist.employee_id) ?? { hours: Number(dist.hours_worked), netTip: Number(dist.net_tip) }
     const monthlyTotal = monthlyRankings.find(ranking => ranking.employee_id === dist.employee_id) ?? {
@@ -277,12 +278,12 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Full revenue and tip settlement report to admin only
-  const closedByName = escapeHtml((report.closed_by as { name?: string } | null)?.name ?? 'N/A')
-  const memoHtml = report.memo
-    ? `<p><strong>Memo:</strong> ${escapeHtml(report.memo)}</p>`
-    : ''
+    const closedByName = escapeHtml((report.closed_by as { name?: string } | null)?.name ?? 'N/A')
+    const memoHtml = report.memo
+      ? `<p><strong>Memo:</strong> ${escapeHtml(report.memo)}</p>`
+      : ''
 
-  const tipRows = tipDists.map(d =>
+    const tipRows = tipDists.map(d =>
     `<tr>
       <td>${escapeHtml(d.employee?.name ?? '')}</td>
       <td>${Number(d.hours_worked).toFixed(2)}</td>
@@ -292,7 +293,7 @@ export async function POST(req: NextRequest) {
     </tr>`
   ).join('')
 
-  const adminEodHtml = renderEmailShell(logoUrl, `
+    const adminEodHtml = renderEmailShell(logoUrl, `
       ${attendanceWarningHtml}
       <h2 style="color:#1a1a1a">FOH End of Day Report — ${report.session_date}</h2>
       <p><strong>Closed by:</strong> ${closedByName}</p>
@@ -314,7 +315,7 @@ export async function POST(req: NextRequest) {
       </table>
       <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
   `)
-  if (emailSettings.eod_admin_summary_enabled) {
+    if (emailSettings.eod_admin_summary_enabled) {
     emailPromises.push(
       sendEmail({
         resendKey,
@@ -329,8 +330,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Sunday weekly summary to admin
-  const sessionDay = new Date(report.session_date + 'T12:00:00').getDay() // 0 = Sunday
-  if (sessionDay === 0) {
+    const sessionDay = new Date(report.session_date + 'T12:00:00').getDay() // 0 = Sunday
+    if (sessionDay === 0) {
     const sunday = new Date(report.session_date + 'T12:00:00')
     const monday = new Date(sunday)
     monday.setDate(sunday.getDate() - 6)
@@ -434,14 +435,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const results = await Promise.allSettled(emailPromises)
-  const errors = results
-    .filter(r => r.status === 'rejected')
-    .map(r => (r as PromiseRejectedResult).reason?.message ?? 'Unknown error')
+    const results = await Promise.allSettled(emailPromises)
+    const errors = results
+      .filter(r => r.status === 'rejected')
+      .map(r => (r as PromiseRejectedResult).reason?.message ?? 'Unknown error')
 
-  if (errors.length > 0) {
-    return NextResponse.json({ success: false, errors, sent: results.length - errors.length }, { status: 207 })
+    if (errors.length > 0) {
+      return NextResponse.json({ success: false, errors, sent: results.length - errors.length }, { status: 207 })
+    }
+
+    return NextResponse.json({ success: true, sent: results.length })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to send EOD emails' },
+      { status: 500 }
+    )
   }
-
-  return NextResponse.json({ success: true, sent: results.length })
 }

@@ -136,7 +136,7 @@ export default function DashboardPage() {
   const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-full flex-col">
       <div className="space-y-2.5 border-b bg-white px-4 py-3">
         <div className="flex items-center justify-between">
           <div>
@@ -189,7 +189,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 md:overflow-hidden">
+      <div className="flex min-h-0 flex-1 md:overflow-hidden">
         <div className="hidden md:block shrink-0">
           <StaffSidebar schedules={schedules} employees={employees} clockRecords={clockRecords} />
         </div>

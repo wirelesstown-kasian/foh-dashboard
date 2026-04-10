@@ -47,11 +47,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { employee_id, ref_date, period, view } = await req.json() as {
+  const { employee_id, ref_date, period, view, start_date, end_date } = await req.json() as {
     employee_id?: string
     ref_date?: string
     period?: WageReportPeriod
     view?: WageReportView
+    start_date?: string
+    end_date?: string
   }
 
   if (!employee_id || !ref_date || !period || !view) {
@@ -67,7 +69,14 @@ export async function POST(req: NextRequest) {
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
-  const { start, end, label } = getRange(ref_date, period)
+  const customRange = start_date && end_date
+    ? {
+        start: start_date <= end_date ? start_date : end_date,
+        end: start_date <= end_date ? end_date : start_date,
+        label: start_date === end_date ? start_date : `${start_date <= end_date ? start_date : end_date} - ${start_date <= end_date ? end_date : start_date}`,
+      }
+    : null
+  const { start, end, label } = customRange ?? getRange(ref_date, period)
 
   const { data: employee, error: employeeError } = await supabaseAdmin
     .from('employees')
@@ -113,7 +122,7 @@ export async function POST(req: NextRequest) {
       .reduce((sum: number, dist: { net_tip: number }) => sum + Number(dist.net_tip), 0)
     const dailyHours = approvedClockHoursByDate.get(report.session_date) ?? 0
     return dailyTips > 0 || dailyHours > 0
-      ? [{ hours: dailyHours, tips: dailyTips }]
+      ? [{ date: report.session_date, hours: dailyHours, tips: dailyTips }]
       : []
   })
 
@@ -152,6 +161,29 @@ export async function POST(req: NextRequest) {
         <tr style="background:#eef7ff"><td><strong>Total Earnings</strong></td><td><strong>${formatCurrency(totalEarnings)}</strong></td></tr>
         <tr><td><strong>Effective / Hr</strong></td><td>${effectiveRate !== null ? formatCurrency(effectiveRate) : '—'}</td></tr>
       ` : ''}
+    </table>
+    <h3 style="margin:20px 0 8px;color:#1a1a1a">Daily Detail</h3>
+    <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
+      <tr>
+        <th align="left">Date</th>
+        <th align="right">Hours</th>
+        <th align="right">Tips</th>
+        ${view === 'earnings' ? '<th align="right">Base Wages</th><th align="right">Top-Up</th><th align="right">Total</th>' : ''}
+      </tr>
+      ${distributions.map(dist => {
+        const dailyBaseWage = dist.hours * Number(employee.hourly_wage ?? 0)
+        const dailyGuaranteedTarget = dist.hours * Number(employee.guaranteed_hourly ?? 0)
+        const dailyTopUp = Math.max(0, dailyGuaranteedTarget - (dailyBaseWage + dist.tips))
+        const dailyTotal = dailyBaseWage + dist.tips + dailyTopUp
+        return `
+          <tr>
+            <td>${dist.date}</td>
+            <td align="right">${dist.hours.toFixed(2)} hrs</td>
+            <td align="right">${formatCurrency(dist.tips)}</td>
+            ${view === 'earnings' ? `<td align="right">${formatCurrency(dailyBaseWage)}</td><td align="right">${formatCurrency(dailyTopUp)}</td><td align="right">${formatCurrency(dailyTotal)}</td>` : ''}
+          </tr>
+        `
+      }).join('')}
     </table>
   `, 520)
 

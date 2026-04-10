@@ -10,23 +10,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
-  const { week_start, week_end } = await req.json()
-  if (!week_start || !week_end) return NextResponse.json({ error: 'Missing week_start or week_end' }, { status: 400 })
-  const settings = await getEmailSettings()
-  if (!settings.schedule_emails_enabled) {
-    return NextResponse.json({ success: true, sent: 0, message: 'Schedule emails are disabled in Email Settings' })
+  try {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+    const { week_start, week_end } = await req.json()
+    if (!week_start || !week_end) return NextResponse.json({ error: 'Missing week_start or week_end' }, { status: 400 })
+    const settings = await getEmailSettings()
+    if (!settings.schedule_emails_enabled) {
+      return NextResponse.json({ success: true, sent: 0, message: 'Schedule emails are disabled in Email Settings' })
+    }
+
+    const result = await sendWeeklyScheduleEmails({
+      weekStart: week_start,
+      weekEnd: week_end,
+      appUrl,
+    })
+
+    if (!result.success) {
+      return NextResponse.json(result, { status: 207 })
+    }
+
+    return NextResponse.json(result)
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to send schedule emails' },
+      { status: 500 }
+    )
   }
-
-  const result = await sendWeeklyScheduleEmails({
-    weekStart: week_start,
-    weekEnd: week_end,
-    appUrl,
-  })
-
-  if (!result.success) {
-    return NextResponse.json(result, { status: 207 })
-  }
-
-  return NextResponse.json(result)
 }

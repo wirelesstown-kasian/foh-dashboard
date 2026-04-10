@@ -8,14 +8,39 @@ import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
+import { exportReportToPdf } from '@/lib/reportExport'
+import type { Employee } from '@/lib/types'
 
 type TipReportView = 'earnings' | 'tips'
+
+type WageDetailRow = {
+  date: string
+  hours: number
+  tips: number
+  baseWages: number
+  guaranteeTopUp: number
+  totalEarnings: number
+}
+
+type WageSummaryRow = {
+  emp: Employee
+  hours: number
+  tips: number
+  baseWages: number
+  guaranteeTopUp: number
+  totalEarnings: number
+  tipRate: number | null
+  effectiveRate: number | null
+  hasAutoClockOut: boolean
+  hasOpenClock: boolean
+}
 
 export default function WageReportPage() {
   const employees = useEmployees()
@@ -33,6 +58,8 @@ export default function WageReportPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null)
+  const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
+  const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -89,10 +116,127 @@ export default function WageReportPage() {
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
   }, [clockRecords, eodReports, filteredEmployees, endDate, startDate])
 
+  const detailRowsByEmployeeId = useMemo(() => {
+    const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
+    return new Map(
+      filteredEmployees.map(emp => {
+        const detailRows: WageDetailRow[] = rangeReports.flatMap(report => {
+          const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
+          const tips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
+          const clockHours = clockRecords
+            .filter(record => record.employee_id === emp.id && record.session_date === report.session_date)
+            .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+          const distributionHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked ?? 0), 0)
+          const hours = clockHours > 0 ? clockHours : distributionHours
+          if (hours <= 0 && tips <= 0) return []
+          const baseWages = hours * Number(emp.hourly_wage ?? 0)
+          const guaranteedTarget = hours * Number(emp.guaranteed_hourly ?? 0)
+          const guaranteeTopUp = Math.max(0, guaranteedTarget - (baseWages + tips))
+          return [{
+            date: report.session_date,
+            hours,
+            tips,
+            baseWages,
+            guaranteeTopUp,
+            totalEarnings: baseWages + tips + guaranteeTopUp,
+          }]
+        })
+
+        const extraClockDates = Array.from(new Set(
+          clockRecords
+            .filter(record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate)
+            .map(record => record.session_date)
+        )).filter(date => !detailRows.some(row => row.date === date))
+
+        for (const date of extraClockDates) {
+          const hours = clockRecords
+            .filter(record => record.employee_id === emp.id && record.session_date === date)
+            .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+          if (hours <= 0) continue
+          const baseWages = hours * Number(emp.hourly_wage ?? 0)
+          const guaranteedTarget = hours * Number(emp.guaranteed_hourly ?? 0)
+          const guaranteeTopUp = Math.max(0, guaranteedTarget - baseWages)
+          detailRows.push({
+            date,
+            hours,
+            tips: 0,
+            baseWages,
+            guaranteeTopUp,
+            totalEarnings: baseWages + guaranteeTopUp,
+          })
+        }
+
+        detailRows.sort((a, b) => b.date.localeCompare(a.date))
+        return [emp.id, detailRows] as const
+      })
+    )
+  }, [clockRecords, eodReports, filteredEmployees, endDate, startDate])
+
+  const buildWageReportHtml = (row: WageSummaryRow) => {
+    const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
+    return `
+      <h1>${row.emp.name} Wage Report</h1>
+      <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
+      <div class="summary">
+        <div class="card"><strong>Hours</strong><div>${row.hours.toFixed(2)} hrs</div></div>
+        <div class="card"><strong>Tips</strong><div>${formatCurrency(row.tips)}</div></div>
+        ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div>${formatCurrency(row.baseWages)}</div></div>` : ''}
+        ${view === 'earnings' ? `<div class="card"><strong>Total Earnings</strong><div>${formatCurrency(row.totalEarnings)}</div></div>` : ''}
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="right">Hours</th>
+            <th class="right">Tips</th>
+            ${view === 'earnings' ? '<th class="right">Base Wages</th><th class="right">Top-Up</th><th class="right">Total</th>' : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${details.map(detail => `
+            <tr>
+              <td>${detail.date}</td>
+              <td class="right">${detail.hours.toFixed(2)}</td>
+              <td class="right">${formatCurrency(detail.tips)}</td>
+              ${view === 'earnings' ? `<td class="right">${formatCurrency(detail.baseWages)}</td><td class="right">${formatCurrency(detail.guaranteeTopUp)}</td><td class="right">${formatCurrency(detail.totalEarnings)}</td>` : ''}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `
+  }
+
+  const handleEmailReport = async (employeeId: string) => {
+    setEmailingEmployeeId(employeeId)
+    try {
+      const res = await fetch('/api/send-wage-report-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id: employeeId,
+          ref_date: startDate,
+          period: startDate === endDate ? 'daily' : period === 'custom' ? 'weekly' : period,
+          start_date: startDate,
+          end_date: endDate,
+          view,
+        }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(json.error ?? 'Failed to send report email')
+      setRefreshMessage('Wage report emailed successfully.')
+    } catch (error) {
+      setRefreshMessage(error instanceof Error ? error.message : 'Failed to send report email')
+    } finally {
+      setEmailingEmployeeId(null)
+    }
+  }
+
   const displayedRows = useMemo(
     () => (employeeFilter === 'all' ? rows : rows.filter(row => row.emp.id === employeeFilter)),
     [employeeFilter, rows]
   )
+  const detailTarget = displayedRows.find(row => row.emp.id === detailEmployeeId) ?? null
+  const detailRows = detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : []
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -182,7 +326,11 @@ export default function WageReportPage() {
           <TableBody>
             {displayedRows.map(row => (
               <TableRow key={row.emp.id}>
-                <TableCell className="font-medium">{row.emp.name}</TableCell>
+                <TableCell>
+                  <button className="font-medium hover:underline" onClick={() => setDetailEmployeeId(row.emp.id)}>
+                    {row.emp.name}
+                  </button>
+                </TableCell>
                 <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
                 <TableCell>
                   {row.hasOpenClock ? (
@@ -238,6 +386,80 @@ export default function WageReportPage() {
           )}
         </Table>
       </div>
+
+      <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{detailTarget?.emp.name} Wage Detail</DialogTitle>
+          </DialogHeader>
+          {detailTarget && (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-xl border bg-slate-50 p-3">
+                  <div className="text-xs text-muted-foreground">Hours</div>
+                  <div className="mt-1 text-lg font-semibold">{detailTarget.hours.toFixed(2)} hrs</div>
+                </div>
+                <div className="rounded-xl border bg-emerald-50 p-3">
+                  <div className="text-xs text-muted-foreground">Tips</div>
+                  <div className="mt-1 text-lg font-semibold text-emerald-700">{formatCurrency(detailTarget.tips)}</div>
+                </div>
+                {view === 'earnings' && (
+                  <div className="rounded-xl border bg-sky-50 p-3">
+                    <div className="text-xs text-muted-foreground">Base Wages</div>
+                    <div className="mt-1 text-lg font-semibold">{formatCurrency(detailTarget.baseWages)}</div>
+                  </div>
+                )}
+                {view === 'earnings' && (
+                  <div className="rounded-xl border bg-violet-50 p-3">
+                    <div className="text-xs text-muted-foreground">Total Earnings</div>
+                    <div className="mt-1 text-lg font-semibold">{formatCurrency(detailTarget.totalEarnings)}</div>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Wage Report`, buildWageReportHtml(detailTarget))}>
+                  PDF Export
+                </Button>
+                <Button onClick={() => void handleEmailReport(detailTarget.emp.id)} disabled={emailingEmployeeId === detailTarget.emp.id}>
+                  {emailingEmployeeId === detailTarget.emp.id ? 'Sending…' : 'Email Report'}
+                </Button>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Hours</TableHead>
+                    <TableHead className="text-right">Tips</TableHead>
+                    {view === 'earnings' && (
+                      <>
+                        <TableHead className="text-right">Base Wages</TableHead>
+                        <TableHead className="text-right">Top-Up</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                      </>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {detailRows.map(detail => (
+                    <TableRow key={detail.date}>
+                      <TableCell>{detail.date}</TableCell>
+                      <TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell>
+                      <TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell>
+                      {view === 'earnings' && (
+                        <>
+                          <TableCell className="text-right">{formatCurrency(detail.baseWages)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(detail.guaranteeTopUp)}</TableCell>
+                          <TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell>
+                        </>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -88,5 +88,17 @@ export async function sendEmail({
       html,
     }),
   })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) {
+    const rawBody = await res.text()
+    let message = rawBody
+
+    try {
+      const parsed = JSON.parse(rawBody) as { message?: string; error?: { message?: string } }
+      message = parsed.error?.message ?? parsed.message ?? rawBody
+    } catch {
+      // Keep the raw response body when Resend does not return JSON.
+    }
+
+    throw new Error(`Email send failed (${res.status}): ${message}`)
+  }
 }

@@ -265,7 +265,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
   if (currentPhase === 'complete' || showSummary) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center p-8 text-center">
         <CheckCircle2 className="mb-4 h-16 w-16 text-green-500" />
         <h2 className="mb-2 text-2xl font-bold">All Tasks Complete!</h2>
         <p className="mb-6 text-muted-foreground">
@@ -337,7 +337,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   }
 
   return (
-    <div className="flex flex-1 flex-col p-4">
+    <div className="flex min-h-0 flex-1 flex-col p-4">
       <div className="mb-4 flex items-center gap-2">
         {PHASE_ORDER.map((phase, index) => {
           const phaseIndex = PHASE_ORDER.indexOf(currentPhase)
@@ -360,7 +360,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
         })}
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-xl border bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-white">
         <div className="flex items-center justify-between gap-2 border-b bg-gray-50 p-3">
           <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
           <div className="flex items-center gap-2">
@@ -419,7 +419,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
           </div>
         )}
 
-        <div className="overflow-y-auto p-3 max-h-[calc(100vh-220px)] md:max-h-[calc(100vh-340px)]">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {currentTasks.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               No tasks in this phase. Add tasks in Task Admin.
