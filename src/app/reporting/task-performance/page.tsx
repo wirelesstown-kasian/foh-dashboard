@@ -243,6 +243,7 @@ export default function TaskPerformancePage() {
           start_date: startDate,
           end_date: endDate,
           department,
+          report_html: buildPerformanceReportHtml(employeeId),
         }),
       })
       const json = (await res.json().catch(() => ({}))) as { error?: string }
@@ -346,7 +347,7 @@ export default function TaskPerformancePage() {
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
-        <DialogContent className="w-[calc(100vw-1rem)] h-[calc(100vh-1rem)] max-w-none sm:max-w-none max-h-none overflow-y-auto p-7">
+        <DialogContent className="w-[calc(100vw-3rem)] max-w-none sm:max-w-none max-h-[90vh] overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Performance Report</DialogTitle>
           </DialogHeader>

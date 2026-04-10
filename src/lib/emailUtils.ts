@@ -42,6 +42,47 @@ export function formatCalendarDay(date: string) {
   return new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })
 }
 
+export function buildEmailDocument(logoUrl: string, title: string, reportBodyHtml: string) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; color: #111827; background: #fff; font-size: 12px; line-height: 1.45; margin: 0; padding: 24px 16px; }
+    .shell { max-width: 700px; margin: 0 auto; }
+    .logo-wrap { text-align: center; padding: 0 0 20px; }
+    .logo-wrap img { max-width: 200px; width: 100%; height: auto; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    h2 { font-size: 15px; margin: 0 0 8px; }
+    h3 { font-size: 13px; margin: 16px 0 6px; color: #374151; }
+    p { margin: 0 0 10px; color: #374151; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border: 1px solid #d1d5db; padding: 7px 10px; font-size: 11px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; font-weight: 600; }
+    .summary { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin: 14px 0; }
+    .card { border: 1px solid #d1d5db; border-radius: 10px; padding: 10px; }
+    .card strong { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin-bottom: 5px; }
+    .metric { font-size: 20px; font-weight: 700; line-height: 1.1; }
+    .muted { color: #6b7280; font-size: 10px; }
+    .right { text-align: right; }
+    .report-grid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(220px,0.9fr); gap: 14px; margin-top: 14px; }
+    .compact-table th, .compact-table td { padding-top: 5px; padding-bottom: 5px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="logo-wrap">
+      <img src="${logoUrl}" alt="Logo" />
+    </div>
+    ${reportBodyHtml}
+  </div>
+</body>
+</html>`
+}
+
 export function renderEmailShell(logoUrl: string, content: string, maxWidth = 520) {
   return `
     <div style="font-family:sans-serif;max-width:${maxWidth}px">

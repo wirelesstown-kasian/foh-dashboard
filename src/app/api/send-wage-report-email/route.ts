@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { renderEmailShell, sendEmail } from '@/lib/emailUtils'
+import { buildEmailDocument, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getEmailSettings } from '@/lib/appSettings'
@@ -47,13 +47,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { employee_id, ref_date, period, view, start_date, end_date } = await req.json() as {
+  const { employee_id, ref_date, period, view, start_date, end_date, report_html } = await req.json() as {
     employee_id?: string
     ref_date?: string
     period?: WageReportPeriod
     view?: WageReportView
     start_date?: string
     end_date?: string
+    report_html?: string
   }
 
   if (!employee_id || !ref_date || !period || !view) {
@@ -88,6 +89,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Employee email not available' }, { status: 400 })
   }
 
+  // Fast path: client passed pre-built report HTML — embed it directly
+  if (report_html) {
+    const subject = `${view === 'earnings' ? 'Earnings' : 'Tip'} Report — ${label}`
+    const html = buildEmailDocument(logoUrl, subject, report_html)
+    await sendEmail({
+      resendKey,
+      to: employee.email,
+      subject,
+      html,
+      fromName: emailSettings.from_name,
+      fromEmail: emailSettings.from_email,
+      replyTo: emailSettings.reply_to,
+    })
+    return NextResponse.json({ success: true })
+  }
+
+  // Fallback: rebuild report server-side (legacy path)
   const { data: reports, error: reportsError } = await supabaseAdmin
     .from('eod_reports')
     .select('id, session_date, tip_distributions(*)')

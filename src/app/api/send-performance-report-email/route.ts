@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { renderEmailShell, sendEmail } from '@/lib/emailUtils'
+import { buildEmailDocument, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getEmailSettings } from '@/lib/appSettings'
@@ -32,11 +32,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { employee_id, start_date, end_date, department } = await req.json() as {
+  const { employee_id, start_date, end_date, department, report_html } = await req.json() as {
     employee_id?: string
     start_date?: string
     end_date?: string
     department?: 'foh' | 'boh'
+    report_html?: string
   }
 
   if (!employee_id || !start_date || !end_date || !department) {
@@ -53,17 +54,37 @@ export async function POST(req: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
-  const [{ data: employee, error: employeeError }, { data: completions, error: completionError }, { data: clockRecords, error: clockError }, { data: reports, error: reportError }, { data: employees, error: employeesError }] = await Promise.all([
-    supabaseAdmin.from('employees').select('*').eq('id', employee_id).single(),
+  const { data: employee, error: employeeError } = await supabaseAdmin
+    .from('employees').select('*').eq('id', employee_id).single()
+
+  if (employeeError || !employee?.email) {
+    return NextResponse.json({ error: 'Employee email not available' }, { status: 400 })
+  }
+
+  // Fast path: client passed pre-built report HTML — embed it directly
+  if (report_html) {
+    const subject = `Performance Report — ${getReportLabel(start_date, end_date)}`
+    const html = buildEmailDocument(logoUrl, subject, report_html)
+    await sendEmail({
+      resendKey,
+      to: employee.email,
+      subject,
+      html,
+      fromName: emailSettings.from_name,
+      fromEmail: emailSettings.from_email,
+      replyTo: emailSettings.reply_to,
+    })
+    return NextResponse.json({ success: true })
+  }
+
+  // Fallback: rebuild report server-side (legacy path)
+  const [{ data: completions, error: completionError }, { data: clockRecords, error: clockError }, { data: reports, error: reportError }, { data: employees, error: employeesError }] = await Promise.all([
     supabaseAdmin.from('task_completions').select('*').eq('employee_id', employee_id).gte('session_date', start_date).lte('session_date', end_date).order('session_date', { ascending: false }),
     supabaseAdmin.from('shift_clocks').select('*').eq('employee_id', employee_id).gte('session_date', start_date).lte('session_date', end_date),
     supabaseAdmin.from('eod_reports').select('session_date, tip_distributions(*)').gte('session_date', start_date).lte('session_date', end_date),
     supabaseAdmin.from('employees').select('*').eq('is_active', true),
   ])
 
-  if (employeeError || !employee?.email) {
-    return NextResponse.json({ error: 'Employee email not available' }, { status: 400 })
-  }
   if (completionError) return NextResponse.json({ error: completionError.message }, { status: 500 })
   if (clockError) return NextResponse.json({ error: clockError.message }, { status: 500 })
   if (reportError) return NextResponse.json({ error: reportError.message }, { status: 500 })
