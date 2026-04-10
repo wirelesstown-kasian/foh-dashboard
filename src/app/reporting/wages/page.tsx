@@ -178,12 +178,17 @@ export default function WageReportPage() {
       <h1>${row.emp.name} Wage Report</h1>
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
       <div class="summary">
-        <div class="card"><strong>Hours</strong><div>${row.hours.toFixed(2)} hrs</div></div>
-        <div class="card"><strong>Tips</strong><div>${formatCurrency(row.tips)}</div></div>
-        ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div>${formatCurrency(row.baseWages)}</div></div>` : ''}
-        ${view === 'earnings' ? `<div class="card"><strong>Total Earnings</strong><div>${formatCurrency(row.totalEarnings)}</div></div>` : ''}
+        <div class="card"><strong>Hours</strong><div class="metric">${row.hours.toFixed(2)} hrs</div></div>
+        <div class="card"><strong>Tips</strong><div class="metric">${formatCurrency(row.tips)}</div></div>
+        ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div class="metric">${formatCurrency(row.baseWages)}</div></div>` : ''}
+        ${view === 'earnings' ? `<div class="card"><strong>Total Earnings</strong><div class="metric">${formatCurrency(row.totalEarnings)}</div></div>` : ''}
       </div>
-      <table>
+      <h3>Comp Summary</h3>
+      <p>
+        ${row.emp.name} worked ${row.hours.toFixed(2)} hours for this period and earned ${formatCurrency(row.tips)} in tips.
+        ${view === 'earnings' ? ` Combined wages and guaranteed top-up brought total earnings to ${formatCurrency(row.totalEarnings)}.` : ''}
+      </p>
+      <table class="compact-table">
         <thead>
           <tr>
             <th>Date</th>
@@ -388,33 +393,42 @@ export default function WageReportPage() {
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="w-[min(96vw,1500px)] max-w-none max-h-[92vh] overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Wage Detail</DialogTitle>
           </DialogHeader>
           {detailTarget && (
-            <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="rounded-xl border bg-slate-50 p-3">
-                  <div className="text-xs text-muted-foreground">Hours</div>
-                  <div className="mt-1 text-lg font-semibold">{detailTarget.hours.toFixed(2)} hrs</div>
-                </div>
-                <div className="rounded-xl border bg-emerald-50 p-3">
-                  <div className="text-xs text-muted-foreground">Tips</div>
-                  <div className="mt-1 text-lg font-semibold text-emerald-700">{formatCurrency(detailTarget.tips)}</div>
-                </div>
-                {view === 'earnings' && (
-                  <div className="rounded-xl border bg-sky-50 p-3">
-                    <div className="text-xs text-muted-foreground">Base Wages</div>
-                    <div className="mt-1 text-lg font-semibold">{formatCurrency(detailTarget.baseWages)}</div>
+            <div className="space-y-5">
+              <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border bg-slate-50 p-4">
+                    <div className="text-xs text-muted-foreground">Hours</div>
+                    <div className="mt-1 text-2xl font-semibold">{detailTarget.hours.toFixed(2)} hrs</div>
                   </div>
-                )}
-                {view === 'earnings' && (
-                  <div className="rounded-xl border bg-violet-50 p-3">
-                    <div className="text-xs text-muted-foreground">Total Earnings</div>
-                    <div className="mt-1 text-lg font-semibold">{formatCurrency(detailTarget.totalEarnings)}</div>
+                  <div className="rounded-xl border bg-emerald-50 p-4">
+                    <div className="text-xs text-muted-foreground">Tips</div>
+                    <div className="mt-1 text-2xl font-semibold text-emerald-700">{formatCurrency(detailTarget.tips)}</div>
                   </div>
-                )}
+                  {view === 'earnings' && (
+                    <div className="rounded-xl border bg-sky-50 p-4">
+                      <div className="text-xs text-muted-foreground">Base Wages</div>
+                      <div className="mt-1 text-2xl font-semibold">{formatCurrency(detailTarget.baseWages)}</div>
+                    </div>
+                  )}
+                  {view === 'earnings' && (
+                    <div className="rounded-xl border bg-violet-50 p-4">
+                      <div className="text-xs text-muted-foreground">Total Earnings</div>
+                      <div className="mt-1 text-2xl font-semibold">{formatCurrency(detailTarget.totalEarnings)}</div>
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Comp Summary</div>
+                  <p className="mt-3 text-sm leading-6 text-slate-700">
+                    {detailTarget.emp.name} worked {detailTarget.hours.toFixed(2)} total hours during this report window and received {formatCurrency(detailTarget.tips)} in tips.
+                    {view === 'earnings' ? ` Base wages were ${formatCurrency(detailTarget.baseWages)} with ${formatCurrency(detailTarget.guaranteeTopUp)} in guaranteed top-up.` : ''}
+                  </p>
+                </div>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Wage Report`, buildWageReportHtml(detailTarget))}>
@@ -424,38 +438,40 @@ export default function WageReportPage() {
                   {emailingEmployeeId === detailTarget.emp.id ? 'Sending…' : 'Email Report'}
                 </Button>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead className="text-right">Hours</TableHead>
-                    <TableHead className="text-right">Tips</TableHead>
-                    {view === 'earnings' && (
-                      <>
-                        <TableHead className="text-right">Base Wages</TableHead>
-                        <TableHead className="text-right">Top-Up</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                      </>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {detailRows.map(detail => (
-                    <TableRow key={detail.date}>
-                      <TableCell>{detail.date}</TableCell>
-                      <TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell>
-                      <TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell>
+              <div className="max-h-[48vh] overflow-auto rounded-xl border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="text-right">Hours</TableHead>
+                      <TableHead className="text-right">Tips</TableHead>
                       {view === 'earnings' && (
                         <>
-                          <TableCell className="text-right">{formatCurrency(detail.baseWages)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(detail.guaranteeTopUp)}</TableCell>
-                          <TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell>
+                          <TableHead className="text-right">Base Wages</TableHead>
+                          <TableHead className="text-right">Top-Up</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
                         </>
                       )}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {detailRows.map(detail => (
+                      <TableRow key={detail.date}>
+                        <TableCell>{detail.date}</TableCell>
+                        <TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell>
+                        <TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell>
+                        {view === 'earnings' && (
+                          <>
+                            <TableCell className="text-right">{formatCurrency(detail.baseWages)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(detail.guaranteeTopUp)}</TableCell>
+                            <TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell>
+                          </>
+                        )}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           )}
         </DialogContent>

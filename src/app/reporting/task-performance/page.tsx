@@ -152,28 +152,33 @@ export default function TaskPerformancePage() {
     return `
       <h1>${row.emp.name} Performance Report</h1>
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
-      <div class="summary">
-        <div class="card"><strong>Overall Rank</strong><div>#${overallRank} of ${staffCount}</div></div>
-        <div class="card"><strong>Performance Score</strong><div>${monthly?.score ?? '—'}</div></div>
-        <div class="card"><strong>Tasks This Period</strong><div>${row.done}</div></div>
-        <div class="card"><strong>Task Share</strong><div>${share}</div></div>
-        <div class="card"><strong>Monthly Tasks</strong><div>${monthly?.tasks ?? 0}</div></div>
-        <div class="card"><strong>Hours Worked</strong><div>${monthly?.hours.toFixed(2) ?? '0.00'} hrs</div></div>
-        <div class="card"><strong>Tasks / Hr</strong><div>${monthly ? monthly.taskRate.toFixed(2) : '—'}</div></div>
-        <div class="card"><strong>Tips / Hr</strong><div>${monthly ? formatCurrency(monthly.tipRate) : '—'}</div></div>
-        <div class="card"><strong>Total Tips</strong><div>${monthly ? formatCurrency(monthly.totalTips) : '—'}</div></div>
+      <div class="report-grid">
+        <div>
+          <div class="summary">
+            <div class="card"><strong>Overall Rank</strong><div class="metric">#${overallRank}</div><div class="muted">of ${staffCount}</div></div>
+            <div class="card"><strong>Performance Score</strong><div class="metric">${monthly?.score ?? '—'}</div><div class="muted">Monthly weighted KPI</div></div>
+            <div class="card"><strong>Tasks This Period</strong><div class="metric">${row.done}</div><div class="muted">Share ${share}</div></div>
+            <div class="card"><strong>Total Tips</strong><div class="metric">${monthly ? formatCurrency(monthly.totalTips) : '—'}</div><div class="muted">This month</div></div>
+          </div>
+          <h3>Performance Summary</h3>
+          <p>
+            ${row.emp.name} is currently ranked #${overallRank} out of ${staffCount} staff in ${department.toUpperCase()}.
+            Monthly pace is ${monthly ? monthly.taskRate.toFixed(2) : '0.00'} tasks/hr with ${monthly?.hours.toFixed(2) ?? '0.00'} hours worked
+            and ${monthly ? formatCurrency(monthly.tipRate) : '$0.00'} tips/hr.
+          </p>
+        </div>
+        <table class="compact-table">
+          <thead>
+            <tr><th>KPI</th><th class="right">Value</th><th class="right">Rank</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Tasks / Hr</td><td class="right">${monthly ? monthly.taskRate.toFixed(2) : '—'}</td><td class="right">${monthly ? `#${monthly.taskRateRank}` : '—'}</td></tr>
+            <tr><td>Working Hours</td><td class="right">${monthly?.hours.toFixed(2) ?? '0.00'} hrs</td><td class="right">${monthly ? `#${monthly.hoursRank}` : '—'}</td></tr>
+            <tr><td>Completed Tasks</td><td class="right">${monthly?.tasks ?? 0}</td><td class="right">${monthly ? `#${monthly.taskRank}` : '—'}</td></tr>
+            <tr><td>Tips / Hr</td><td class="right">${monthly ? formatCurrency(monthly.tipRate) : '—'}</td><td class="right">${monthly ? `#${monthly.tipRateRank}` : '—'}</td></tr>
+          </tbody>
+        </table>
       </div>
-      <table>
-        <thead>
-          <tr><th>KPI</th><th class="right">Value</th><th class="right">Rank</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Monthly Tasks</td><td class="right">${monthly?.tasks ?? 0}</td><td class="right">${monthly ? `#${monthly.taskRank}` : '—'}</td></tr>
-          <tr><td>Tasks / Hr</td><td class="right">${monthly ? monthly.taskRate.toFixed(2) : '—'}</td><td class="right">${monthly ? `#${monthly.taskRateRank}` : '—'}</td></tr>
-          <tr><td>Tips / Hr</td><td class="right">${monthly ? formatCurrency(monthly.tipRate) : '—'}</td><td class="right">${monthly ? `#${monthly.tipRateRank}` : '—'}</td></tr>
-          <tr><td>Hours Worked</td><td class="right">${monthly?.hours.toFixed(2) ?? '0.00'} hrs</td><td class="right">${monthly ? `#${monthly.hoursRank}` : '—'}</td></tr>
-        </tbody>
-      </table>
     `
   }
 
@@ -291,13 +296,13 @@ export default function TaskPerformancePage() {
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
-        <DialogContent className="max-w-[min(1120px,calc(100vw-2rem))] max-h-[88vh] overflow-y-auto p-6">
+        <DialogContent className="w-[min(96vw,1440px)] max-w-none max-h-[92vh] overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Performance Report</DialogTitle>
           </DialogHeader>
           {detailTarget && (
-            <div className="space-y-4">
-              <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
+            <div className="space-y-5">
+              <div className="grid gap-5 xl:grid-cols-[1.45fr_0.95fr]">
                 <div className="rounded-2xl border bg-gradient-to-br from-amber-50 via-white to-sky-50 p-5">
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Performance Summary</div>
                   <div className="mt-3 flex flex-wrap items-end gap-6">
@@ -347,25 +352,38 @@ export default function TaskPerformancePage() {
                       <div className="mt-1 text-xl font-semibold">{getRoleLabel(detailTarget.emp.role, roleDefinitions)}</div>
                     </div>
                   </div>
+                  <div className="mt-5 rounded-2xl border border-amber-200 bg-white/90 p-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Quick Summary</div>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      Overall rank is #{perfRows.findIndex(item => item.emp.id === detailTarget.emp.id) + 1} of {perfRows.length}.
+                      {` `}
+                      Tasks per hour rank is #{detailTarget.monthly?.taskRateRank ?? '—'}, working hours rank is #{detailTarget.monthly?.hoursRank ?? '—'},
+                      and completed tasks rank is #{detailTarget.monthly?.taskRank ?? '—'} for the current month.
+                    </p>
+                  </div>
                 </div>
                 <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">KPI Ranking</div>
                   <div className="mt-4 space-y-3">
-                    <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                      <span className="text-sm font-medium">Monthly Tasks</span>
-                      <span className="text-sm font-semibold">#{detailTarget.monthly?.taskRank ?? '—'}</span>
+                    <div className="flex items-center justify-between rounded-xl bg-amber-50 px-4 py-3">
+                      <span className="text-sm font-medium">Overall Rank</span>
+                      <span className="text-sm font-semibold">#{perfRows.findIndex(item => item.emp.id === detailTarget.emp.id) + 1}</span>
                     </div>
                     <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                      <span className="text-sm font-medium">Tasks / Hr</span>
+                      <span className="text-sm font-medium">Tasks / Hr Rank</span>
                       <span className="text-sm font-semibold">#{detailTarget.monthly?.taskRateRank ?? '—'}</span>
                     </div>
                     <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                      <span className="text-sm font-medium">Tips / Hr</span>
-                      <span className="text-sm font-semibold">#{detailTarget.monthly?.tipRateRank ?? '—'}</span>
+                      <span className="text-sm font-medium">Working Hours Rank</span>
+                      <span className="text-sm font-semibold">#{detailTarget.monthly?.hoursRank ?? '—'}</span>
                     </div>
                     <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                      <span className="text-sm font-medium">Hours Worked</span>
-                      <span className="text-sm font-semibold">#{detailTarget.monthly?.hoursRank ?? '—'}</span>
+                      <span className="text-sm font-medium">Completed Tasks Rank</span>
+                      <span className="text-sm font-semibold">#{detailTarget.monthly?.taskRank ?? '—'}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
+                      <span className="text-sm font-medium">Tips / Hr Rank</span>
+                      <span className="text-sm font-semibold">#{detailTarget.monthly?.tipRateRank ?? '—'}</span>
                     </div>
                   </div>
                 </div>
