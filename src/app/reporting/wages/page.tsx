@@ -393,7 +393,7 @@ export default function WageReportPage() {
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
-        <DialogContent className="w-[min(96vw,1500px)] max-w-none max-h-[92vh] overflow-y-auto p-7">
+        <DialogContent className="w-[calc(100vw-1rem)] h-[calc(100vh-1rem)] max-w-none max-h-none overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Wage Detail</DialogTitle>
           </DialogHeader>
@@ -438,7 +438,7 @@ export default function WageReportPage() {
                   {emailingEmployeeId === detailTarget.emp.id ? 'Sending…' : 'Email Report'}
                 </Button>
               </div>
-              <div className="max-h-[48vh] overflow-auto rounded-xl border">
+              <div className="rounded-xl border">
                 <Table>
                   <TableHeader>
                     <TableRow>
