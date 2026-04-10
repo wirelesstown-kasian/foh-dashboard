@@ -347,7 +347,7 @@ export default function TaskPerformancePage() {
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
-        <DialogContent className="w-[calc(100vw-3rem)] max-w-none sm:max-w-none max-h-[90vh] overflow-y-auto p-7">
+        <DialogContent className="w-[80vw] max-w-none sm:max-w-none max-h-[60vh] overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Performance Report</DialogTitle>
           </DialogHeader>
