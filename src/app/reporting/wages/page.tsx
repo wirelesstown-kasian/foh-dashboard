@@ -1,11 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
+import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, useScheduledDepartmentIds } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, useScheduledDepartmentIds, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -17,6 +17,16 @@ import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import type { Employee } from '@/lib/types'
+
+function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
+  const sorted = [...items].sort((a, b) => getValue(b) - getValue(a))
+  return new Map(sorted.map((item, idx) => [getId(item), idx + 1]))
+}
+
+function scoreFromRank(rank: number, count: number) {
+  if (count <= 1) return 100
+  return ((count - rank) / (count - 1)) * 100
+}
 
 type TipReportView = 'earnings' | 'tips'
 
@@ -46,6 +56,7 @@ export default function WageReportPage() {
   const employees = useEmployees()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
+  const { completions } = useTaskCompletions()
   const { roleDefinitions } = useAppSettings()
 
   const [department, setDepartment] = useState<ReportDepartment>('foh')
@@ -77,6 +88,59 @@ export default function WageReportPage() {
     }),
     [employees, department, scheduledDeptIds]
   )
+
+  const monthStart = format(new Date(`${startDate}T12:00:00`), 'yyyy-MM-01')
+  const monthEnd = format(new Date(new Date(`${endDate}T12:00:00`).getFullYear(), new Date(`${endDate}T12:00:00`).getMonth() + 1, 0), 'yyyy-MM-dd')
+
+  const employeePerfStats = useMemo(() => {
+    const filteredEmpIds = new Set(filteredEmployees.map(e => e.id))
+    const monthCompletions = completions.filter(c =>
+      c.session_date >= monthStart && c.session_date <= monthEnd &&
+      filteredEmpIds.has(c.employee_id) && c.status !== 'incomplete'
+    )
+    const monthHoursByEmp = new Map<string, number>()
+    const monthTipsByEmp = new Map<string, number>()
+    for (const r of clockRecords) {
+      if (!filteredEmpIds.has(r.employee_id) || r.session_date < monthStart || r.session_date > monthEnd) continue
+      monthHoursByEmp.set(r.employee_id, (monthHoursByEmp.get(r.employee_id) ?? 0) + getEffectiveClockHours(r))
+    }
+    for (const eod of eodReports) {
+      if (eod.session_date < monthStart || eod.session_date > monthEnd) continue
+      for (const dist of eod.tip_distributions ?? []) {
+        if (!filteredEmpIds.has(dist.employee_id)) continue
+        monthTipsByEmp.set(dist.employee_id, (monthTipsByEmp.get(dist.employee_id) ?? 0) + Number(dist.net_tip))
+      }
+    }
+    const base = filteredEmployees.map(emp => {
+      const tasks = monthCompletions.filter(c => c.employee_id === emp.id).length
+      const hrs = monthHoursByEmp.get(emp.id) ?? 0
+      const totalTips = monthTipsByEmp.get(emp.id) ?? 0
+      return { empId: emp.id, tasks, hours: hrs, totalTips, taskRate: hrs > 0 ? tasks / hrs : 0, tipRate: hrs > 0 ? totalTips / hrs : 0 }
+    }).filter(item => item.tasks > 0 || item.hours > 0)
+
+    const taskRM = getRankMap(base, i => i.tasks, i => i.empId)
+    const rateRM = getRankMap(base.filter(i => i.hours > 0), i => i.taskRate, i => i.empId)
+    const tipRM = getRankMap(base.filter(i => i.hours > 0), i => i.tipRate, i => i.empId)
+    const hrsRM = getRankMap(base, i => i.hours, i => i.empId)
+
+    const scored = base.map(item => {
+      const taskRank = taskRM.get(item.empId) ?? 1
+      const rateRank = rateRM.get(item.empId) ?? 1
+      const tipRank = tipRM.get(item.empId) ?? 1
+      const hrsRank = hrsRM.get(item.empId) ?? 1
+      return {
+        ...item,
+        score: Math.round(
+          scoreFromRank(taskRank, Math.max(taskRM.size, 1)) * 0.3 +
+          scoreFromRank(rateRank, Math.max(rateRM.size, 1)) * 0.3 +
+          scoreFromRank(tipRank, Math.max(tipRM.size, 1)) * 0.25 +
+          scoreFromRank(hrsRank, Math.max(hrsRM.size, 1)) * 0.15
+        ),
+      }
+    }).sort((a, b) => b.score - a.score || b.tasks - a.tasks)
+
+    return new Map(scored.map((item, idx) => [item.empId, { ...item, overallRank: idx + 1, staffCount: scored.length }]))
+  }, [completions, clockRecords, eodReports, filteredEmployees, monthStart, monthEnd])
 
   const rows = useMemo(() => {
     const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
@@ -406,53 +470,52 @@ export default function WageReportPage() {
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Wage Detail</DialogTitle>
           </DialogHeader>
-          {detailTarget && (
+          {detailTarget && (() => {
+            const perf = employeePerfStats.get(detailTarget.emp.id)
+            return (
             <div className="space-y-5">
-              <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-xl border bg-slate-50 p-4">
-                    <div className="text-xs text-muted-foreground">Hours</div>
-                    <div className="mt-1 text-2xl font-semibold">{detailTarget.hours.toFixed(2)} hrs</div>
-                  </div>
-                  <div className="rounded-xl border bg-emerald-50 p-4">
-                    <div className="text-xs text-muted-foreground">Tips</div>
-                    <div className="mt-1 text-2xl font-semibold text-emerald-700">{formatCurrency(detailTarget.tips)}</div>
-                  </div>
-                  {view === 'earnings' && (
-                    <div className="rounded-xl border bg-sky-50 p-4">
-                      <div className="text-xs text-muted-foreground">Base Wages</div>
-                      <div className="mt-1 text-2xl font-semibold">{formatCurrency(detailTarget.baseWages)}</div>
-                    </div>
-                  )}
-                  {view === 'earnings' && (
-                    <div className="rounded-xl border bg-violet-50 p-4">
-                      <div className="text-xs text-muted-foreground">Total Earnings</div>
-                      <div className="mt-1 text-2xl font-semibold">{formatCurrency(detailTarget.totalEarnings)}</div>
-                    </div>
-                  )}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="rounded-2xl border bg-slate-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hours Worked</div>
+                  <div className="mt-2 text-2xl font-bold">{detailTarget.hours.toFixed(2)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">hrs this period</div>
                 </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Comp Summary</div>
-                  <p className="mt-3 text-sm leading-6 text-slate-700">
-                    {detailTarget.emp.name} worked {detailTarget.hours.toFixed(2)} total hours during this report window and received {formatCurrency(detailTarget.tips)} in tips.
-                    {view === 'earnings' ? ` Base wages were ${formatCurrency(detailTarget.baseWages)} with ${formatCurrency(detailTarget.guaranteeTopUp)} in guaranteed top-up.` : ''}
-                  </p>
+                <div className="rounded-2xl border bg-emerald-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Tips</div>
+                  <div className="mt-2 text-2xl font-bold text-emerald-800">{formatCurrency(detailTarget.tips)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">this period</div>
+                </div>
+                <div className="rounded-2xl border bg-sky-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-sky-700">Base Wages</div>
+                  <div className="mt-2 text-2xl font-bold text-sky-900">{formatCurrency(detailTarget.baseWages)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">this period</div>
+                </div>
+                <div className="rounded-2xl border bg-violet-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Total Earnings</div>
+                  <div className="mt-2 text-2xl font-bold text-violet-900">{formatCurrency(detailTarget.totalEarnings)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">wages + tips + top-up</div>
+                </div>
+                <div className="rounded-2xl border bg-green-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-green-700">Tips / Hr</div>
+                  <div className="mt-2 text-2xl font-bold text-green-900">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">this period</div>
+                </div>
+                <div className="rounded-2xl border bg-blue-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Effective Rate</div>
+                  <div className="mt-2 text-2xl font-bold text-blue-900">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">total earnings / hr</div>
+                </div>
+                <div className="rounded-2xl border bg-amber-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">Performance Score</div>
+                  <div className="mt-2 text-2xl font-bold text-amber-900">{perf?.score ?? '—'}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">monthly weighted KPI</div>
+                </div>
+                <div className="rounded-2xl border bg-orange-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-orange-700">Overall Rank</div>
+                  <div className="mt-2 text-2xl font-bold text-orange-900">{perf ? `#${perf.overallRank}` : '—'}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{perf ? `of ${perf.staffCount} staff` : 'no data'}</div>
                 </div>
               </div>
-              {/* Performance one-liner */}
-              {(() => {
-                const ranked = [...rows].filter(r => r.tipRate !== null).sort((a, b) => (b.tipRate ?? 0) - (a.tipRate ?? 0))
-                const tipRank = ranked.findIndex(r => r.emp.id === detailTarget.emp.id) + 1
-                return (
-                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
-                    <span>Tips/Hr: <span className="font-semibold text-emerald-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</span></span>
-                    {tipRank > 0 && <span>Tips/Hr Rank: <span className="font-semibold">#{tipRank} of {ranked.length}</span></span>}
-                    {view === 'earnings' && detailTarget.effectiveRate !== null && (
-                      <span>Effective Rate: <span className="font-semibold">{formatCurrency(detailTarget.effectiveRate)}/hr</span></span>
-                    )}
-                  </div>
-                )
-              })()}
 
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Wage Report`, buildWageReportHtml(detailTarget))}>
@@ -497,7 +560,7 @@ export default function WageReportPage() {
                 </Table>
               </div>
             </div>
-          )}
+          )})()}
         </DialogContent>
       </Dialog>
     </div>
