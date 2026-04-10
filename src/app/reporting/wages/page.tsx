@@ -475,45 +475,45 @@ export default function WageReportPage() {
             return (
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <div className="rounded-2xl border bg-slate-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hours Worked</div>
-                  <div className="mt-2 text-2xl font-bold">{detailTarget.hours.toFixed(2)}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">hrs this period</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Hours Worked</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.hours.toFixed(2)}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">hrs this period</div>
                 </div>
-                <div className="rounded-2xl border bg-emerald-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Tips</div>
-                  <div className="mt-2 text-2xl font-bold text-emerald-800">{formatCurrency(detailTarget.tips)}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">this period</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.tips)}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
-                <div className="rounded-2xl border bg-sky-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-sky-700">Base Wages</div>
-                  <div className="mt-2 text-2xl font-bold text-sky-900">{formatCurrency(detailTarget.baseWages)}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">this period</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Base Wages</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.baseWages)}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
-                <div className="rounded-2xl border bg-violet-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">Total Earnings</div>
-                  <div className="mt-2 text-2xl font-bold text-violet-900">{formatCurrency(detailTarget.totalEarnings)}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">wages + tips + top-up</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total Earnings</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.totalEarnings)}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">wages + tips + top-up</div>
                 </div>
-                <div className="rounded-2xl border bg-green-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-green-700">Tips / Hr</div>
-                  <div className="mt-2 text-2xl font-bold text-green-900">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">this period</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips / Hr</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
-                <div className="rounded-2xl border bg-blue-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Effective Rate</div>
-                  <div className="mt-2 text-2xl font-bold text-blue-900">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">total earnings / hr</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">total earnings / hr</div>
                 </div>
-                <div className="rounded-2xl border bg-amber-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">Performance Score</div>
-                  <div className="mt-2 text-2xl font-bold text-amber-900">{perf?.score ?? '—'}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">monthly weighted KPI</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Performance Score</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf?.score ?? '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">monthly weighted KPI</div>
                 </div>
-                <div className="rounded-2xl border bg-orange-50 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-orange-700">Overall Rank</div>
-                  <div className="mt-2 text-2xl font-bold text-orange-900">{perf ? `#${perf.overallRank}` : '—'}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">{perf ? `of ${perf.staffCount} staff` : 'no data'}</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Overall Rank</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf ? `#${perf.overallRank}` : '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">{perf ? `of ${perf.staffCount} staff` : 'no data'}</div>
                 </div>
               </div>
 
