@@ -29,6 +29,11 @@ type ShiftDraft = {
   display_order?: number
 }
 
+type PublishMode = 'immediate' | 'queued'
+
+const QUEUED_SEND_HOUR = 9
+const QUEUED_SEND_MINUTE = 0
+
 function snapTimeToHalfHour(value: string) {
   const [hourText = '0', minuteText = '0'] = value.split(':')
   const hour = Number(hourText)
@@ -142,7 +147,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string; draftIndex?: number } | null>(null)
   const [addStaffInlineOpen, setAddStaffInlineOpen] = useState(false)
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
-  const [sendEmailOnPublish, setSendEmailOnPublish] = useState(true)
+  const [publishMode, setPublishMode] = useState<PublishMode>('immediate')
   const [staffToAdd, setStaffToAdd] = useState<string[]>([])
   const [addForm, setAddForm] = useState({ start_time: '15:30', end_time: '01:00', is_off: false })
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
@@ -164,6 +169,13 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const currentDraftKey = `${draftKey(weekRef)}_${department}`
   const currentRowsKey = `${currentDraftKey}_rows`
   const mondayDate = days[0] ? formatDate(days[0]) : null
+
+  const getQueuedSendAt = useCallback((weekStartDate: Date) => {
+    const queued = new Date(weekStartDate)
+    queued.setDate(queued.getDate() - 1)
+    queued.setHours(QUEUED_SEND_HOUR, QUEUED_SEND_MINUTE, 0, 0)
+    return queued
+  }, [])
 
   const ensureMondayOffDrafts = useCallback((baseDrafts: ShiftDraft[], employeeIds: string[]) => {
     if (!mondayDate) return baseDrafts
@@ -757,10 +769,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         if (insertResult.error) throw insertResult.error
       }
 
-      const scheduledSendDate = new Date(days[0])
-      scheduledSendDate.setDate(scheduledSendDate.getDate() - 1)
-      const scheduledSendDateStr = formatDate(scheduledSendDate)
-      const todayStr = formatDate(new Date())
+      const scheduledSendAt = getQueuedSendAt(days[0])
+      const scheduledSendDateStr = formatDate(scheduledSendAt)
+      const sendImmediately = publishMode === 'immediate'
 
       const publicationResult = await supabase
         .from('schedule_publications')
@@ -768,12 +779,13 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           week_start: startDate,
           week_end: endDate,
           scheduled_send_date: scheduledSendDateStr,
+          scheduled_send_at: scheduledSendAt.toISOString(),
           published_at: new Date().toISOString(),
-          email_sent_at: sendEmailOnPublish ? null : new Date().toISOString(),
+          email_sent_at: null,
         }, { onConflict: 'week_start' })
       if (publicationResult.error) throw publicationResult.error
 
-      if (sendEmailOnPublish && scheduledSendDateStr <= todayStr) {
+      if (sendImmediately) {
         const response = await fetch('/api/send-schedule-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -794,15 +806,17 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           tone: 'success',
           message: `Schedule published and emails sent${typeof payload.sent === 'number' ? ` (${payload.sent} sent)` : ''}.`,
         })
-      } else if (sendEmailOnPublish) {
-        setPublishFeedback({
-          tone: 'success',
-          message: `Schedule published. Emails are queued for ${scheduledSendDateStr}.`,
-        })
       } else {
+        const queuedLabel = scheduledSendAt.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
         setPublishFeedback({
           tone: 'success',
-          message: 'Schedule published without sending emails.',
+          message: `Schedule published. Email is queued for ${queuedLabel}. Any previous queued send for this week was replaced.`,
         })
       }
 
@@ -814,7 +828,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       await loadData()
       setIsDirty(false)
       setPublishDialogOpen(false)
-      setSendEmailOnPublish(true)
+      setPublishMode('immediate')
     } catch (error) {
       setPublishFeedback({
         tone: 'error',
@@ -1164,7 +1178,10 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+      <Dialog open={publishDialogOpen} onOpenChange={(open) => {
+        setPublishDialogOpen(open)
+        if (!open) setPublishMode('immediate')
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Confirm Publish</DialogTitle>
@@ -1187,28 +1204,62 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               Review once more before confirming. This will replace the published schedule for this department and week.
             </div>
             <div className="rounded-lg border bg-white p-3 text-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium text-slate-900">Send schedule emails now</p>
-                  <p className="mt-1 text-muted-foreground">
-                    Default is on. Turn this off if the schedule was already emailed and you only want to republish the board.
-                  </p>
-                </div>
+              <p className="font-medium text-slate-900">Email Delivery</p>
+              <div className="mt-3 grid gap-2">
                 <button
                   type="button"
-                  role="switch"
-                  aria-checked={sendEmailOnPublish}
-                  onClick={() => setSendEmailOnPublish(value => !value)}
-                  className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${sendEmailOnPublish ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                  onClick={() => setPublishMode('immediate')}
+                  className={`rounded-xl border px-3 py-3 text-left transition-colors ${publishMode === 'immediate' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
                 >
-                  <span
-                    className={`inline-block h-5 w-5 translate-y-0.5 rounded-full bg-white transition-transform ${sendEmailOnPublish ? 'translate-x-5' : 'translate-x-0.5'}`}
-                  />
+                  <div className="font-medium text-slate-900">Send Immediately</div>
+                  <div className="mt-1 text-muted-foreground">
+                    Publish the schedule and send the email right now.
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPublishMode('queued')}
+                  className={`rounded-xl border px-3 py-3 text-left transition-colors ${publishMode === 'queued' ? 'border-sky-500 bg-sky-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                >
+                  <div className="font-medium text-slate-900">Schedule Queued</div>
+                  <div className="mt-1 text-muted-foreground">
+                    Queue one email send for {getQueuedSendAt(days[0] ?? new Date()).toLocaleString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}.
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500">
+                    If this week already had a queued email, the latest publish replaces it so duplicate emails do not go out.
+                  </div>
                 </button>
               </div>
             </div>
+            <div className="rounded-lg border bg-white p-3 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium text-slate-900">Current action</p>
+                  <p className="mt-1 text-muted-foreground">
+                    {publishMode === 'immediate'
+                      ? 'This publish will send the schedule email immediately.'
+                      : `This publish will queue the email for ${getQueuedSendAt(days[0] ?? new Date()).toLocaleString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}.`}
+                  </p>
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${publishMode === 'immediate' ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700'}`}>
+                  {publishMode === 'immediate' ? 'Immediate' : 'Queued'}
+                </span>
+              </div>
+            </div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => { setPublishDialogOpen(false); setSendEmailOnPublish(true) }}>
+              <Button variant="outline" className="flex-1" onClick={() => { setPublishDialogOpen(false); setPublishMode('immediate') }}>
                 Back
               </Button>
               <Button className="flex-1" onClick={handlePublish} disabled={saving}>

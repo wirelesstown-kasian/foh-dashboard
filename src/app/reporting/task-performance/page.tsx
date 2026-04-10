@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useClockRecords, useEmployees, useEodReports, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -31,7 +31,6 @@ export default function TaskPerformancePage() {
   const { completions } = useTaskCompletions()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
-  const tasks = useTasks()
   const { roleDefinitions } = useAppSettings()
 
   const [department, setDepartment] = useState<ReportDepartment>('foh')
@@ -114,6 +113,10 @@ export default function TaskPerformancePage() {
       const hoursRank = hoursRankMap.get(item.emp.id) ?? 1
       return {
         ...item,
+        taskRank,
+        taskRateRank,
+        tipRateRank,
+        hoursRank,
         score: Math.round(
           scoreFromRank(taskRank, Math.max(taskRankMap.size, 1)) * 0.3 +
           scoreFromRank(taskRateRank, Math.max(taskRateRankMap.size, 1)) * 0.3 +
@@ -138,57 +141,37 @@ export default function TaskPerformancePage() {
 
   const totalTasks = perfRows.reduce((sum, row) => sum + row.done, 0)
   const detailTarget = perfRows.find(row => row.emp.id === detailEmployeeId) ?? null
-  const taskMap = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks])
-
-  const employeeTaskEntries = useMemo(() => {
-    if (!detailTarget) return []
-    return completions
-      .filter(completion =>
-        completion.employee_id === detailTarget.emp.id &&
-        completion.session_date >= startDate &&
-        completion.session_date <= endDate
-      )
-      .map(completion => ({
-        ...completion,
-        task: taskMap.get(completion.task_id),
-      }))
-      .sort((a, b) => {
-        if (a.session_date !== b.session_date) return b.session_date.localeCompare(a.session_date)
-        return (b.completed_at ?? '').localeCompare(a.completed_at ?? '')
-      })
-  }, [completions, detailTarget, endDate, startDate, taskMap])
 
   const buildPerformanceReportHtml = (employeeId: string) => {
     const row = perfRows.find(item => item.emp.id === employeeId)
     if (!row) return ''
-    const taskEntries = completions
-      .filter(completion => completion.employee_id === employeeId && completion.session_date >= startDate && completion.session_date <= endDate)
-      .map(completion => ({
-        ...completion,
-        task: taskMap.get(completion.task_id),
-      }))
+    const overallRank = perfRows.findIndex(item => item.emp.id === employeeId) + 1
+    const staffCount = perfRows.length
+    const monthly = row.monthly
+    const share = totalTasks > 0 ? getPercent((row.done / totalTasks) * 100) : '0.0%'
     return `
       <h1>${row.emp.name} Performance Report</h1>
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
       <div class="summary">
+        <div class="card"><strong>Overall Rank</strong><div>#${overallRank} of ${staffCount}</div></div>
+        <div class="card"><strong>Performance Score</strong><div>${monthly?.score ?? '—'}</div></div>
         <div class="card"><strong>Tasks This Period</strong><div>${row.done}</div></div>
-        <div class="card"><strong>Performance Score</strong><div>${row.monthly?.score ?? '—'}</div></div>
-        <div class="card"><strong>Monthly Tasks</strong><div>${row.monthly?.tasks ?? 0}</div></div>
-        <div class="card"><strong>Tip Pace</strong><div>${row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div></div>
+        <div class="card"><strong>Task Share</strong><div>${share}</div></div>
+        <div class="card"><strong>Monthly Tasks</strong><div>${monthly?.tasks ?? 0}</div></div>
+        <div class="card"><strong>Hours Worked</strong><div>${monthly?.hours.toFixed(2) ?? '0.00'} hrs</div></div>
+        <div class="card"><strong>Tasks / Hr</strong><div>${monthly ? monthly.taskRate.toFixed(2) : '—'}</div></div>
+        <div class="card"><strong>Tips / Hr</strong><div>${monthly ? formatCurrency(monthly.tipRate) : '—'}</div></div>
+        <div class="card"><strong>Total Tips</strong><div>${monthly ? formatCurrency(monthly.totalTips) : '—'}</div></div>
       </div>
       <table>
         <thead>
-          <tr><th>Date</th><th>Task</th><th>Status</th><th>Completed At</th></tr>
+          <tr><th>KPI</th><th class="right">Value</th><th class="right">Rank</th></tr>
         </thead>
         <tbody>
-          ${taskEntries.map(entry => `
-            <tr>
-              <td>${entry.session_date}</td>
-              <td>${entry.task?.title ?? 'Task'}</td>
-              <td>${entry.status === 'incomplete' ? 'Incomplete' : 'Complete'}</td>
-              <td>${entry.completed_at ? format(new Date(entry.completed_at), 'MMM d, yyyy p') : '—'}</td>
-            </tr>
-          `).join('')}
+          <tr><td>Monthly Tasks</td><td class="right">${monthly?.tasks ?? 0}</td><td class="right">${monthly ? `#${monthly.taskRank}` : '—'}</td></tr>
+          <tr><td>Tasks / Hr</td><td class="right">${monthly ? monthly.taskRate.toFixed(2) : '—'}</td><td class="right">${monthly ? `#${monthly.taskRateRank}` : '—'}</td></tr>
+          <tr><td>Tips / Hr</td><td class="right">${monthly ? formatCurrency(monthly.tipRate) : '—'}</td><td class="right">${monthly ? `#${monthly.tipRateRank}` : '—'}</td></tr>
+          <tr><td>Hours Worked</td><td class="right">${monthly?.hours.toFixed(2) ?? '0.00'} hrs</td><td class="right">${monthly ? `#${monthly.hoursRank}` : '—'}</td></tr>
         </tbody>
       </table>
     `
@@ -204,6 +187,7 @@ export default function TaskPerformancePage() {
           employee_id: employeeId,
           start_date: startDate,
           end_date: endDate,
+          department,
         }),
       })
       const json = (await res.json().catch(() => ({}))) as { error?: string }
@@ -307,28 +291,83 @@ export default function TaskPerformancePage() {
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-[min(1120px,calc(100vw-2rem))] max-h-[88vh] overflow-y-auto p-6">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Performance Report</DialogTitle>
           </DialogHeader>
           {detailTarget && (
             <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="rounded-xl border bg-amber-50 p-3">
-                  <div className="text-xs text-muted-foreground">Tasks This Period</div>
-                  <div className="mt-1 text-lg font-semibold">{detailTarget.done}</div>
+              <div className="grid gap-4 lg:grid-cols-[1.3fr_0.9fr]">
+                <div className="rounded-2xl border bg-gradient-to-br from-amber-50 via-white to-sky-50 p-5">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Performance Summary</div>
+                  <div className="mt-3 flex flex-wrap items-end gap-6">
+                    <div>
+                      <div className="text-sm text-muted-foreground">Performance Score</div>
+                      <div className="text-5xl font-bold text-slate-950">{detailTarget.monthly?.score ?? '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Overall Rank</div>
+                      <div className="text-2xl font-semibold text-slate-900">
+                        #{perfRows.findIndex(item => item.emp.id === detailTarget.emp.id) + 1}
+                        <span className="ml-2 text-sm font-medium text-muted-foreground">of {perfRows.length}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Tasks This Period</div>
+                      <div className="mt-1 text-xl font-semibold">{detailTarget.done}</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Task Share</div>
+                      <div className="mt-1 text-xl font-semibold">{totalTasks > 0 ? getPercent((detailTarget.done / totalTasks) * 100) : '0.0%'}</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Monthly Tasks</div>
+                      <div className="mt-1 text-xl font-semibold">{detailTarget.monthly?.tasks ?? 0}</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Hours Worked</div>
+                      <div className="mt-1 text-xl font-semibold">{detailTarget.monthly?.hours.toFixed(2) ?? '0.00'} hrs</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Tasks / Hr</div>
+                      <div className="mt-1 text-xl font-semibold">{detailTarget.monthly ? detailTarget.monthly.taskRate.toFixed(2) : '—'}</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Tips / Hr</div>
+                      <div className="mt-1 text-xl font-semibold">{detailTarget.monthly ? formatCurrency(detailTarget.monthly.tipRate) : '—'}</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Total Tips</div>
+                      <div className="mt-1 text-xl font-semibold">{detailTarget.monthly ? formatCurrency(detailTarget.monthly.totalTips) : '—'}</div>
+                    </div>
+                    <div className="rounded-xl border bg-white p-3">
+                      <div className="text-xs text-muted-foreground">Role</div>
+                      <div className="mt-1 text-xl font-semibold">{getRoleLabel(detailTarget.emp.role, roleDefinitions)}</div>
+                    </div>
+                  </div>
                 </div>
-                <div className="rounded-xl border bg-sky-50 p-3">
-                  <div className="text-xs text-muted-foreground">Performance Score</div>
-                  <div className="mt-1 text-lg font-semibold">{detailTarget.monthly?.score ?? '—'}</div>
-                </div>
-                <div className="rounded-xl border bg-green-50 p-3">
-                  <div className="text-xs text-muted-foreground">Monthly Tasks</div>
-                  <div className="mt-1 text-lg font-semibold">{detailTarget.monthly?.tasks ?? 0}</div>
-                </div>
-                <div className="rounded-xl border bg-violet-50 p-3">
-                  <div className="text-xs text-muted-foreground">Tip Pace</div>
-                  <div className="mt-1 text-lg font-semibold">{detailTarget.monthly ? formatCurrency(detailTarget.monthly.tipRate) : '—'}</div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">KPI Ranking</div>
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
+                      <span className="text-sm font-medium">Monthly Tasks</span>
+                      <span className="text-sm font-semibold">#{detailTarget.monthly?.taskRank ?? '—'}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
+                      <span className="text-sm font-medium">Tasks / Hr</span>
+                      <span className="text-sm font-semibold">#{detailTarget.monthly?.taskRateRank ?? '—'}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
+                      <span className="text-sm font-medium">Tips / Hr</span>
+                      <span className="text-sm font-semibold">#{detailTarget.monthly?.tipRateRank ?? '—'}</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
+                      <span className="text-sm font-medium">Hours Worked</span>
+                      <span className="text-sm font-semibold">#{detailTarget.monthly?.hoursRank ?? '—'}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -339,31 +378,6 @@ export default function TaskPerformancePage() {
                   {emailingEmployeeId === detailTarget.emp.id ? 'Sending…' : 'Email Report'}
                 </Button>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Task</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Completed At</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {employeeTaskEntries.map(entry => (
-                    <TableRow key={entry.id}>
-                      <TableCell>{entry.session_date}</TableCell>
-                      <TableCell>{entry.task?.title ?? 'Task'}</TableCell>
-                      <TableCell>{entry.status === 'incomplete' ? 'Incomplete' : 'Complete'}</TableCell>
-                      <TableCell>{entry.completed_at ? format(new Date(entry.completed_at), 'MMM d, yyyy p') : '—'}</TableCell>
-                    </TableRow>
-                  ))}
-                  {employeeTaskEntries.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">No task activity for this range</TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
             </div>
           )}
         </DialogContent>

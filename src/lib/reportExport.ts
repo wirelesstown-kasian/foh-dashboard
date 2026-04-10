@@ -27,13 +27,16 @@ function buildPrintWindow(title: string, bodyHtml: string) {
 
 export function exportReportToPdf(title: string, bodyHtml: string) {
   if (typeof window === 'undefined') return
-  const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=960,height=720')
+  const printWindow = window.open('about:blank', '_blank', 'width=1280,height=900')
   if (!printWindow) return
   printWindow.document.open()
   printWindow.document.write(buildPrintWindow(title, bodyHtml))
   printWindow.document.close()
-  printWindow.focus()
-  window.setTimeout(() => {
+
+  const triggerPrint = () => {
+    printWindow.focus()
     printWindow.print()
-  }, 200)
+  }
+
+  window.setTimeout(triggerPrint, 400)
 }

@@ -9,15 +9,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const today = new Date().toISOString().slice(0, 10)
+  const nowIso = new Date().toISOString()
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
 
   const { data: pendingPublications, error } = await supabaseAdmin
     .from('schedule_publications')
-    .select('week_start, week_end')
-    .lte('scheduled_send_date', today)
+    .select('week_start, week_end, scheduled_send_at')
+    .lte('scheduled_send_at', nowIso)
     .is('email_sent_at', null)
-    .order('week_start')
+    .order('scheduled_send_at')
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
         .eq('week_start', publication.week_start)
     }
 
-    results.push({ week_start: publication.week_start, ...result })
+    results.push({ week_start: publication.week_start, scheduled_send_at: publication.scheduled_send_at, ...result })
   }
 
   const hasErrors = results.some(result => !result.success)
