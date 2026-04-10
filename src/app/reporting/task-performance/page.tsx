@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEmployees, useEodReports, useScheduledDepartmentIds, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -45,9 +45,17 @@ export default function TaskPerformancePage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
+  const scheduledDeptIds = useScheduledDepartmentIds(startDate, endDate)
   const filteredEmployees = useMemo(
-    () => employees.filter(employee => isEmployeeInDepartment(employee, department)),
-    [employees, department]
+    () => employees.filter(employee => {
+      const dept = employee.primary_department ?? 'foh'
+      if (dept === 'hybrid') {
+        const scheduled = scheduledDeptIds.get(department)
+        return scheduled && scheduled.size > 0 ? scheduled.has(employee.id) : true
+      }
+      return isEmployeeInDepartment(employee, department)
+    }),
+    [employees, department, scheduledDeptIds]
   )
   const filteredEmployeeIds = useMemo(
     () => new Set(filteredEmployees.map(employee => employee.id)),

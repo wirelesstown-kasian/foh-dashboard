@@ -106,6 +106,32 @@ export function useEodReports() {
   return { eodReports, setEodReports }
 }
 
+export function useScheduledDepartmentIds(startDate: string, endDate: string) {
+  const [deptMap, setDeptMap] = useState<Map<string, Set<string>>>(new Map())
+
+  useEffect(() => {
+    if (!startDate || !endDate) return
+    let mounted = true
+    void (async () => {
+      const res = await supabase
+        .from('schedules')
+        .select('employee_id, department')
+        .gte('date', startDate)
+        .lte('date', endDate)
+      if (!mounted) return
+      const map = new Map<string, Set<string>>()
+      for (const row of (res.data ?? []) as { employee_id: string; department: string }[]) {
+        if (!map.has(row.department)) map.set(row.department, new Set())
+        map.get(row.department)!.add(row.employee_id)
+      }
+      setDeptMap(map)
+    })()
+    return () => { mounted = false }
+  }, [startDate, endDate])
+
+  return deptMap
+}
+
 export function useClockRecords() {
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
 
