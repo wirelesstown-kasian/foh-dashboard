@@ -431,6 +431,21 @@ export default function WageReportPage() {
                   </p>
                 </div>
               </div>
+              {/* Performance one-liner */}
+              {(() => {
+                const ranked = [...rows].filter(r => r.tipRate !== null).sort((a, b) => (b.tipRate ?? 0) - (a.tipRate ?? 0))
+                const tipRank = ranked.findIndex(r => r.emp.id === detailTarget.emp.id) + 1
+                return (
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-xl border bg-slate-50 px-4 py-2.5 text-sm text-slate-600">
+                    <span>Tips/Hr: <span className="font-semibold text-emerald-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</span></span>
+                    {tipRank > 0 && <span>Tips/Hr Rank: <span className="font-semibold">#{tipRank} of {ranked.length}</span></span>}
+                    {view === 'earnings' && detailTarget.effectiveRate !== null && (
+                      <span>Effective Rate: <span className="font-semibold">{formatCurrency(detailTarget.effectiveRate)}/hr</span></span>
+                    )}
+                  </div>
+                )
+              })()}
+
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Wage Report`, buildWageReportHtml(detailTarget))}>
                   PDF Export
