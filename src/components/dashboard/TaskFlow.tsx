@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Task, TaskCategory, TaskCompletion, DailySession, Employee, SessionPhase, TaskCompletionStatus } from '@/lib/types'
 import { PinModal } from '@/components/layout/PinModal'
@@ -50,6 +50,8 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   const [phaseResetError, setPhaseResetError] = useState<string | null>(null)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
+  const [nextPhasePromptOpen, setNextPhasePromptOpen] = useState(false)
+  const prevAllCurrentDoneRef = useRef(false)
 
   const todayDow = getBusinessDate().getDay()
   const currentPhase: SessionPhase = session?.current_phase ?? 'pre_shift'
@@ -87,6 +89,14 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   const isResolved = (taskId: string) => getTaskStatus(taskId) !== 'pending'
   const allCurrentDone = currentTasks.length === 0 || currentTasks.every(task => isResolved(task.id))
   const selectedTasks = currentTasks.filter(task => selectedTaskIds.includes(task.id))
+
+  useEffect(() => {
+    const justFinished = allCurrentDone && !prevAllCurrentDoneRef.current && currentTasks.length > 0 && currentPhase !== 'complete' && !showSummary
+    if (justFinished) {
+      setNextPhasePromptOpen(true)
+    }
+    prevAllCurrentDoneRef.current = allCurrentDone
+  }, [allCurrentDone, currentPhase, currentTasks.length, showSummary])
 
   const getTaskHelperText = (task: Task) =>
     task.deadline_time ? `by ${task.deadline_time.slice(0, 5)}` : null
@@ -638,6 +648,44 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
               </div>
             )
           })()}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={nextPhasePromptOpen} onOpenChange={setNextPhasePromptOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>All Tasks Resolved</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Every task in {PHASE_LABELS[currentPhase]} has been checked, including both complete and incomplete items.
+            </p>
+            <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span>Resolved Tasks</span>
+                <span className="font-semibold">{currentTasks.length}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span>Next Page</span>
+                <span className="font-semibold">{currentPhase === 'closing' ? 'Review Summary' : PHASE_LABELS[PHASE_ORDER[PHASE_ORDER.indexOf(currentPhase) + 1]]}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setNextPhasePromptOpen(false)}>
+                Stay Here
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={async () => {
+                  setNextPhasePromptOpen(false)
+                  await advancePhase()
+                }}
+                disabled={advancing}
+              >
+                {currentPhase === 'closing' ? 'Go to Review' : 'Go to Next Page'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

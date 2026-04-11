@@ -32,7 +32,7 @@ type ShiftDraft = {
 
 type PublishMode = 'immediate' | 'queued'
 
-const QUEUED_SEND_HOUR = 9
+const QUEUED_SEND_HOUR = 21
 const QUEUED_SEND_MINUTE = 0
 
 function formatTimeInputValue(date: Date) {
