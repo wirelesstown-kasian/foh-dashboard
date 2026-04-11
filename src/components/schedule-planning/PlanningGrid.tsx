@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
 import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
@@ -33,6 +34,12 @@ type PublishMode = 'immediate' | 'queued'
 
 const QUEUED_SEND_HOUR = 9
 const QUEUED_SEND_MINUTE = 0
+
+function formatTimeInputValue(date: Date) {
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${hour}:${minute}`
+}
 
 function snapTimeToHalfHour(value: string) {
   const [hourText = '0', minuteText = '0'] = value.split(':')
@@ -148,6 +155,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [addStaffInlineOpen, setAddStaffInlineOpen] = useState(false)
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
   const [publishMode, setPublishMode] = useState<PublishMode>('immediate')
+  const [queuedSendDate, setQueuedSendDate] = useState('')
+  const [queuedSendTime, setQueuedSendTime] = useState('')
   const [staffToAdd, setStaffToAdd] = useState<string[]>([])
   const [addForm, setAddForm] = useState({ start_time: '15:30', end_time: '01:00', is_off: false })
   const [employeeNamesById, setEmployeeNamesById] = useState<Map<string, string>>(new Map())
@@ -176,6 +185,22 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     queued.setHours(QUEUED_SEND_HOUR, QUEUED_SEND_MINUTE, 0, 0)
     return queued
   }, [])
+
+  const getSelectedQueuedSendAt = useCallback(() => {
+    const fallback = getQueuedSendAt(days[0] ?? new Date())
+    if (!queuedSendDate || !queuedSendTime) return fallback
+
+    const selected = new Date(`${queuedSendDate}T${queuedSendTime}:00`)
+    if (Number.isNaN(selected.getTime())) return fallback
+    return selected
+  }, [days, getQueuedSendAt, queuedSendDate, queuedSendTime])
+
+  useEffect(() => {
+    if (days.length === 0) return
+    const defaultQueued = getQueuedSendAt(days[0])
+    setQueuedSendDate(formatDate(defaultQueued))
+    setQueuedSendTime(formatTimeInputValue(defaultQueued))
+  }, [days, getQueuedSendAt])
 
   const ensureMondayOffDrafts = useCallback((baseDrafts: ShiftDraft[], employeeIds: string[]) => {
     if (!mondayDate) return baseDrafts
@@ -769,7 +794,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         if (insertResult.error) throw insertResult.error
       }
 
-      const scheduledSendAt = getQueuedSendAt(days[0])
+      const scheduledSendAt = getSelectedQueuedSendAt()
       const scheduledSendDateStr = formatDate(scheduledSendAt)
       const sendImmediately = publishMode === 'immediate'
 
@@ -829,6 +854,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       setIsDirty(false)
       setPublishDialogOpen(false)
       setPublishMode('immediate')
+      const defaultQueued = getQueuedSendAt(days[0])
+      setQueuedSendDate(formatDate(defaultQueued))
+      setQueuedSendTime(formatTimeInputValue(defaultQueued))
     } catch (error) {
       setPublishFeedback({
         tone: 'error',
@@ -1180,7 +1208,12 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
       <Dialog open={publishDialogOpen} onOpenChange={(open) => {
         setPublishDialogOpen(open)
-        if (!open) setPublishMode('immediate')
+        if (!open) {
+          setPublishMode('immediate')
+          const defaultQueued = getQueuedSendAt(days[0] ?? new Date())
+          setQueuedSendDate(formatDate(defaultQueued))
+          setQueuedSendTime(formatTimeInputValue(defaultQueued))
+        }
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -1223,7 +1256,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 >
                   <div className="font-medium text-slate-900">Schedule Queued</div>
                   <div className="mt-1 text-muted-foreground">
-                    Queue one email send for {getQueuedSendAt(days[0] ?? new Date()).toLocaleString('en-US', {
+                    Queue one email send for {getSelectedQueuedSendAt().toLocaleString('en-US', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',
@@ -1236,6 +1269,31 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                   </div>
                 </button>
               </div>
+              {publishMode === 'queued' && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Send Date
+                    </label>
+                    <Input
+                      type="date"
+                      value={queuedSendDate}
+                      onChange={(event) => setQueuedSendDate(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Send Time
+                    </label>
+                    <Input
+                      type="time"
+                      step={1800}
+                      value={queuedSendTime}
+                      onChange={(event) => setQueuedSendTime(event.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <div className="rounded-lg border bg-white p-3 text-sm">
               <div className="flex items-start justify-between gap-3">
@@ -1244,7 +1302,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                   <p className="mt-1 text-muted-foreground">
                     {publishMode === 'immediate'
                       ? 'This publish will send the schedule email immediately.'
-                      : `This publish will queue the email for ${getQueuedSendAt(days[0] ?? new Date()).toLocaleString('en-US', {
+                      : `This publish will queue the email for ${getSelectedQueuedSendAt().toLocaleString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
