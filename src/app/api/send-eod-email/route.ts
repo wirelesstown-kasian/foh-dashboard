@@ -428,16 +428,26 @@ export async function POST(req: NextRequest) {
     }
   }
 
-    const results = await Promise.allSettled(emailPromises)
-    const errors = results
-      .filter(r => r.status === 'rejected')
-      .map(r => (r as PromiseRejectedResult).reason?.message ?? 'Unknown error')
-
-    if (errors.length > 0) {
-      return NextResponse.json({ success: false, errors, sent: results.length - errors.length }, { status: 207 })
+    // Send sequentially to avoid Resend rate limits
+    let sent = 0
+    const errors: string[] = []
+    for (const promise of emailPromises) {
+      try {
+        await promise
+        sent++
+        if (sent < emailPromises.length) {
+          await new Promise(resolve => setTimeout(resolve, 350))
+        }
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : 'Unknown error')
+      }
     }
 
-    return NextResponse.json({ success: true, sent: results.length })
+    if (errors.length > 0) {
+      return NextResponse.json({ success: false, errors, sent }, { status: 207 })
+    }
+
+    return NextResponse.json({ success: true, sent })
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to send EOD emails' },
