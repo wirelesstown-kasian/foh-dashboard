@@ -848,61 +848,87 @@ export default function EodPage() {
 
             {/* Cash Drawer Counter */}
             <div className={`rounded-xl border p-5 ${financialStyles.card}`}>
-              <h2 className="font-semibold mb-3">Cash Drawer Count</h2>
-              <div className="grid grid-cols-5 gap-2 mb-3">
-                {[
-                  { key: 'd100', label: '$100' },
-                  { key: 'd50', label: '$50' },
-                  { key: 'd20', label: '$20' },
-                  { key: 'd10', label: '$10' },
-                  { key: 'd5', label: '$5' },
-                  { key: 'd1', label: '$1' },
-                  { key: 'c25', label: '¢25' },
-                  { key: 'c10', label: '¢10' },
-                  { key: 'c5', label: '¢5' },
-                  { key: 'c1', label: '¢1' },
-                ].map(({ key, label }) => (
-                  <div key={key} className="flex flex-col items-center gap-1">
-                    <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={denoms[key]}
-                      onChange={e => {
-                        const val = e.target.value
-                        const newDenoms = { ...denoms, [key]: val }
-                        setDenoms(newDenoms)
-                        const hasAny = Object.values(newDenoms).some(v => v !== '')
-                        if (hasAny) {
-                          const total = Object.entries(newDenoms).reduce(
-                            (sum, [k, v]) => sum + (parseInt(v) || 0) * DENOM_VALUES[k],
-                            0
-                          )
-                          setField('cash_total', Math.max(0, total - startingCash).toFixed(2))
-                        }
-                      }}
-                      placeholder="0"
-                      className="h-8 text-center text-sm px-1"
-                    />
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold">Cash Drawer Count</h2>
+                <div className="flex items-center gap-3 rounded-lg bg-amber-50 border border-amber-300 px-4 py-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-amber-700">Starting Cash</span>
+                  <span className="text-xl font-bold text-amber-800">${startingCash.toFixed(2)}</span>
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div className="rounded-lg bg-muted/60 px-3 py-2">
-                  <p className="text-xs text-muted-foreground mb-0.5">Register Total</p>
-                  <p className="font-semibold">${registerTotal.toFixed(2)}</p>
-                </div>
-                <div className="rounded-lg bg-muted/60 px-3 py-2">
-                  <p className="text-xs text-muted-foreground mb-0.5">Starting Cash</p>
-                  <p className="font-semibold">${startingCash.toFixed(2)}</p>
-                </div>
-                <div className={`rounded-lg px-3 py-2 ${registerTotal === 0 ? 'bg-muted/60' : cashFromDrawer >= 0 ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
-                  <p className="text-xs text-muted-foreground mb-0.5">Cash Total</p>
-                  <p className={`font-semibold ${registerTotal === 0 ? '' : cashFromDrawer >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                    ${cashFromDrawer.toFixed(2)}
-                  </p>
-                </div>
+
+              {(() => {
+                const coins = [
+                  { key: 'c25', label: '¢25', value: 0.25 },
+                  { key: 'c10', label: '¢10', value: 0.10 },
+                  { key: 'c5',  label: '¢5',  value: 0.05 },
+                  { key: 'c1',  label: '¢1',  value: 0.01 },
+                ]
+                const bills = [
+                  { key: 'd100', label: '$100', value: 100 },
+                  { key: 'd50',  label: '$50',  value: 50 },
+                  { key: 'd20',  label: '$20',  value: 20 },
+                  { key: 'd10',  label: '$10',  value: 10 },
+                  { key: 'd5',   label: '$5',   value: 5 },
+                  { key: 'd1',   label: '$1',   value: 1 },
+                ]
+                const renderRow = ({ key, label, value }: { key: string; label: string; value: number }) => {
+                  const count = parseInt(denoms[key]) || 0
+                  const amount = count * value
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <span className="w-10 text-right text-sm font-semibold text-slate-600">{label}</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={denoms[key]}
+                        onChange={e => {
+                          const val = e.target.value
+                          const newDenoms = { ...denoms, [key]: val }
+                          setDenoms(newDenoms)
+                          const hasAny = Object.values(newDenoms).some(v => v !== '')
+                          if (hasAny) {
+                            const total = Object.entries(newDenoms).reduce(
+                              (s, [k, v]) => s + (parseInt(v) || 0) * DENOM_VALUES[k],
+                              0
+                            )
+                            setField('cash_total', Math.max(0, total - startingCash).toFixed(2))
+                          }
+                        }}
+                        placeholder="0"
+                        className="h-8 w-16 text-center text-sm px-1"
+                      />
+                      <span className="w-20 text-sm font-medium text-slate-500">
+                        {count > 0 ? `= $${amount.toFixed(2)}` : ''}
+                      </span>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-4">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
+                      <div className="space-y-1.5">{coins.map(renderRow)}</div>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
+                      <div className="space-y-1.5">{bills.map(renderRow)}</div>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              <div className="flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-sm flex-wrap">
+                <span className="text-muted-foreground">Register Total</span>
+                <span className="font-semibold">${registerTotal.toFixed(2)}</span>
+                <span className="text-muted-foreground mx-1">−</span>
+                <span className="text-muted-foreground">Starting Cash</span>
+                <span className="font-semibold text-amber-700">${startingCash.toFixed(2)}</span>
+                <span className="text-muted-foreground mx-1">=</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cash Total</span>
+                <span className={`text-lg font-bold ${registerTotal === 0 ? 'text-slate-400' : cashFromDrawer >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                  ${cashFromDrawer.toFixed(2)}
+                </span>
               </div>
             </div>
 
