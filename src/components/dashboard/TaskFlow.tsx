@@ -221,7 +221,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   const handlePhaseBack = async () => {
     if (!session) return
     const phaseIdx = PHASE_ORDER.indexOf(currentPhase)
-    if (phaseIdx <= 1) return // don't go back to register_open from here
+    if (phaseIdx <= 0) return
     const prevPhase = PHASE_ORDER[phaseIdx - 1]
     await supabase.from('daily_sessions').update({ current_phase: prevPhase }).eq('id', session.id)
     onRefresh()
@@ -376,7 +376,19 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-white">
         <div className="flex items-center justify-between gap-2 border-b bg-gray-50 p-3">
-          <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
+          <div className="flex items-center gap-2">
+            {currentPhase === 'pre_shift' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={handlePhaseBack}
+              >
+                <ChevronLeft className="h-3 w-3 mr-1" /> Register
+              </Button>
+            )}
+            <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               size="sm"
