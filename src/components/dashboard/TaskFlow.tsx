@@ -451,7 +451,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
               No tasks in this phase. Add tasks in Task Admin.
             </p>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
             {currentTasks.map(task => {
               const status = getTaskStatus(task.id)
               const completion = getCompletion(task.id)
@@ -461,7 +461,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
                 <button
                   key={task.id}
                   type="button"
-                  className={`aspect-square rounded-2xl border-2 p-3 text-center transition-all ${
+                  className={`rounded-xl border-2 p-2.5 text-center transition-all ${
                     status === 'complete'
                       ? 'border-green-400 bg-green-50 hover:bg-green-100'
                       : status === 'incomplete'
@@ -476,44 +476,29 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
                     setTaskActionTarget(task)
                   }}
                 >
-                  <div className="flex h-full flex-col items-center justify-between">
-                    <div className="flex w-full justify-center">
-                      {status === 'complete' ? (
-                        <CheckCircle2 className="h-6 w-6 shrink-0 text-green-500" />
-                      ) : status === 'incomplete' ? (
-                        <Circle className="h-6 w-6 shrink-0 text-red-500" />
-                      ) : (
-                        <Circle className="h-6 w-6 shrink-0 text-gray-300" />
-                      )}
-                    </div>
-                    <div className="flex flex-1 flex-col items-center justify-center px-1">
-                      <p
-                        className={`line-clamp-3 text-sm font-semibold leading-tight ${
-                          status === 'complete' ? 'text-green-800' : status === 'incomplete' ? 'text-red-800' : 'text-slate-900'
-                        }`}
-                      >
-                        {task.title}
-                      </p>
-                    </div>
-                    <div className="flex min-h-10 flex-col items-center justify-end">
-                      {employee ? (
-                        <span
-                          className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
-                            status === 'complete'
-                              ? 'bg-green-200 text-green-700'
-                              : status === 'incomplete'
-                                ? 'bg-red-200 text-red-700'
-                                : 'bg-slate-200 text-slate-700'
-                          }`}
-                        >
-                          {employee.name}
-                        </span>
-                      ) : getTaskHelperText(task) ? (
-                        <p className="text-[11px] leading-tight text-muted-foreground">{getTaskHelperText(task)}</p>
-                      ) : (
-                        <span />
-                      )}
-                    </div>
+                  <div className="flex flex-col items-center gap-1.5">
+                    {status === 'complete' ? (
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
+                    ) : status === 'incomplete' ? (
+                      <Circle className="h-5 w-5 shrink-0 text-red-500" />
+                    ) : (
+                      <Circle className="h-5 w-5 shrink-0 text-gray-300" />
+                    )}
+                    <p className={`line-clamp-2 text-xs font-semibold leading-tight ${
+                      status === 'complete' ? 'text-green-800' : status === 'incomplete' ? 'text-red-800' : 'text-slate-900'
+                    }`}>
+                      {task.title}
+                    </p>
+                    {employee ? (
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        status === 'complete' ? 'bg-green-200 text-green-700' :
+                        status === 'incomplete' ? 'bg-red-200 text-red-700' : 'bg-slate-200 text-slate-700'
+                      }`}>
+                        {employee.name}
+                      </span>
+                    ) : getTaskHelperText(task) ? (
+                      <p className="text-[10px] leading-tight text-muted-foreground">{getTaskHelperText(task)}</p>
+                    ) : null}
                   </div>
                 </button>
               )
