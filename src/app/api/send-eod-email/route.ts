@@ -259,7 +259,7 @@ export async function POST(req: NextRequest) {
       emailQueue.push(() =>
         sendEmail({
           resendKey,
-          to: dist.employee.email,
+          to: dist.employee!.email!,
           subject: `Your Tip — ${report.session_date}`,
           html,
           fromName: emailSettings.from_name,
