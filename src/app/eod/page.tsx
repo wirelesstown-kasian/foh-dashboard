@@ -162,6 +162,8 @@ export default function EodPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const [startingCash, setStartingCash] = useState<number>(0)
+  const [coinSubtotalOverride, setCoinSubtotalOverride] = useState<string>('')
+  const [billSubtotalOverride, setBillSubtotalOverride] = useState<string>('')
   const [denoms, setDenoms] = useState<Record<string, { count: string; amount: string }>>({
     d100: { count: '', amount: '' }, d50: { count: '', amount: '' },
     d20: { count: '', amount: '' },  d10: { count: '', amount: '' },
@@ -287,10 +289,13 @@ export default function EodPage() {
     d100: 100, d50: 50, d20: 20, d10: 10, d5: 5,
     d1: 1, c25: 0.25, c10: 0.10, c5: 0.05, c1: 0.01,
   }
-  const registerTotal = Object.entries(denoms).reduce(
-    (sum, [key, { count }]) => sum + (parseInt(count) || 0) * DENOM_VALUES[key],
-    0
-  )
+  const COIN_KEYS = ['c25', 'c10', 'c5', 'c1']
+  const BILL_KEYS = ['d100', 'd50', 'd20', 'd10', 'd5', 'd1']
+  const computedCoinTotal = COIN_KEYS.reduce((s, k) => s + (parseInt(denoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
+  const computedBillTotal = BILL_KEYS.reduce((s, k) => s + (parseInt(denoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
+  const effectiveCoinTotal = coinSubtotalOverride !== '' ? (parseFloat(coinSubtotalOverride) || 0) : computedCoinTotal
+  const effectiveBillTotal = billSubtotalOverride !== '' ? (parseFloat(billSubtotalOverride) || 0) : computedBillTotal
+  const registerTotal = effectiveCoinTotal + effectiveBillTotal
   const cashFromDrawer = Math.max(0, registerTotal - startingCash)
 
   const grossRevenue = (parseFloat(form.cash_total) || 0) + (parseFloat(form.batch_total) || 0)
@@ -874,18 +879,18 @@ export default function EodPage() {
                   { key: 'd5',   label: '$5',   value: 5 },
                   { key: 'd1',   label: '$1',   value: 1 },
                 ]
-                const updateTotal = (newDenoms: typeof denoms) => {
-                  const hasAny = Object.values(newDenoms).some(d => d.count !== '')
-                  if (hasAny) {
-                    const total = Object.entries(newDenoms).reduce(
-                      (s, [k, d]) => s + (parseInt(d.count) || 0) * DENOM_VALUES[k],
-                      0
-                    )
-                    setField('cash_total', Math.max(0, total - startingCash).toFixed(2))
-                  }
+                const recomputeCashTotal = (newDenoms: typeof denoms, coinOverride: string, billOverride: string) => {
+                  const cCoins = COIN_KEYS.reduce((s, k) => s + (parseInt(newDenoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
+                  const cBills = BILL_KEYS.reduce((s, k) => s + (parseInt(newDenoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
+                  const effCoins = coinOverride !== '' ? (parseFloat(coinOverride) || 0) : cCoins
+                  const effBills = billOverride !== '' ? (parseFloat(billOverride) || 0) : cBills
+                  const total = effCoins + effBills
+                  const hasAny = Object.values(newDenoms).some(d => d.count !== '') || coinOverride !== '' || billOverride !== ''
+                  if (hasAny) setField('cash_total', Math.max(0, total - startingCash).toFixed(2))
                 }
                 const renderRow = ({ key, label, value }: { key: string; label: string; value: number }) => {
                   const { count, amount } = denoms[key]
+                  const isCoin = COIN_KEYS.includes(key)
                   return (
                     <div key={key} className="flex items-center gap-1.5">
                       <span className="w-9 text-right text-sm font-semibold text-slate-600 shrink-0">{label}</span>
@@ -899,7 +904,12 @@ export default function EodPage() {
                           const a = c ? ((parseInt(c) || 0) * value).toFixed(2) : ''
                           const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
                           setDenoms(newDenoms)
-                          updateTotal(newDenoms)
+                          // clear subtotal override for this group when counting individually
+                          const newCoinOverride = isCoin ? '' : coinSubtotalOverride
+                          const newBillOverride = !isCoin ? '' : billSubtotalOverride
+                          if (isCoin) setCoinSubtotalOverride('')
+                          else setBillSubtotalOverride('')
+                          recomputeCashTotal(newDenoms, newCoinOverride, newBillOverride)
                         }}
                         placeholder="개수"
                         className="h-8 w-16 text-center text-xs px-1"
@@ -915,7 +925,11 @@ export default function EodPage() {
                           const c = a ? String(Math.round((parseFloat(a) || 0) / value)) : ''
                           const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
                           setDenoms(newDenoms)
-                          updateTotal(newDenoms)
+                          const newCoinOverride = isCoin ? '' : coinSubtotalOverride
+                          const newBillOverride = !isCoin ? '' : billSubtotalOverride
+                          if (isCoin) setCoinSubtotalOverride('')
+                          else setBillSubtotalOverride('')
+                          recomputeCashTotal(newDenoms, newCoinOverride, newBillOverride)
                         }}
                         placeholder="금액"
                         className="h-8 w-20 text-center text-xs px-1"
@@ -923,15 +937,39 @@ export default function EodPage() {
                     </div>
                   )
                 }
+                const SubtotalRow = ({ label, computed, override, setOverride, isCoin }: {
+                  label: string; computed: number; override: string;
+                  setOverride: (v: string) => void; isCoin: boolean
+                }) => (
+                  <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-dashed">
+                    <span className="w-9 shrink-0" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">{label}</span>
+                    <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
+                      onChange={e => {
+                        setOverride(e.target.value)
+                        recomputeCashTotal(denoms, isCoin ? e.target.value : coinSubtotalOverride, isCoin ? billSubtotalOverride : e.target.value)
+                      }}
+                      placeholder="0.00"
+                      className="h-8 w-20 text-center text-xs px-1 font-semibold"
+                    />
+                  </div>
+                )
                 return (
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-4">
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
                       <div className="space-y-1.5">{coins.map(renderRow)}</div>
+                      <SubtotalRow label="Coin Total" computed={computedCoinTotal} override={coinSubtotalOverride} setOverride={setCoinSubtotalOverride} isCoin={true} />
                     </div>
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
                       <div className="space-y-1.5">{bills.map(renderRow)}</div>
+                      <SubtotalRow label="Bill Total" computed={computedBillTotal} override={billSubtotalOverride} setOverride={setBillSubtotalOverride} isCoin={false} />
                     </div>
                   </div>
                 )
@@ -989,12 +1027,6 @@ export default function EodPage() {
                       <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold">
                         ${grossRevenue.toFixed(2)}
                       </div>
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Net Revenue</Label>
-                    <div className="flex h-9 w-full items-center rounded-md border border-input bg-emerald-50 px-3 text-sm font-semibold text-emerald-800">
-                      ${netRevenue.toFixed(2)}
                     </div>
                   </div>
                 </div>
@@ -1127,19 +1159,6 @@ export default function EodPage() {
                     <tr><td colSpan={8} className="text-center text-muted-foreground py-4 text-sm">No staff added. Click &quot;Add Staff&quot; above.</td></tr>
                   )}
                 </tbody>
-                {tipRows.length > 0 && (
-                  <tfoot>
-                    <tr className="border-t">
-                      <td className="pt-2 font-semibold">Total</td>
-                      <td />
-                      <td className="pt-2 text-muted-foreground text-xs">{formatHours(tipRows.reduce((s, r) => s + r.hours_worked, 0))}</td>
-                      <td />
-                      <td className="pt-2 font-bold text-green-700">${tipResults.reduce((s, r) => s + r.net_tip, 0).toFixed(2)}</td>
-                      <td />
-                      <td />
-                    </tr>
-                  </tfoot>
-                )}
               </table>
               </div>
               <div className={`mt-5 rounded-xl border px-4 py-4 text-center ${
