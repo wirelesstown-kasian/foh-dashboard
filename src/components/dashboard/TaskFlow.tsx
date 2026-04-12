@@ -220,8 +220,15 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
   const handlePhaseBack = async () => {
     if (!session) return
-    const phaseIdx = PHASE_ORDER.indexOf(currentPhase)
-    if (phaseIdx <= 0) return
+    // use raw session phase, not the sanitized currentPhase
+    const rawPhase = session.current_phase
+    if (rawPhase === 'pre_shift') {
+      await supabase.from('daily_sessions').update({ current_phase: 'register_open' }).eq('id', session.id)
+      onRefresh()
+      return
+    }
+    const phaseIdx = PHASE_ORDER.indexOf(rawPhase)
+    if (phaseIdx <= 1) return
     const prevPhase = PHASE_ORDER[phaseIdx - 1]
     await supabase.from('daily_sessions').update({ current_phase: prevPhase }).eq('id', session.id)
     onRefresh()
