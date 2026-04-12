@@ -22,6 +22,7 @@ interface Props {
 
 const PHASE_ORDER: SessionPhase[] = ['pre_shift', 'operation', 'closing']
 const PHASE_LABELS: Record<SessionPhase, string> = {
+  register_open: 'Register Open',
   pre_shift: 'Pre-Shift',
   operation: 'Operations',
   closing: 'Closing',
@@ -54,10 +55,13 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   const prevAllCurrentDoneRef = useRef(false)
 
   const todayDow = getBusinessDate().getDay()
-  const currentPhase: SessionPhase = session?.current_phase ?? 'pre_shift'
+  const currentPhase: SessionPhase = (session?.current_phase && session.current_phase !== 'register_open')
+    ? session.current_phase
+    : 'pre_shift'
 
   const phaseCategory = (phase: SessionPhase) => {
     const typeMap: Record<SessionPhase, string> = {
+      register_open: 'pre_shift',
       pre_shift: 'pre_shift',
       operation: 'operation',
       closing: 'closing',
@@ -263,7 +267,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
     await supabase.from('task_completions').delete().eq('session_date', today)
     if (session) {
-      await supabase.from('daily_sessions').update({ current_phase: 'pre_shift' }).eq('id', session.id)
+      await supabase.from('daily_sessions').update({ current_phase: 'register_open' }).eq('id', session.id)
     }
     setShowResetPin(false)
     setShowSummary(false)

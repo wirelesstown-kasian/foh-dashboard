@@ -11,6 +11,7 @@ import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
 import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
+import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format } from 'date-fns'
 
 const isSystemClockTask = (task: Task) => {
@@ -148,6 +149,21 @@ export default function DashboardPage() {
   const completedTasks = new Set(completions.filter(completion => isCompletedCompletion(completion) && visibleTaskIds.has(completion.task_id)).map(completion => completion.task_id)).size
   const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
 
+  // Show Register Open screen when session hasn't started yet or is in register_open phase
+  if (!session || session.current_phase === 'register_open') {
+    return (
+      <div className="flex min-h-full flex-col">
+        <RegisterOpenPanel
+          session={session}
+          employees={employees}
+          today={today}
+          businessDate={businessDate}
+          onComplete={load}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-full flex-col">
       <div className="space-y-2.5 border-b bg-white px-4 py-3">
@@ -198,19 +214,6 @@ export default function DashboardPage() {
               onBlur={saveNotes}
             />
             {notesSaved && <span className="shrink-0 self-center text-xs text-green-600">Saved</span>}
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Starting Cash</span>
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={startingCash}
-              onChange={e => setStartingCash(e.target.value)}
-              onBlur={saveStartingCash}
-              placeholder="0.00"
-              className="w-24 h-8 text-sm"
-            />
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 export type EmployeeRole = string
 export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
-export type SessionPhase = 'pre_shift' | 'operation' | 'closing' | 'complete'
+export type SessionPhase = 'register_open' | 'pre_shift' | 'operation' | 'closing' | 'complete'
 export type ScheduleDepartment = 'foh' | 'boh'
 export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
 export type TaskCompletionStatus = 'complete' | 'incomplete'
@@ -74,6 +74,7 @@ export interface DailySession {
   notes: string | null
   completed_at: string | null
   starting_cash: number | null
+  register_opened_by: string | null
 }
 
 export interface EodReport {
