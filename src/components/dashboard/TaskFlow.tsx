@@ -20,7 +20,7 @@ interface Props {
   onRefresh: () => void
 }
 
-const PHASE_ORDER: SessionPhase[] = ['pre_shift', 'operation', 'closing']
+const PHASE_ORDER: SessionPhase[] = ['register_open', 'pre_shift', 'operation', 'closing']
 const PHASE_LABELS: Record<SessionPhase, string> = {
   register_open: 'Register Open',
   pre_shift: 'Pre-Shift',
@@ -221,7 +221,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   const handlePhaseBack = async () => {
     if (!session) return
     const phaseIdx = PHASE_ORDER.indexOf(currentPhase)
-    if (phaseIdx <= 0) return
+    if (phaseIdx <= 1) return // don't go back to register_open from here
     const prevPhase = PHASE_ORDER[phaseIdx - 1]
     await supabase.from('daily_sessions').update({ current_phase: prevPhase }).eq('id', session.id)
     onRefresh()
