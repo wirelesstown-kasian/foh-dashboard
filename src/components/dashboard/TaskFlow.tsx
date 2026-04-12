@@ -374,19 +374,9 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
         })}
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-white">
+      <div className="flex flex-col overflow-hidden rounded-xl border bg-white">
         <div className="flex items-center justify-between gap-2 border-b bg-gray-50 p-3">
           <div className="flex items-center gap-2">
-            {currentPhase === 'pre_shift' && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2 text-xs text-muted-foreground"
-                onClick={handlePhaseBack}
-              >
-                <ChevronLeft className="h-3 w-3 mr-1" /> Register
-              </Button>
-            )}
             <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
           </div>
           <div className="flex items-center gap-2">
@@ -509,7 +499,11 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
       <div className="mt-4 flex items-center justify-between">
         <div>
-          {currentPhase !== 'pre_shift' && (
+          {currentPhase === 'pre_shift' ? (
+            <Button variant="outline" onClick={handlePhaseBack}>
+              <ChevronLeft className="mr-1 h-4 w-4" /> Register
+            </Button>
+          ) : (
             <Button variant="outline" onClick={handlePhaseBack}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back
             </Button>
