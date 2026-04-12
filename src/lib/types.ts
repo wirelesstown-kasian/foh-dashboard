@@ -73,6 +73,7 @@ export interface DailySession {
   current_phase: SessionPhase
   notes: string | null
   completed_at: string | null
+  starting_cash: number | null
 }
 
 export interface EodReport {
@@ -86,6 +87,7 @@ export interface EodReport {
   cash_tip: number
   tip_total: number
   cash_deposit: number
+  sales_tax: number | null
   memo: string | null
   created_at: string
   updated_at: string

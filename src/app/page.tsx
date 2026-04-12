@@ -10,6 +10,7 @@ import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
 import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
 import { format } from 'date-fns'
 
 const isSystemClockTask = (task: Task) => {
@@ -30,6 +31,7 @@ export default function DashboardPage() {
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [notes, setNotes] = useState('')
   const [notesSaved, setNotesSaved] = useState(false)
+  const [startingCash, setStartingCash] = useState<string>('')
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const isResolvedCompletion = (completion: TaskCompletion) =>
@@ -72,6 +74,7 @@ export default function DashboardPage() {
       setClockRecords(clockRes.records ?? [])
       setSession(loadedSession)
       setNotes(loadedSession?.notes ?? '')
+      setStartingCash(loadedSession?.starting_cash != null ? String(loadedSession.starting_cash) : '')
       if (clockRes.error) {
         setLoadError(`Clock system offline: ${clockRes.error}`)
       }
@@ -118,6 +121,16 @@ export default function DashboardPage() {
     }
     setNotesSaved(true)
     setTimeout(() => setNotesSaved(false), 2000)
+    await load()
+  }
+
+  const saveStartingCash = async () => {
+    const value = parseFloat(startingCash) || 0
+    if (session) {
+      await supabase.from('daily_sessions').update({ starting_cash: value }).eq('id', session.id)
+    } else {
+      await supabase.from('daily_sessions').insert({ session_date: today, starting_cash: value, current_phase: 'pre_shift' })
+    }
     await load()
   }
 
@@ -185,6 +198,19 @@ export default function DashboardPage() {
               onBlur={saveNotes}
             />
             {notesSaved && <span className="shrink-0 self-center text-xs text-green-600">Saved</span>}
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Starting Cash</span>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={startingCash}
+              onChange={e => setStartingCash(e.target.value)}
+              onBlur={saveStartingCash}
+              placeholder="0.00"
+              className="w-24 h-8 text-sm"
+            />
           </div>
         </div>
       </div>

@@ -295,9 +295,11 @@ export async function POST(req: NextRequest) {
         <tr><td>Cash Total</td><td style="text-align:right">$${Number(report.cash_total).toFixed(2)}</td></tr>
         <tr><td>Batch Total</td><td style="text-align:right">$${Number(report.batch_total).toFixed(2)}</td></tr>
         <tr style="background:#f5f5f5"><td><strong>Gross Revenue</strong></td><td style="text-align:right"><strong>$${Number(report.revenue_total).toFixed(2)}</strong></td></tr>
+        <tr><td>Sales Tax</td><td style="text-align:right">$${Number(report.sales_tax ?? 0).toFixed(2)}</td></tr>
+        <tr><td>Tip Total</td><td style="text-align:right">$${Number(report.tip_total).toFixed(2)}</td></tr>
+        <tr style="background:#e8f5e9"><td><strong>Net Revenue</strong></td><td style="text-align:right"><strong>$${(Number(report.revenue_total) - Number(report.sales_tax ?? 0) - Number(report.tip_total)).toFixed(2)}</strong></td></tr>
         <tr><td>CC Tips</td><td style="text-align:right">$${Number(report.cc_tip).toFixed(2)}</td></tr>
         <tr><td>Cash Tips</td><td style="text-align:right">$${Number(report.cash_tip).toFixed(2)}</td></tr>
-        <tr style="background:#f5f5f5"><td><strong>Tip Total</strong></td><td style="text-align:right"><strong>$${Number(report.tip_total).toFixed(2)}</strong></td></tr>
         <tr><td>Cash Deposit</td><td style="text-align:right">$${Number(report.cash_deposit).toFixed(2)}</td></tr>
       </table>
       ${memoHtml}
