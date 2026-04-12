@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
         scheduled_end: schedule?.end_time ?? null,
       }
     })
-    const emailPromises: Promise<void>[] = []
+    const emailQueue: (() => Promise<void>)[] = []
 
     const { data: shiftClocks } = await supabaseAdmin
       .from('shift_clocks')
@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
         <p style="color:#aaa;font-size:11px;margin-top:4px">New Village Pub · FOH Dashboard</p>
     `, 480)
     if (emailSettings.eod_tip_emails_enabled) {
-      emailPromises.push(
+      emailQueue.push(() =>
         sendEmail({
           resendKey,
           to: dist.employee.email,
@@ -309,7 +309,7 @@ export async function POST(req: NextRequest) {
       <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
   `)
     if (emailSettings.eod_admin_summary_enabled) {
-    emailPromises.push(
+    emailQueue.push(() =>
       sendEmail({
         resendKey,
         to: emailSettings.eod_report_email,
@@ -413,7 +413,7 @@ export async function POST(req: NextRequest) {
       `, 640)
 
       if (emailSettings.eod_admin_summary_enabled) {
-        emailPromises.push(
+        emailQueue.push(() =>
           sendEmail({
             resendKey,
             to: emailSettings.eod_report_email,
@@ -428,14 +428,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-    // Send sequentially to avoid Resend rate limits
+    // Send sequentially to avoid Resend rate limits (queue holds fns, not started promises)
     let sent = 0
     const errors: string[] = []
-    for (const promise of emailPromises) {
+    for (const send of emailQueue) {
       try {
-        await promise
+        await send()
         sent++
-        if (sent < emailPromises.length) {
+        if (sent < emailQueue.length) {
           await new Promise(resolve => setTimeout(resolve, 350))
         }
       } catch (err) {
