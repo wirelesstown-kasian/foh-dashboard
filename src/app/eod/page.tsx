@@ -162,9 +162,12 @@ export default function EodPage() {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const [startingCash, setStartingCash] = useState<number>(0)
-  const [denoms, setDenoms] = useState<Record<string, string>>({
-    d100: '', d50: '', d20: '', d10: '', d5: '',
-    d1: '', c25: '', c10: '', c5: '', c1: '',
+  const [denoms, setDenoms] = useState<Record<string, { count: string; amount: string }>>({
+    d100: { count: '', amount: '' }, d50: { count: '', amount: '' },
+    d20: { count: '', amount: '' },  d10: { count: '', amount: '' },
+    d5:  { count: '', amount: '' },  d1:  { count: '', amount: '' },
+    c25: { count: '', amount: '' },  c10: { count: '', amount: '' },
+    c5:  { count: '', amount: '' },  c1:  { count: '', amount: '' },
   })
 
   const [form, setForm] = useState({
@@ -285,7 +288,7 @@ export default function EodPage() {
     d1: 1, c25: 0.25, c10: 0.10, c5: 0.05, c1: 0.01,
   }
   const registerTotal = Object.entries(denoms).reduce(
-    (sum, [key, val]) => sum + (parseInt(val) || 0) * DENOM_VALUES[key],
+    (sum, [key, { count }]) => sum + (parseInt(count) || 0) * DENOM_VALUES[key],
     0
   )
   const cashFromDrawer = Math.max(0, registerTotal - startingCash)
@@ -871,36 +874,52 @@ export default function EodPage() {
                   { key: 'd5',   label: '$5',   value: 5 },
                   { key: 'd1',   label: '$1',   value: 1 },
                 ]
+                const updateTotal = (newDenoms: typeof denoms) => {
+                  const hasAny = Object.values(newDenoms).some(d => d.count !== '')
+                  if (hasAny) {
+                    const total = Object.entries(newDenoms).reduce(
+                      (s, [k, d]) => s + (parseInt(d.count) || 0) * DENOM_VALUES[k],
+                      0
+                    )
+                    setField('cash_total', Math.max(0, total - startingCash).toFixed(2))
+                  }
+                }
                 const renderRow = ({ key, label, value }: { key: string; label: string; value: number }) => {
-                  const count = parseInt(denoms[key]) || 0
-                  const amount = count * value
+                  const { count, amount } = denoms[key]
                   return (
-                    <div key={key} className="flex items-center gap-2">
-                      <span className="w-10 text-right text-sm font-semibold text-slate-600">{label}</span>
+                    <div key={key} className="flex items-center gap-1.5">
+                      <span className="w-9 text-right text-sm font-semibold text-slate-600 shrink-0">{label}</span>
                       <Input
                         type="number"
                         min="0"
                         step="1"
-                        value={denoms[key]}
+                        value={count}
                         onChange={e => {
-                          const val = e.target.value
-                          const newDenoms = { ...denoms, [key]: val }
+                          const c = e.target.value
+                          const a = c ? ((parseInt(c) || 0) * value).toFixed(2) : ''
+                          const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
                           setDenoms(newDenoms)
-                          const hasAny = Object.values(newDenoms).some(v => v !== '')
-                          if (hasAny) {
-                            const total = Object.entries(newDenoms).reduce(
-                              (s, [k, v]) => s + (parseInt(v) || 0) * DENOM_VALUES[k],
-                              0
-                            )
-                            setField('cash_total', Math.max(0, total - startingCash).toFixed(2))
-                          }
+                          updateTotal(newDenoms)
                         }}
-                        placeholder="0"
-                        className="h-8 w-16 text-center text-sm px-1"
+                        placeholder="개수"
+                        className="h-8 w-16 text-center text-xs px-1"
                       />
-                      <span className="w-20 text-sm font-medium text-slate-500">
-                        {count > 0 ? `= $${amount.toFixed(2)}` : ''}
-                      </span>
+                      <span className="text-xs text-muted-foreground shrink-0">×</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={amount}
+                        onChange={e => {
+                          const a = e.target.value
+                          const c = a ? String(Math.round((parseFloat(a) || 0) / value)) : ''
+                          const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
+                          setDenoms(newDenoms)
+                          updateTotal(newDenoms)
+                        }}
+                        placeholder="금액"
+                        className="h-8 w-20 text-center text-xs px-1"
+                      />
                     </div>
                   )
                 }
