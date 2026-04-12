@@ -425,11 +425,14 @@ export default function EodPage() {
         body: JSON.stringify({ eod_report_id: currentReportId }),
       })
       const data = await res.json().catch(() => ({})) as { success?: boolean; sent?: number; errors?: string[]; error?: string }
-      if (!res.ok || data.success === false) {
-        const message = data.errors?.join(' ') || data.error || 'Failed to send emails. Please try again.'
+      if (res.status >= 500 || (!res.ok && res.status !== 207)) {
+        const message = data.error || 'Failed to send emails. Please try again.'
         throw new Error(message)
       }
-      setSubmitResult({ success: true, message: `EOD report and tip emails sent successfully${typeof data.sent === 'number' ? ` (${data.sent} sent)` : '!'}` })
+      // 207 = partial success (some sent, some failed e.g. missing email address)
+      const sentCount = typeof data.sent === 'number' ? data.sent : null
+      const partialNote = data.errors?.length ? ` (${data.errors.length} skipped — missing email)` : ''
+      setSubmitResult({ success: true, message: `EOD report sent${sentCount !== null ? ` — ${sentCount} email${sentCount !== 1 ? 's' : ''} delivered` : ''}${partialNote}.` })
       setSubmissionComplete(true)
       setShowConfirm(false)
     } catch (error) {
