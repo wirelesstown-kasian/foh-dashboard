@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { APP_SESSION_COOKIE, parseAppSessionValue } from '@/lib/appAuth'
 import { getEmailSettings } from '@/lib/appSettings'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
@@ -52,14 +49,6 @@ function getRank<T>(items: T[], getValue: (item: T) => number, idKey: keyof T, t
 }
 
 export async function POST(req: NextRequest) {
-  const cookieStore = await cookies()
-  const isAdminSession = isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
-  const appSession = parseAppSessionValue(cookieStore.get(APP_SESSION_COOKIE)?.value)
-
-  if (!isAdminSession && !appSession) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
     const { eod_report_id } = await req.json()
     if (!eod_report_id) return NextResponse.json({ error: 'Missing eod_report_id' }, { status: 400 })
