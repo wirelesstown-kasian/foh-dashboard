@@ -31,6 +31,7 @@ import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import { Employee, EodReport, ShiftClock } from '@/lib/types'
+import { getCashVariance, getExpectedCashDeposit } from '@/lib/eodVariance'
 
 function isEodCloserRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
@@ -73,6 +74,8 @@ const EMPTY_FORM = {
   batch_total: '',
   cc_tip: '',
   cash_tip: '',
+  actual_cash_on_hand: '',
+  variance_note: '',
   memo: '',
 }
 
@@ -115,9 +118,10 @@ export default function EodHistoryPage() {
             tip: sum.tip + report.tip_total,
             net: sum.net + (report.revenue_total - tax - report.tip_total),
             deposit: sum.deposit + report.cash_deposit,
+            variance: sum.variance + Number(report.cash_variance ?? 0),
           }
         },
-        { cash: 0, batch: 0, revenue: 0, tax: 0, tip: 0, net: 0, deposit: 0 }
+        { cash: 0, batch: 0, revenue: 0, tax: 0, tip: 0, net: 0, deposit: 0, variance: 0 }
       ),
     [filteredEodReports]
   )
@@ -145,6 +149,8 @@ export default function EodHistoryPage() {
       batch_total: String(report.batch_total),
       cc_tip: String(report.cc_tip),
       cash_tip: String(report.cash_tip),
+      actual_cash_on_hand: String(report.actual_cash_on_hand ?? 0),
+      variance_note: report.variance_note ?? '',
       memo: report.memo ?? '',
     })
     setSaveError(null)
@@ -165,6 +171,9 @@ export default function EodHistoryPage() {
       const batchTotal = Number(form.batch_total || 0)
       const ccTip = Number(form.cc_tip || 0)
       const cashTip = Number(form.cash_tip || 0)
+      const actualCashOnHand = Number(form.actual_cash_on_hand || 0)
+      const expectedCash = getExpectedCashDeposit(cashTotal, cashTip)
+      const cashVariance = getCashVariance(actualCashOnHand, cashTotal, cashTip)
 
       const payload = {
         session_date: form.session_date,
@@ -175,7 +184,10 @@ export default function EodHistoryPage() {
         cc_tip: ccTip,
         cash_tip: cashTip,
         tip_total: ccTip + cashTip,
-        cash_deposit: cashTotal + cashTip,
+        cash_deposit: expectedCash,
+        actual_cash_on_hand: actualCashOnHand,
+        cash_variance: cashVariance,
+        variance_note: form.variance_note.trim() || null,
         memo: form.memo.trim() || null,
       }
 
@@ -249,6 +261,17 @@ export default function EodHistoryPage() {
       }
 
       const nextReport = refreshedReport as EodReport
+
+      const sheetSync = await fetch('/api/eod-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_id: reportId }),
+      })
+      if (!sheetSync.ok) {
+        const payload = await sheetSync.json().catch(() => ({})) as { error?: string }
+        setSaveError(`Manual EOD entry saved, but Google Sheets sync failed: ${payload.error ?? 'unknown error'}`)
+      }
+
       setReports(current => {
         const remaining = current.filter(report => report.id !== nextReport.id)
         return [...remaining, nextReport].sort((a, b) => (a.session_date < b.session_date ? 1 : -1))
@@ -293,6 +316,8 @@ export default function EodHistoryPage() {
               <TableHead className="text-right">Tip Total</TableHead>
               <TableHead className="text-right text-emerald-700">Net Revenue</TableHead>
               <TableHead className="text-right">Cash Deposit</TableHead>
+              <TableHead className="text-right">Actual Cash</TableHead>
+              <TableHead className="text-right">Variance</TableHead>
               <TableHead>Memo</TableHead>
             </TableRow>
           </TableHeader>
@@ -307,9 +332,11 @@ export default function EodHistoryPage() {
                 <TableCell className="text-right text-green-700">{formatCurrency(report.tip_total)}</TableCell>
                 <TableCell className="text-right font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0) - report.tip_total)}</TableCell>
                 <TableCell className="text-right">{formatCurrency(report.cash_deposit)}</TableCell>
+                <TableCell className="text-right">{formatCurrency(report.actual_cash_on_hand ?? 0)}</TableCell>
+                <TableCell className={`text-right font-semibold ${Number(report.cash_variance ?? 0) === 0 ? '' : Number(report.cash_variance ?? 0) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(report.cash_variance ?? 0)}</TableCell>
                 <TableCell className="max-w-xs text-sm text-muted-foreground">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate">{report.memo ?? '—'}</span>
+                    <span className="truncate">{report.variance_note ?? report.memo ?? '—'}</span>
                     <Button size="sm" variant="outline" onClick={() => openEditDialog(report)}>
                       Edit
                     </Button>
@@ -319,7 +346,7 @@ export default function EodHistoryPage() {
             ))}
             {filteredEodReports.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
+                <TableCell colSpan={11} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -334,6 +361,8 @@ export default function EodHistoryPage() {
                 <TableCell className="text-right font-semibold text-green-700">{formatCurrency(totals.tip)}</TableCell>
                 <TableCell className="text-right font-bold text-emerald-700">{formatCurrency(totals.net)}</TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(totals.deposit)}</TableCell>
+                <TableCell />
+                <TableCell className={`text-right font-semibold ${totals.variance === 0 ? '' : totals.variance > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(totals.variance)}</TableCell>
                 <TableCell />
               </TableRow>
             </tfoot>
@@ -417,6 +446,27 @@ export default function EodHistoryPage() {
                 className="mt-1"
               />
             </div>
+            <div>
+              <Label>Actual Cash on Hand</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.actual_cash_on_hand}
+                onChange={event => setForm(current => ({ ...current, actual_cash_on_hand: event.target.value }))}
+                className="mt-1"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Variance Note</Label>
+            <Textarea
+              value={form.variance_note}
+              onChange={event => setForm(current => ({ ...current, variance_note: event.target.value }))}
+              className="mt-1"
+              rows={3}
+              placeholder="Explain any over / short amount"
+            />
           </div>
 
           <div>

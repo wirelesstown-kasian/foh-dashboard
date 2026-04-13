@@ -275,6 +275,9 @@ export async function POST(req: NextRequest) {
     const memoHtml = report.memo
       ? `<p><strong>Memo:</strong> ${escapeHtml(report.memo)}</p>`
       : ''
+    const varianceNoteHtml = report.variance_note
+      ? `<p><strong>Variance Note:</strong> ${escapeHtml(report.variance_note)}</p>`
+      : ''
 
     const tipRows = tipDists.map(d =>
     `<tr>
@@ -300,8 +303,11 @@ export async function POST(req: NextRequest) {
         <tr style="background:#e8f5e9"><td><strong>Net Revenue</strong></td><td style="text-align:right"><strong>$${(Number(report.revenue_total) - Number(report.sales_tax ?? 0) - Number(report.tip_total)).toFixed(2)}</strong></td></tr>
         <tr><td>CC Tips</td><td style="text-align:right">$${Number(report.cc_tip).toFixed(2)}</td></tr>
         <tr><td>Cash Tips</td><td style="text-align:right">$${Number(report.cash_tip).toFixed(2)}</td></tr>
-        <tr><td>Cash Deposit</td><td style="text-align:right">$${Number(report.cash_deposit).toFixed(2)}</td></tr>
+        <tr><td>Expected Cash</td><td style="text-align:right">$${Number(report.cash_deposit).toFixed(2)}</td></tr>
+        <tr><td>Actual Cash on Hand</td><td style="text-align:right">$${Number(report.actual_cash_on_hand ?? 0).toFixed(2)}</td></tr>
+        <tr><td>Variance</td><td style="text-align:right">$${Number(report.cash_variance ?? 0).toFixed(2)}</td></tr>
       </table>
+      ${varianceNoteHtml}
       ${memoHtml}
       <h3>Tip Distribution</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">

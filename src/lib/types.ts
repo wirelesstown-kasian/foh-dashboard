@@ -88,6 +88,9 @@ export interface EodReport {
   cash_tip: number
   tip_total: number
   cash_deposit: number
+  actual_cash_on_hand: number
+  cash_variance: number
+  variance_note: string | null
   sales_tax: number | null
   memo: string | null
   created_at: string
