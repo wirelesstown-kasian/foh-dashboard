@@ -1,18 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { APP_SESSION_COOKIE, parseAppSessionValue } from '@/lib/appAuth'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { syncEodReportToGoogleSheet } from '@/lib/eodGoogleSheet'
 
 export async function POST(req: NextRequest) {
-  const cookieStore = await cookies()
-  const isAdminSession = isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
-  const appSession = parseAppSessionValue(cookieStore.get(APP_SESSION_COOKIE)?.value)
-
-  if (!isAdminSession && !appSession) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
 
   try {
     const { report_id } = await req.json() as { report_id?: string }
