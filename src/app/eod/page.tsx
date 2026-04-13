@@ -625,7 +625,8 @@ export default function EodPage() {
     form.cash_total.trim() !== '' &&
     form.batch_total.trim() !== '' &&
     form.cc_tip.trim() !== '' &&
-    form.cash_tip.trim() !== ''
+    form.cash_tip.trim() !== '' &&
+    form.sales_tax.trim() !== ''
   const financialStepState: 'saved' | 'dirty' | 'locked' =
     financialsSaved ? 'saved' : canSaveFinancials ? 'dirty' : 'locked'
   const tipStepState: 'saved' | 'dirty' | 'ready' | 'locked' =
