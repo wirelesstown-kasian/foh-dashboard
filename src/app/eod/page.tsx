@@ -27,7 +27,6 @@ import { Lock, Plus, Trash2, Send, CheckCircle2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { PinModal } from '@/components/layout/PinModal'
 import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
-import { getCashVariance, getExpectedCashDeposit } from '@/lib/eodVariance'
 
 interface TipRow {
   employee_id: string
@@ -161,7 +160,6 @@ export default function EodPage() {
   const [financialsSaved, setFinancialsSaved] = useState(false)
   const [tipDistributionSaved, setTipDistributionSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [saveNotice, setSaveNotice] = useState<string | null>(null)
 
   const [startingCash, setStartingCash] = useState<number>(0)
   const [coinSubtotalOverride, setCoinSubtotalOverride] = useState<string>('')
@@ -179,10 +177,8 @@ export default function EodPage() {
     batch_total: '',
     cc_tip: '',
     cash_tip: '',
-    actual_cash_on_hand: '',
     sales_tax: '',
     memo: '',
-    variance_note: '',
     closed_by: '',
   })
   const [tipRows, setTipRows] = useState<TipRow[]>([])
@@ -216,10 +212,8 @@ export default function EodPage() {
         batch_total: String(eod.batch_total),
         cc_tip: String(eod.cc_tip),
         cash_tip: String(eod.cash_tip),
-        actual_cash_on_hand: String(eod.actual_cash_on_hand ?? 0),
         sales_tax: eod.sales_tax != null ? String(eod.sales_tax) : '',
         memo: eod.memo ?? '',
-        variance_note: eod.variance_note ?? '',
         closed_by: eod.closed_by_employee_id ?? '',
       })
       setTipRows((eod.tip_distributions ?? [])
@@ -308,9 +302,7 @@ export default function EodPage() {
   const salesTax = parseFloat(form.sales_tax) || 0
   const netRevenue = grossRevenue - salesTax
   const tipTotal = (parseFloat(form.cc_tip) || 0) + (parseFloat(form.cash_tip) || 0)
-  const totalCashDeposit = getExpectedCashDeposit(parseFloat(form.cash_total) || 0, parseFloat(form.cash_tip) || 0)
-  const actualCashOnHand = parseFloat(form.actual_cash_on_hand) || 0
-  const cashVariance = getCashVariance(actualCashOnHand, parseFloat(form.cash_total) || 0, parseFloat(form.cash_tip) || 0)
+  const totalCashDeposit = (parseFloat(form.cash_total) || 0) + (parseFloat(form.cash_tip) || 0)
 
   const tipResults = calculateTips(
     tipTotal,
@@ -322,7 +314,6 @@ export default function EodPage() {
 
   const setField = (field: string, value: string) => {
     setFinancialsSaved(false)
-    setSaveNotice(null)
     setForm(f => ({ ...f, [field]: value }))
   }
 
@@ -368,15 +359,13 @@ export default function EodPage() {
     window.localStorage.setItem(getTipDraftKey(today), JSON.stringify(tipRows))
     setTipDistributionSaved(true)
     setSaveError(null)
-    setSaveNotice(null)
   }
 
   const handleFinancialSave = async () => {
     window.localStorage.setItem(getFinancialDraftKey(today), JSON.stringify(form))
     setFinancialsSaved(true)
     setSaveError(null)
-    setSaveNotice(null)
-    setShowFinancialConfirm(true)
+    setShowFinancialConfirm(false)
   }
 
   const saveTipDistributions = async (reportId: string) => {
@@ -402,7 +391,6 @@ export default function EodPage() {
   const handleSave = async () => {
     setSaving(true)
     setSaveError(null)
-    setSaveNotice(null)
     try {
       const payload = {
         session_date: today,
@@ -414,9 +402,6 @@ export default function EodPage() {
         cash_tip: parseFloat(form.cash_tip) || 0,
         tip_total: tipTotal,
         cash_deposit: totalCashDeposit,
-        actual_cash_on_hand: actualCashOnHand,
-        cash_variance: cashVariance,
-        variance_note: form.variance_note.trim() || null,
         sales_tax: salesTax,
         memo: form.memo || null,
         updated_at: new Date().toISOString(),
@@ -441,10 +426,7 @@ export default function EodPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report_id: reportId }),
       })
-      if (!sheetSync.ok) {
-        const sheetPayload = await sheetSync.json().catch(() => ({})) as { error?: string }
-        setSaveNotice(`EOD saved, but Google Sheets sync failed: ${sheetPayload.error ?? 'unknown error'}`)
-      }
+      void sheetSync
       await load()
       window.localStorage.removeItem(getFinancialDraftKey(today))
       window.localStorage.removeItem(getTipDraftKey(today))
@@ -592,10 +574,7 @@ export default function EodPage() {
               <div className="flex justify-between"><span className="text-muted-foreground">CC Tips</span><span>${(parseFloat(form.cc_tip) || 0).toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Cash Tips</span><span>${(parseFloat(form.cash_tip) || 0).toFixed(2)}</span></div>
               <div className="flex justify-between font-semibold border-t pt-2"><span>Tip Total</span><span className="text-green-700">${tipTotal.toFixed(2)}</span></div>
-              <div className="flex justify-between font-semibold"><span>Expected Cash</span><span>${totalCashDeposit.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Actual Cash on Hand</span><span>${actualCashOnHand.toFixed(2)}</span></div>
-              <div className="flex justify-between font-semibold"><span>Variance</span><span className={cashVariance === 0 ? '' : cashVariance > 0 ? 'text-emerald-700' : 'text-red-700'}>${cashVariance.toFixed(2)}</span></div>
-              {form.variance_note && <div className="border-t pt-2 text-muted-foreground">{form.variance_note}</div>}
+              <div className="flex justify-between font-semibold"><span>Total Cash Deposit</span><span>${totalCashDeposit.toFixed(2)}</span></div>
               {form.memo && <div className="border-t pt-2 text-muted-foreground italic">{form.memo}</div>}
             </div>
 
@@ -646,8 +625,7 @@ export default function EodPage() {
     form.cash_total.trim() !== '' &&
     form.batch_total.trim() !== '' &&
     form.cc_tip.trim() !== '' &&
-    form.cash_tip.trim() !== '' &&
-    form.actual_cash_on_hand.trim() !== ''
+    form.cash_tip.trim() !== ''
   const financialStepState: 'saved' | 'dirty' | 'locked' =
     financialsSaved ? 'saved' : canSaveFinancials ? 'dirty' : 'locked'
   const tipStepState: 'saved' | 'dirty' | 'ready' | 'locked' =
@@ -774,12 +752,6 @@ export default function EodPage() {
             <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
           </div>
         </div>
-
-        {saveNotice && (
-          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {saveNotice}
-          </div>
-        )}
 
         {submissionComplete ? (
           <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center p-8">
@@ -1093,22 +1065,6 @@ export default function EodPage() {
                         ${totalCashDeposit.toFixed(2)}
                       </div>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label>Actual Cash on Hand</Label>
-                      <Input type="number" step="0.01" value={form.actual_cash_on_hand} onChange={e => setField('actual_cash_on_hand', e.target.value)} placeholder="0.00" />
-                    </div>
-                    <div>
-                      <Label>Variance</Label>
-                      <div className={`flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold ${cashVariance === 0 ? '' : cashVariance > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                        ${cashVariance.toFixed(2)}
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Variance Note</Label>
-                    <Textarea value={form.variance_note} onChange={e => setField('variance_note', e.target.value)} placeholder="Explain any over / short amount…" className="h-16 resize-none" />
                   </div>
                   <div>
                     <Label>Memo</Label>

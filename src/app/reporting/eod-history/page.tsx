@@ -92,6 +92,7 @@ export default function EodHistoryPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
 
   useEffect(() => {
     setReports(eodReports)
@@ -137,6 +138,7 @@ export default function EodHistoryPage() {
       session_date: format(refDate, 'yyyy-MM-dd'),
     })
     setSaveError(null)
+    setSaveNotice(null)
     setDialogOpen(true)
   }
 
@@ -154,6 +156,7 @@ export default function EodHistoryPage() {
       memo: report.memo ?? '',
     })
     setSaveError(null)
+    setSaveNotice(null)
     setDialogOpen(true)
   }
 
@@ -165,6 +168,7 @@ export default function EodHistoryPage() {
 
     setSaving(true)
     setSaveError(null)
+    setSaveNotice(null)
 
     try {
       const cashTotal = Number(form.cash_total || 0)
@@ -280,6 +284,7 @@ export default function EodHistoryPage() {
       setDialogOpen(false)
       setEditingReportId(null)
       setForm(EMPTY_FORM)
+      setSaveNotice(`EOD report saved. Variance: ${formatCurrency(nextReport.cash_variance ?? 0)}.`)
     } finally {
       setSaving(false)
     }
@@ -295,6 +300,11 @@ export default function EodHistoryPage() {
         rightSlot={<Button onClick={openCreateDialog}>Add Manual Entry</Button>}
       />
       <div className="rounded-xl border bg-white p-5">
+        {saveNotice && (
+          <div className="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            {saveNotice}
+          </div>
+        )}
         <ReportingToolbar
           period={period}
           refDate={refDate}
@@ -375,7 +385,7 @@ export default function EodHistoryPage() {
           <DialogHeader>
             <DialogTitle>{editingReportId ? 'Edit Manual EOD Entry' : 'Add Manual EOD Entry'}</DialogTitle>
             <DialogDescription>
-              Use this for missed days or corrections. Revenue, tips, and cash deposit recalculate automatically when you save.
+              Use this for missed days or corrections. Revenue, tips, and cash audit values recalculate automatically when you save.
             </DialogDescription>
           </DialogHeader>
 
@@ -456,6 +466,31 @@ export default function EodHistoryPage() {
                 className="mt-1"
               />
             </div>
+          </div>
+
+          <div className="rounded-xl border bg-amber-50/60 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Cash Audit</div>
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <div>
+                <Label>Actual Cash on Hand</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={form.actual_cash_on_hand}
+                  onChange={event => setForm(current => ({ ...current, actual_cash_on_hand: event.target.value }))}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Variance</Label>
+                <div className={`mt-1 flex h-10 items-center rounded-md border bg-white px-3 text-sm font-semibold ${getCashVariance(Number(form.actual_cash_on_hand || 0), Number(form.cash_total || 0), Number(form.cash_tip || 0)) === 0 ? '' : getCashVariance(Number(form.actual_cash_on_hand || 0), Number(form.cash_total || 0), Number(form.cash_tip || 0)) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {formatCurrency(getCashVariance(Number(form.actual_cash_on_hand || 0), Number(form.cash_total || 0), Number(form.cash_tip || 0)))}
+                </div>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Actual Cash on Hand - (Cash Total + Cash Tip) = Variance
+            </p>
           </div>
 
           <div>
