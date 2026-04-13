@@ -90,6 +90,8 @@ export default function EodHistoryPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [inlineAudit, setInlineAudit] = useState<Record<string, { actualCash: string; varianceNote: string }>>({})
+  const [auditSavingId, setAuditSavingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
@@ -130,6 +132,20 @@ export default function EodHistoryPage() {
     () => employees.filter(employee => isEodCloserRole(employee.role)),
     [employees]
   )
+
+  useEffect(() => {
+    setInlineAudit(current => {
+      const next = { ...current }
+      for (const report of filteredEodReports) {
+        if (next[report.id]) continue
+        next[report.id] = {
+          actualCash: report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : '',
+          varianceNote: report.variance_note ?? '',
+        }
+      }
+      return next
+    })
+  }, [filteredEodReports])
 
   const openCreateDialog = () => {
     setEditingReportId(null)
@@ -290,6 +306,59 @@ export default function EodHistoryPage() {
     }
   }
 
+  const handleAuditSave = async (report: EodReport) => {
+    const currentAudit = inlineAudit[report.id] ?? { actualCash: '', varianceNote: '' }
+    if (currentAudit.actualCash.trim() === '') {
+      setSaveError('Actual cash on hand is required.')
+      return
+    }
+
+    setAuditSavingId(report.id)
+    setSaveError(null)
+    setSaveNotice(null)
+
+    try {
+      const actualCashOnHand = Number(currentAudit.actualCash || 0)
+      const cashVariance = getCashVariance(actualCashOnHand, Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0))
+
+      const { error } = await supabase
+        .from('eod_reports')
+        .update({
+          actual_cash_on_hand: actualCashOnHand,
+          cash_variance: cashVariance,
+          variance_note: currentAudit.varianceNote.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', report.id)
+
+      if (error) {
+        setSaveError(error.message)
+        return
+      }
+
+      const sheetSync = await fetch('/api/eod-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report_id: report.id }),
+      })
+      if (!sheetSync.ok) {
+        const payload = await sheetSync.json().catch(() => ({})) as { error?: string }
+        setSaveError(`Cash audit saved, but Google Sheets sync failed: ${payload.error ?? 'unknown error'}`)
+      }
+
+      notifyReportingDataChanged()
+      setReports(current => current.map(item => item.id === report.id ? {
+        ...item,
+        actual_cash_on_hand: actualCashOnHand,
+        cash_variance: cashVariance,
+        variance_note: currentAudit.varianceNote.trim() || null,
+      } : item))
+      setSaveNotice(`Cash audit saved for ${report.session_date}. Variance: ${formatCurrency(cashVariance)}.`)
+    } finally {
+      setAuditSavingId(null)
+    }
+  }
+
   return (
     <div className="p-6">
       <AdminSubpageHeader
@@ -326,9 +395,11 @@ export default function EodHistoryPage() {
               <TableHead className="text-right">Tip Total</TableHead>
               <TableHead className="text-right text-emerald-700">Net Revenue</TableHead>
               <TableHead className="text-right">Cash Deposit</TableHead>
-              <TableHead className="text-right">Actual Cash</TableHead>
+              <TableHead className="min-w-[170px]">Actual Cash</TableHead>
               <TableHead className="text-right">Variance</TableHead>
+              <TableHead className="min-w-[240px]">Variance Note</TableHead>
               <TableHead>Memo</TableHead>
+              <TableHead className="w-[96px] text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -342,21 +413,58 @@ export default function EodHistoryPage() {
                 <TableCell className="text-right text-green-700">{formatCurrency(report.tip_total)}</TableCell>
                 <TableCell className="text-right font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0) - report.tip_total)}</TableCell>
                 <TableCell className="text-right">{formatCurrency(report.cash_deposit)}</TableCell>
-                <TableCell className="text-right">{formatCurrency(report.actual_cash_on_hand ?? 0)}</TableCell>
-                <TableCell className={`text-right font-semibold ${Number(report.cash_variance ?? 0) === 0 ? '' : Number(report.cash_variance ?? 0) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(report.cash_variance ?? 0)}</TableCell>
+                <TableCell>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={inlineAudit[report.id]?.actualCash ?? ''}
+                    onChange={event => setInlineAudit(current => ({
+                      ...current,
+                      [report.id]: {
+                        actualCash: event.target.value,
+                        varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+                      },
+                    }))}
+                    placeholder="Actual cash required"
+                    className="h-9"
+                  />
+                </TableCell>
+                <TableCell className={`text-right font-semibold ${getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) === 0 ? '' : getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {formatCurrency(getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)))}
+                </TableCell>
+                <TableCell>
+                  <Textarea
+                    value={inlineAudit[report.id]?.varianceNote ?? ''}
+                    onChange={event => setInlineAudit(current => ({
+                      ...current,
+                      [report.id]: {
+                        actualCash: current[report.id]?.actualCash ?? (report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''),
+                        varianceNote: event.target.value,
+                      },
+                    }))}
+                    rows={2}
+                    placeholder="Explain any over / short amount"
+                    className="min-h-[72px] resize-none"
+                  />
+                </TableCell>
                 <TableCell className="max-w-xs text-sm text-muted-foreground">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate">{report.variance_note ?? report.memo ?? '—'}</span>
+                    <span className="truncate">{report.memo ?? '—'}</span>
                     <Button size="sm" variant="outline" onClick={() => openEditDialog(report)}>
                       Edit
                     </Button>
                   </div>
                 </TableCell>
+                <TableCell className="text-right">
+                  <Button size="sm" onClick={() => void handleAuditSave(report)} disabled={auditSavingId === report.id || !(inlineAudit[report.id]?.actualCash ?? '').trim()}>
+                    {auditSavingId === report.id ? 'Saving…' : 'Save'}
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
             {filteredEodReports.length === 0 && (
               <TableRow>
-                <TableCell colSpan={11} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
+                <TableCell colSpan={13} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -373,6 +481,8 @@ export default function EodHistoryPage() {
                 <TableCell className="text-right font-semibold">{formatCurrency(totals.deposit)}</TableCell>
                 <TableCell />
                 <TableCell className={`text-right font-semibold ${totals.variance === 0 ? '' : totals.variance > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(totals.variance)}</TableCell>
+                <TableCell />
+                <TableCell />
                 <TableCell />
               </TableRow>
             </tfoot>
