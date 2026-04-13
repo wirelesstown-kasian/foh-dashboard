@@ -387,33 +387,33 @@ export default function EodHistoryPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead className="text-right">Cash Total</TableHead>
-              <TableHead className="text-right">Batch Total</TableHead>
-              <TableHead className="text-right">Revenue Total</TableHead>
-              <TableHead className="text-right">Sales Tax</TableHead>
-              <TableHead className="text-right">Tip Total</TableHead>
-              <TableHead className="text-right text-emerald-700">Net Revenue</TableHead>
-              <TableHead className="text-right">Cash Deposit</TableHead>
-              <TableHead className="min-w-[170px]">Actual Cash</TableHead>
-              <TableHead className="text-right">Variance</TableHead>
-              <TableHead className="min-w-[240px]">Variance Note</TableHead>
-              <TableHead>Memo</TableHead>
-              <TableHead className="w-[96px] text-right">Action</TableHead>
+              <TableHead className="w-[92px]">Date</TableHead>
+              <TableHead className="w-[88px] text-right">Cash</TableHead>
+              <TableHead className="w-[88px] text-right">Batch</TableHead>
+              <TableHead className="w-[96px] text-right">Revenue</TableHead>
+              <TableHead className="w-[82px] text-right">Tax</TableHead>
+              <TableHead className="w-[82px] text-right">Tips</TableHead>
+              <TableHead className="w-[96px] text-right text-emerald-700">Net</TableHead>
+              <TableHead className="w-[96px] text-right">Deposit</TableHead>
+              <TableHead className="w-[150px]">Actual Cash</TableHead>
+              <TableHead className="w-[90px] text-right">Variance</TableHead>
+              <TableHead className="w-[180px]">Variance Note</TableHead>
+              <TableHead className="w-[120px]">Memo</TableHead>
+              <TableHead className="w-[80px] text-right">Save</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredEodReports.map(report => (
               <TableRow key={report.id}>
-                <TableCell className="font-medium">{format(new Date(`${report.session_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
-                <TableCell className="text-right">{formatCurrency(report.cash_total)}</TableCell>
-                <TableCell className="text-right">{formatCurrency(report.batch_total)}</TableCell>
-                <TableCell className="text-right font-semibold">{formatCurrency(report.revenue_total)}</TableCell>
-                <TableCell className="text-right text-muted-foreground">{formatCurrency(Number(report.sales_tax ?? 0))}</TableCell>
-                <TableCell className="text-right text-green-700">{formatCurrency(report.tip_total)}</TableCell>
-                <TableCell className="text-right font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0) - report.tip_total)}</TableCell>
-                <TableCell className="text-right">{formatCurrency(report.cash_deposit)}</TableCell>
-                <TableCell>
+                <TableCell className="py-2 text-xs font-medium">{format(new Date(`${report.session_date}T12:00:00`), 'MMM d')}</TableCell>
+                <TableCell className="py-2 text-right text-xs">{formatCurrency(report.cash_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs">{formatCurrency(report.batch_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs font-semibold">{formatCurrency(report.revenue_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs text-muted-foreground">{formatCurrency(Number(report.sales_tax ?? 0))}</TableCell>
+                <TableCell className="py-2 text-right text-xs text-green-700">{formatCurrency(report.tip_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0) - report.tip_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs">{formatCurrency(report.cash_deposit)}</TableCell>
+                <TableCell className="py-2">
                   <Input
                     type="number"
                     step="0.01"
@@ -426,14 +426,14 @@ export default function EodHistoryPage() {
                       },
                     }))}
                     placeholder="Actual cash required"
-                    className="h-9"
+                    className="h-8 text-xs"
                   />
                 </TableCell>
-                <TableCell className={`text-right font-semibold ${getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) === 0 ? '' : getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                <TableCell className={`py-2 text-right text-xs font-semibold ${getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) === 0 ? '' : getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                   {formatCurrency(getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)))}
                 </TableCell>
-                <TableCell>
-                  <Textarea
+                <TableCell className="py-2">
+                  <Input
                     value={inlineAudit[report.id]?.varianceNote ?? ''}
                     onChange={event => setInlineAudit(current => ({
                       ...current,
@@ -442,21 +442,20 @@ export default function EodHistoryPage() {
                         varianceNote: event.target.value,
                       },
                     }))}
-                    rows={2}
                     placeholder="Explain any over / short amount"
-                    className="min-h-[72px] resize-none"
+                    className="h-8 text-xs"
                   />
                 </TableCell>
-                <TableCell className="max-w-xs text-sm text-muted-foreground">
+                <TableCell className="max-w-[120px] py-2 text-xs text-muted-foreground">
                   <div className="flex items-center justify-between gap-3">
                     <span className="truncate">{report.memo ?? '—'}</span>
-                    <Button size="sm" variant="outline" onClick={() => openEditDialog(report)}>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openEditDialog(report)}>
                       Edit
                     </Button>
                   </div>
                 </TableCell>
-                <TableCell className="text-right">
-                  <Button size="sm" onClick={() => void handleAuditSave(report)} disabled={auditSavingId === report.id || !(inlineAudit[report.id]?.actualCash ?? '').trim()}>
+                <TableCell className="py-2 text-right">
+                  <Button size="sm" className="h-8 px-2 text-xs" onClick={() => void handleAuditSave(report)} disabled={auditSavingId === report.id || !(inlineAudit[report.id]?.actualCash ?? '').trim()}>
                     {auditSavingId === report.id ? 'Saving…' : 'Save'}
                   </Button>
                 </TableCell>
