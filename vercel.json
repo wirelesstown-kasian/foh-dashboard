@@ -5,6 +5,10 @@
       "schedule": "0 11 * * *"
     },
     {
+      "path": "/api/cron/send-weekly-summary-email",
+      "schedule": "0 14 * * 1"
+    },
+    {
       "path": "/api/cron/cleanup-clock-photos",
       "schedule": "15 10 * * *"
     }
