@@ -105,14 +105,19 @@ export default function EodHistoryPage() {
   const totals = useMemo(
     () =>
       filteredEodReports.reduce(
-        (sum, report) => ({
-          cash: sum.cash + report.cash_total,
-          batch: sum.batch + report.batch_total,
-          revenue: sum.revenue + report.revenue_total,
-          tip: sum.tip + report.tip_total,
-          deposit: sum.deposit + report.cash_deposit,
-        }),
-        { cash: 0, batch: 0, revenue: 0, tip: 0, deposit: 0 }
+        (sum, report) => {
+          const tax = Number(report.sales_tax ?? 0)
+          return {
+            cash: sum.cash + report.cash_total,
+            batch: sum.batch + report.batch_total,
+            revenue: sum.revenue + report.revenue_total,
+            tax: sum.tax + tax,
+            tip: sum.tip + report.tip_total,
+            net: sum.net + (report.revenue_total - tax - report.tip_total),
+            deposit: sum.deposit + report.cash_deposit,
+          }
+        },
+        { cash: 0, batch: 0, revenue: 0, tax: 0, tip: 0, net: 0, deposit: 0 }
       ),
     [filteredEodReports]
   )
@@ -284,7 +289,9 @@ export default function EodHistoryPage() {
               <TableHead className="text-right">Cash Total</TableHead>
               <TableHead className="text-right">Batch Total</TableHead>
               <TableHead className="text-right">Revenue Total</TableHead>
+              <TableHead className="text-right">Sales Tax</TableHead>
               <TableHead className="text-right">Tip Total</TableHead>
+              <TableHead className="text-right text-emerald-700">Net Revenue</TableHead>
               <TableHead className="text-right">Cash Deposit</TableHead>
               <TableHead>Memo</TableHead>
             </TableRow>
@@ -296,7 +303,9 @@ export default function EodHistoryPage() {
                 <TableCell className="text-right">{formatCurrency(report.cash_total)}</TableCell>
                 <TableCell className="text-right">{formatCurrency(report.batch_total)}</TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(report.revenue_total)}</TableCell>
+                <TableCell className="text-right text-muted-foreground">{formatCurrency(Number(report.sales_tax ?? 0))}</TableCell>
                 <TableCell className="text-right text-green-700">{formatCurrency(report.tip_total)}</TableCell>
+                <TableCell className="text-right font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0) - report.tip_total)}</TableCell>
                 <TableCell className="text-right">{formatCurrency(report.cash_deposit)}</TableCell>
                 <TableCell className="max-w-xs text-sm text-muted-foreground">
                   <div className="flex items-center justify-between gap-3">
@@ -310,7 +319,7 @@ export default function EodHistoryPage() {
             ))}
             {filteredEodReports.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
+                <TableCell colSpan={9} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -321,7 +330,9 @@ export default function EodHistoryPage() {
                 <TableCell className="text-right font-semibold">{formatCurrency(totals.cash)}</TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(totals.batch)}</TableCell>
                 <TableCell className="text-right font-bold">{formatCurrency(totals.revenue)}</TableCell>
+                <TableCell className="text-right font-semibold text-muted-foreground">{formatCurrency(totals.tax)}</TableCell>
                 <TableCell className="text-right font-semibold text-green-700">{formatCurrency(totals.tip)}</TableCell>
+                <TableCell className="text-right font-bold text-emerald-700">{formatCurrency(totals.net)}</TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(totals.deposit)}</TableCell>
                 <TableCell />
               </TableRow>
