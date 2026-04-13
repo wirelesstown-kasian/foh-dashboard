@@ -12,7 +12,7 @@ function getConfig(): GoogleSheetsConfig | null {
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
   const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n')
   const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
-  const sheetName = process.env.GOOGLE_SHEETS_EOD_SHEET_NAME ?? 'Sheet1'
+  const sheetName = process.env.GOOGLE_SHEETS_EOD_SHEET_NAME ?? 'EOD'
 
   if (!clientEmail || !privateKey || !spreadsheetId) return null
   return { clientEmail, privateKey, spreadsheetId, sheetName }
