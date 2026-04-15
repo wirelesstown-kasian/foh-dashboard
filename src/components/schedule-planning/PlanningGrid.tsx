@@ -152,7 +152,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [addDialog, setAddDialog] = useState<{ date: string; employee_id: string; draftIndex?: number } | null>(null)
-  const [addStaffInlineOpen, setAddStaffInlineOpen] = useState(false)
+  const [addStaffDialogOpen, setAddStaffDialogOpen] = useState(false)
   const [publishDialogOpen, setPublishDialogOpen] = useState(false)
   const [publishMode, setPublishMode] = useState<PublishMode>('immediate')
   const [queuedSendDate, setQueuedSendDate] = useState('')
@@ -610,7 +610,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     persistDisplayedEmployeeIds(nextDisplayedIds)
     persistDrafts(ensureMondayOffDrafts(drafts, nextDisplayedIds))
     setStaffToAdd([])
-    setAddStaffInlineOpen(false)
+    setAddStaffDialogOpen(false)
   }
 
   const [deleteAllDialogOpen, setDeleteAllDialogOpen] = useState(false)
@@ -1062,7 +1062,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                   </td>
                 </tr>
               )})}
-              {displayedEmployees.length === 0 && !addStaffInlineOpen && (
+              {displayedEmployees.length === 0 && !addStaffDialogOpen && (
                 <tr>
                   <td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">
                     No staff lines yet. Click <strong>+ Add staff</strong> below to start building this week&apos;s schedule.
@@ -1070,65 +1070,22 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 </tr>
               )}
 
-              {/* ── Inline Add Staff row ── */}
               {isEditableWeek && (
-                addStaffInlineOpen ? (
-                  <tr className="border-t border-slate-200 bg-slate-50/60">
-                    <td colSpan={days.length + 2} className="p-4">
-                      {availableEmployeesToAdd.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">All available staff are already on this planner.</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-2 mb-3">
-                          {availableEmployeesToAdd.map(employee => {
-                            const checked = staffToAdd.includes(employee.id)
-                            const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
-                            return (
-                              <label
-                                key={employee.id}
-                                className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${checked ? 'border-slate-700 bg-slate-100 font-medium' : 'border-slate-300 bg-white hover:border-slate-500'}`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="sr-only"
-                                  checked={checked}
-                                  onChange={e => setStaffToAdd(cur => e.target.checked ? [...cur, employee.id] : cur.filter(id => id !== employee.id))}
-                                />
-                                <span>{employee.name}</span>
-                                <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
-                                  {getRoleLabel(employee.role, roleDefinitions)}
-                                </span>
-                              </label>
-                            )
-                          })}
-                        </div>
+                <tr className="border-t border-dashed border-slate-300">
+                  <td colSpan={days.length + 2} className="p-0">
+                    <button
+                      className="flex w-full items-center gap-2 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                      disabled={availableEmployeesToAdd.length === 0}
+                      onClick={() => setAddStaffDialogOpen(true)}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add staff
+                      {availableEmployeesToAdd.length > 0 && (
+                        <span className="text-xs text-slate-400">({availableEmployeesToAdd.length} available)</span>
                       )}
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={addStaffRow} disabled={staffToAdd.length === 0}>
-                          Add{staffToAdd.length > 0 ? ` ${staffToAdd.length} staff` : ''}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => { setAddStaffInlineOpen(false); setStaffToAdd([]) }}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr className="border-t border-dashed border-slate-300">
-                    <td colSpan={days.length + 2} className="p-0">
-                      <button
-                        className="flex w-full items-center gap-2 px-4 py-3 text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:text-slate-300"
-                        disabled={availableEmployeesToAdd.length === 0}
-                        onClick={() => setAddStaffInlineOpen(true)}
-                      >
-                        <Plus className="w-4 h-4" />
-                        Add staff
-                        {availableEmployeesToAdd.length > 0 && (
-                          <span className="text-xs text-slate-400">({availableEmployeesToAdd.length} available)</span>
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                )
+                    </button>
+                  </td>
+                </tr>
               )}
 
               {/* ── Delete All row ── */}
@@ -1322,6 +1279,66 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               </Button>
               <Button className="flex-1" onClick={handlePublish} disabled={saving}>
                 {saving ? 'Publishing…' : 'Confirm Publish'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addStaffDialogOpen} onOpenChange={(open) => {
+        setAddStaffDialogOpen(open)
+        if (!open) setStaffToAdd([])
+      }}>
+        <DialogContent className="max-w-4xl p-0">
+          <DialogHeader className="border-b px-6 py-5">
+            <DialogTitle>Add Staff To This Week</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Pick the team members you want to add without shrinking the planner.
+            </p>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+            {availableEmployeesToAdd.length === 0 ? (
+              <p className="text-sm text-muted-foreground">All available staff are already on this planner.</p>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {availableEmployeesToAdd.map(employee => {
+                  const checked = staffToAdd.includes(employee.id)
+                  const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
+                  return (
+                    <label
+                      key={employee.id}
+                      className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-4 py-3 transition-colors ${checked ? 'border-slate-700 bg-slate-100' : 'border-slate-300 bg-white hover:border-slate-500 hover:bg-slate-50'}`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">{employee.name}</div>
+                        <div className="mt-2">
+                          <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
+                            {getRoleLabel(employee.role, roleDefinitions)}
+                          </span>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-slate-300"
+                        checked={checked}
+                        onChange={e => setStaffToAdd(cur => e.target.checked ? [...cur, employee.id] : cur.filter(id => id !== employee.id))}
+                      />
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t px-6 py-4">
+            <div className="text-sm text-muted-foreground">
+              {staffToAdd.length > 0 ? `${staffToAdd.length} staff selected` : 'Select one or more staff members'}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => { setAddStaffDialogOpen(false); setStaffToAdd([]) }}>
+                Cancel
+              </Button>
+              <Button onClick={addStaffRow} disabled={staffToAdd.length === 0}>
+                Add{staffToAdd.length > 0 ? ` ${staffToAdd.length} staff` : ''}
               </Button>
             </div>
           </div>

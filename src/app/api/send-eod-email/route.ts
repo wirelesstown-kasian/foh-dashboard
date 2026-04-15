@@ -295,6 +295,7 @@ export async function POST(req: NextRequest) {
       <p><strong>Closed by:</strong> ${closedByName}</p>
       <h3>Revenue</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+        <tr><td>Starting Cash</td><td style="text-align:right">$${Number(report.starting_cash ?? 0).toFixed(2)}</td></tr>
         <tr><td>Cash Total</td><td style="text-align:right">$${Number(report.cash_total).toFixed(2)}</td></tr>
         <tr><td>Batch Total</td><td style="text-align:right">$${Number(report.batch_total).toFixed(2)}</td></tr>
         <tr style="background:#f5f5f5"><td><strong>Gross Revenue</strong></td><td style="text-align:right"><strong>$${Number(report.revenue_total).toFixed(2)}</strong></td></tr>

@@ -81,6 +81,7 @@ export interface EodReport {
   id: string
   session_date: string
   closed_by_employee_id: string | null
+  starting_cash: number
   cash_total: number
   batch_total: number
   revenue_total: number

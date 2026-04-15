@@ -395,6 +395,7 @@ export default function EodPage() {
       const payload = {
         session_date: today,
         closed_by_employee_id: form.closed_by || null,
+        starting_cash: startingCash,
         cash_total: parseFloat(form.cash_total) || 0,
         batch_total: parseFloat(form.batch_total) || 0,
         revenue_total: grossRevenue,
@@ -568,6 +569,7 @@ export default function EodPage() {
           <div className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Closed By</span><span className="font-medium">{closedByName}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Starting Cash</span><span>${startingCash.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Cash Total</span><span>${(parseFloat(form.cash_total) || 0).toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Batch Total</span><span>${(parseFloat(form.batch_total) || 0).toFixed(2)}</span></div>
               <div className="flex justify-between font-semibold border-t pt-2"><span>Gross Revenue</span><span>${grossRevenue.toFixed(2)}</span></div>

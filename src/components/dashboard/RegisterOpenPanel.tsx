@@ -54,10 +54,8 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
     const effC = newCoinOverride !== '' ? (parseFloat(newCoinOverride) || 0) : cCoins
     const effB = newBillOverride !== '' ? (parseFloat(newBillOverride) || 0) : cBills
     const total = effC + effB
-    if (manualCash === '') {
-      // auto-fill manual cash from drawer total
-      setManualCash(total > 0 ? total.toFixed(2) : '')
-    }
+    // Keep starting cash synced to the register calculator total by default.
+    setManualCash(total > 0 ? total.toFixed(2) : '')
   }
 
   const renderRow = (key: string, label: string, value: number, isCoin: boolean) => {
