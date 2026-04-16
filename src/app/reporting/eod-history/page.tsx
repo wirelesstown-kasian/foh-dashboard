@@ -108,6 +108,8 @@ export default function EodHistoryPage() {
   const [cashEntries, setCashEntries] = useState<CashBalanceEntry[]>([])
   const [inlineAudit, setInlineAudit] = useState<Record<string, { actualCash: string; varianceNote: string }>>({})
   const [auditSavingId, setAuditSavingId] = useState<string | null>(null)
+  const [savedAuditIds, setSavedAuditIds] = useState<Set<string>>(new Set())
+  const [saveAllRunning, setSaveAllRunning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [cashEntrySaving, setCashEntrySaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -496,10 +498,27 @@ export default function EodHistoryPage() {
         cash_variance: cashVariance,
         variance_note: currentAudit.varianceNote.trim() || null,
       } : item))
+      setSavedAuditIds(current => new Set([...current, report.id]))
       setSaveNotice(`Cash audit saved for ${report.session_date}. Variance: ${formatCurrency(cashVariance)}.`)
     } finally {
       setAuditSavingId(null)
     }
+  }
+
+  const handleSaveAll = async () => {
+    const pending = filteredEodReports.filter(report => {
+      const audit = inlineAudit[report.id]
+      return (audit?.actualCash ?? '').trim() !== '' && !savedAuditIds.has(report.id)
+    })
+    if (pending.length === 0) return
+    setSaveAllRunning(true)
+    setSaveError(null)
+    setSaveNotice(null)
+    for (const report of pending) {
+      await handleAuditSave(report)
+    }
+    setSaveAllRunning(false)
+    setSaveNotice(`${pending.length} record${pending.length === 1 ? '' : 's'} saved.`)
   }
 
   return (
@@ -647,7 +666,16 @@ export default function EodHistoryPage() {
               <TableHead className="w-[90px] text-right">Variance</TableHead>
               <TableHead className="w-[180px]">Variance Note</TableHead>
               <TableHead className="w-[120px]">Memo</TableHead>
-              <TableHead className="w-[80px] text-right">Save</TableHead>
+              <TableHead className="w-35 text-right">
+                <Button
+                  size="sm"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => void handleSaveAll()}
+                  disabled={saveAllRunning || filteredEodReports.every(r => (inlineAudit[r.id]?.actualCash ?? '').trim() === '' || savedAuditIds.has(r.id))}
+                >
+                  {saveAllRunning ? 'Saving…' : 'Save All'}
+                </Button>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -666,13 +694,16 @@ export default function EodHistoryPage() {
                     type="number"
                     step="0.01"
                     value={inlineAudit[report.id]?.actualCash ?? ''}
-                    onChange={event => setInlineAudit(current => ({
-                      ...current,
-                      [report.id]: {
-                        actualCash: event.target.value,
-                        varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
-                      },
-                    }))}
+                    onChange={event => {
+                      setSavedAuditIds(current => { const next = new Set(current); next.delete(report.id); return next })
+                      setInlineAudit(current => ({
+                        ...current,
+                        [report.id]: {
+                          actualCash: event.target.value,
+                          varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+                        },
+                      }))
+                    }}
                     placeholder="Actual cash required"
                     className="h-8 text-xs"
                   />
@@ -700,17 +731,23 @@ export default function EodHistoryPage() {
                   />
                 </TableCell>
                 <TableCell className="max-w-[120px] py-2 text-xs text-muted-foreground">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="truncate">{report.memo ?? '—'}</span>
+                  <span className="truncate block">{report.memo ?? '—'}</span>
+                </TableCell>
+                <TableCell className="py-2 text-right">
+                  <div className="flex items-center justify-end gap-1.5">
                     <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openEditDialog(report)}>
                       Edit
                     </Button>
+                    {savedAuditIds.has(report.id) ? (
+                      <Button size="sm" className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-600 cursor-default" disabled>
+                        Saved
+                      </Button>
+                    ) : (
+                      <Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleAuditSave(report)} disabled={auditSavingId === report.id || !(inlineAudit[report.id]?.actualCash ?? '').trim()}>
+                        {auditSavingId === report.id ? 'Saving…' : 'Save'}
+                      </Button>
+                    )}
                   </div>
-                </TableCell>
-                <TableCell className="py-2 text-right">
-                  <Button size="sm" className="h-8 px-2 text-xs" onClick={() => void handleAuditSave(report)} disabled={auditSavingId === report.id || !(inlineAudit[report.id]?.actualCash ?? '').trim()}>
-                    {auditSavingId === report.id ? 'Saving…' : 'Save'}
-                  </Button>
                 </TableCell>
               </TableRow>
             ))}
