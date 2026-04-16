@@ -100,7 +100,7 @@ export default function TaskPerformancePage() {
     <div className="p-6">
       <AdminSubpageHeader
         title="Task Performance"
-        subtitle="Overview scores, pace, and ranking for the selected range."
+        subtitle="Score = Task Completion Rate (40%) + Tasks/Hr (35%) + Tips/Hr (25%) — shift-adjusted, fair for any schedule type."
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
@@ -154,9 +154,9 @@ export default function TaskPerformancePage() {
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
               <TableHead className="text-right">Tasks This Period</TableHead>
-              <TableHead className="text-right">Performance Score</TableHead>
-              <TableHead className="text-right">Monthly Tasks</TableHead>
-              <TableHead className="text-right">Tip Pace</TableHead>
+              <TableHead className="text-right">Score</TableHead>
+              <TableHead className="text-right">Completion Rate</TableHead>
+              <TableHead className="text-right">Tips/Hr</TableHead>
               <TableHead className="text-right">Share</TableHead>
             </TableRow>
           </TableHeader>
@@ -175,7 +175,7 @@ export default function TaskPerformancePage() {
                 <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
                 <TableCell className="text-right font-semibold">{row.done}</TableCell>
                 <TableCell className="text-right font-semibold text-amber-700">{row.monthly?.score ?? '—'}</TableCell>
-                <TableCell className="text-right text-muted-foreground">{row.monthly?.tasks ?? 0}</TableCell>
+                <TableCell className="text-right text-muted-foreground">{row.monthly ? (row.monthly.taskCompletionRate * 100).toFixed(1) + '%' : '—'}</TableCell>
                 <TableCell className="text-right">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</TableCell>
                 <TableCell className="text-right text-xs text-muted-foreground">{totalTasks > 0 ? getPercent((row.done / totalTasks) * 100) : '0.0%'}</TableCell>
               </TableRow>

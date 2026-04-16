@@ -61,33 +61,40 @@ export function PerformanceReportDialog({
                   </div>
                 </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-xl border bg-white p-3">
-                    <div className="text-xs text-muted-foreground">Tasks This Period</div>
-                    <div className="mt-1 text-xl font-semibold">{detailTarget.done}</div>
-                  </div>
-                  <div className="rounded-xl border bg-white p-3">
-                    <div className="text-xs text-muted-foreground">Task Share</div>
-                    <div className="mt-1 text-xl font-semibold">{totalTasks > 0 ? getPercent((detailTarget.done / totalTasks) * 100) : '0.0%'}</div>
-                  </div>
-                  <div className="rounded-xl border bg-white p-3">
-                    <div className="text-xs text-muted-foreground">Monthly Tasks</div>
-                    <div className="mt-1 text-xl font-semibold">{detailTarget.monthly?.tasks ?? 0}</div>
-                  </div>
-                  <div className="rounded-xl border bg-white p-3">
-                    <div className="text-xs text-muted-foreground">Hours Worked</div>
-                    <div className="mt-1 text-xl font-semibold">{detailTarget.monthly?.hours.toFixed(2) ?? '0.00'} hrs</div>
+                  <div className="rounded-xl border bg-amber-50 p-3">
+                    <div className="text-xs text-amber-700 font-medium">Task Completion Rate</div>
+                    <div className="mt-1 text-xl font-bold text-amber-900">{detailTarget.monthly ? (detailTarget.monthly.taskCompletionRate * 100).toFixed(1) + '%' : '—'}</div>
+                    <div className="text-[10px] text-amber-700 mt-0.5">Avg daily share of tasks completed</div>
                   </div>
                   <div className="rounded-xl border bg-white p-3">
                     <div className="text-xs text-muted-foreground">Tasks / Hr</div>
                     <div className="mt-1 text-xl font-semibold">{detailTarget.monthly ? detailTarget.monthly.taskRate.toFixed(2) : '—'}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Efficiency per hour worked</div>
                   </div>
                   <div className="rounded-xl border bg-white p-3">
                     <div className="text-xs text-muted-foreground">Tips / Hr</div>
                     <div className="mt-1 text-xl font-semibold">{detailTarget.monthly ? formatCurrency(detailTarget.monthly.tipRate) : '—'}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Customer service proxy</div>
                   </div>
                   <div className="rounded-xl border bg-white p-3">
                     <div className="text-xs text-muted-foreground">Total Tips</div>
                     <div className="mt-1 text-xl font-semibold">{detailTarget.monthly ? formatCurrency(detailTarget.monthly.totalTips) : '—'}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">This month</div>
+                  </div>
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-xs text-muted-foreground">Tasks This Period</div>
+                    <div className="mt-1 text-xl font-semibold">{detailTarget.done}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Share {totalTasks > 0 ? getPercent((detailTarget.done / totalTasks) * 100) : '0.0%'}</div>
+                  </div>
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-xs text-muted-foreground">Hours Worked</div>
+                    <div className="mt-1 text-xl font-semibold">{detailTarget.monthly?.hours.toFixed(1) ?? '0.0'} hrs</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">This month</div>
+                  </div>
+                  <div className="rounded-xl border bg-white p-3">
+                    <div className="text-xs text-muted-foreground">Monthly Tasks</div>
+                    <div className="mt-1 text-xl font-semibold">{detailTarget.monthly?.tasks ?? 0}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Total completed</div>
                   </div>
                   <div className="rounded-xl border bg-white p-3">
                     <div className="text-xs text-muted-foreground">Role</div>
@@ -95,12 +102,14 @@ export function PerformanceReportDialog({
                   </div>
                 </div>
                 <div className="mt-5 rounded-2xl border border-amber-200 bg-white/90 p-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Quick Summary</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">How Score Is Calculated</div>
                   <p className="mt-2 text-sm leading-6 text-slate-700">
-                    Overall rank is #{perfRows.findIndex(item => item.emp.id === detailTarget.emp.id) + 1} of {perfRows.length}.
-                    {' '}
-                    Task completion rate rank is #{detailTarget.monthly?.taskCompletionRateRank ?? '—'}, tasks per hour rank is #{detailTarget.monthly?.taskRateRank ?? '—'},
-                    and tips per hour rank is #{detailTarget.monthly?.tipRateRank ?? '—'} for the current month.
+                    Score = <strong>Task Completion Rate (40%)</strong> + <strong>Tasks/Hr (35%)</strong> + <strong>Tips/Hr (25%)</strong>.
+                    Each KPI is ranked relative to the team — #1 gets 100 pts, last gets 0. Scores are shift-adjusted so part-time and full-time staff compete on equal footing.
+                    {detailTarget.monthly && (
+                      <> {detailTarget.emp.name} is ranked #{perfRows.findIndex(item => item.emp.id === detailTarget.emp.id) + 1} of {perfRows.length} overall,
+                      with a {(detailTarget.monthly.taskCompletionRate * 100).toFixed(1)}% avg task completion rate across shifts worked.</>
+                    )}
                   </p>
                 </div>
               </div>
@@ -138,6 +147,7 @@ export function PerformanceReportDialog({
               return (
                 <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Score Breakdown</div>
+                  <p className="mt-1 text-xs text-muted-foreground">Each KPI ranked within team → converted to 0–100 → weighted sum</p>
                   <Table className="mt-3">
                     <TableHeader>
                       <TableRow>
@@ -211,7 +221,8 @@ export function PerformanceReportDialog({
                       <TableHead className="w-10">#</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead className="text-right">Score</TableHead>
-                      <TableHead className="text-right">Tasks</TableHead>
+                      <TableHead className="text-right">Rate</TableHead>
+                      <TableHead className="text-right">Tasks/Hr</TableHead>
                       <TableHead className="text-right">Tips/Hr</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -223,7 +234,8 @@ export function PerformanceReportDialog({
                           <TableCell>{index === 0 ? <Trophy className="h-4 w-4 text-amber-500" /> : index + 1}</TableCell>
                           <TableCell>{row.emp.name}{isFocused ? ' ◀' : ''}</TableCell>
                           <TableCell className="text-right">{row.monthly?.score ?? '—'}</TableCell>
-                          <TableCell className="text-right">{row.done}</TableCell>
+                          <TableCell className="text-right">{row.monthly ? (row.monthly.taskCompletionRate * 100).toFixed(0) + '%' : '—'}</TableCell>
+                          <TableCell className="text-right">{row.monthly ? row.monthly.taskRate.toFixed(1) : '—'}</TableCell>
                           <TableCell className="text-right">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</TableCell>
                         </TableRow>
                       )
