@@ -193,15 +193,16 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
     'Description',
     'Created At',
     'Updated At',
+    'Cash On Hand',
   ]]
 
   const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A1:H1`,
+    `${baseUrl}/${encodedSheetName}!A1:I1`,
     accessToken,
   )
   if (!headerCheck.values || headerCheck.values.length === 0 || headerCheck.values[0].length === 0) {
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A1:H1?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A1:I1?valueInputOption=USER_ENTERED`,
       accessToken,
       {
         method: 'PUT',
@@ -216,23 +217,23 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
   )
 
   const signedAmount = entry.entry_type === 'cash_in' ? Number(entry.amount) : Number(entry.amount) * -1
-  const values = [[
-    entry.id,
-    entry.entry_date,
-    entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out',
-    Number(entry.amount).toFixed(2),
-    signedAmount.toFixed(2),
-    entry.description,
-    entry.created_at,
-    entry.updated_at,
-  ]]
-
   const existingRowIndex = (idColumn.values ?? []).findIndex(row => row[0] === entry.id)
 
   if (existingRowIndex >= 0) {
     const rowNumber = existingRowIndex + 2
+    const values = [[
+      entry.id,
+      entry.entry_date,
+      entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out',
+      Number(entry.amount).toFixed(2),
+      signedAmount.toFixed(2),
+      entry.description,
+      entry.created_at,
+      entry.updated_at,
+      `=SUM($E$2:E${rowNumber})`,
+    ]]
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A${rowNumber}:H${rowNumber}?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A${rowNumber}:I${rowNumber}?valueInputOption=USER_ENTERED`,
       accessToken,
       {
         method: 'PUT',
@@ -242,14 +243,27 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
     return { success: true, skipped: false, action: 'updated', rowNumber }
   }
 
+  const newRowNumber = (idColumn.values ?? []).length + 2
+  const values = [[
+    entry.id,
+    entry.entry_date,
+    entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out',
+    Number(entry.amount).toFixed(2),
+    signedAmount.toFixed(2),
+    entry.description,
+    entry.created_at,
+    entry.updated_at,
+    `=SUM($E$2:E${newRowNumber})`,
+  ]]
+
   await googleSheetsRequest(
-    `${baseUrl}/${encodedSheetName}!A:H:append?valueInputOption=USER_ENTERED`,
+    `${baseUrl}/${encodedSheetName}!A${newRowNumber}:I${newRowNumber}?valueInputOption=USER_ENTERED`,
     accessToken,
     {
-      method: 'POST',
+      method: 'PUT',
       body: JSON.stringify({ values }),
     }
   )
 
-  return { success: true, skipped: false, action: 'appended' }
+  return { success: true, skipped: false, action: 'appended', rowNumber: newRowNumber }
 }
