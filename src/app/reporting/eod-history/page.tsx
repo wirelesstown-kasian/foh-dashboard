@@ -81,8 +81,8 @@ const EMPTY_FORM = {
 
 const EMPTY_CASH_ENTRY_FORM = {
   entry_date: '',
-  entry_type: 'cash_out' as CashBalanceEntry['entry_type'],
-  amount: '',
+  cash_in_amount: '',
+  cash_out_amount: '',
   description: '',
 }
 
@@ -252,8 +252,8 @@ export default function EodHistoryPage() {
   }
 
   const handleCashEntrySubmit = async () => {
-    if (!cashEntryForm.entry_date || !cashEntryForm.amount.trim() || !cashEntryForm.description.trim()) {
-      setSaveError('Date, amount, and description are required for cash in / cash out.')
+    if (!cashEntryForm.entry_date || !cashEntryForm.description.trim()) {
+      setSaveError('Date and description are required for cash in / cash out.')
       return
     }
 
@@ -262,45 +262,63 @@ export default function EodHistoryPage() {
     setSaveNotice(null)
 
     try {
-      const amount = Number(cashEntryForm.amount)
-      if (Number.isNaN(amount) || amount <= 0) {
-        setSaveError('Amount must be greater than 0.')
+      const cashInAmount = cashEntryForm.cash_in_amount.trim() ? Number(cashEntryForm.cash_in_amount) : 0
+      const cashOutAmount = cashEntryForm.cash_out_amount.trim() ? Number(cashEntryForm.cash_out_amount) : 0
+
+      if (cashInAmount <= 0 && cashOutAmount <= 0) {
+        setSaveError('Enter a cash in amount, a cash out amount, or both.')
+        return
+      }
+      if ((cashEntryForm.cash_in_amount.trim() && (Number.isNaN(cashInAmount) || cashInAmount <= 0)) || (cashEntryForm.cash_out_amount.trim() && (Number.isNaN(cashOutAmount) || cashOutAmount <= 0))) {
+        setSaveError('Cash in and cash out amounts must be greater than 0.')
         return
       }
 
-      const payload = {
-        entry_date: cashEntryForm.entry_date,
-        entry_type: cashEntryForm.entry_type,
-        amount,
-        description: cashEntryForm.description.trim(),
-        updated_at: new Date().toISOString(),
-      }
+      const timestamp = new Date().toISOString()
+      const payloads = [
+        ...(cashInAmount > 0 ? [{
+          entry_date: cashEntryForm.entry_date,
+          entry_type: 'cash_in' as const,
+          amount: cashInAmount,
+          description: cashEntryForm.description.trim(),
+          updated_at: timestamp,
+        }] : []),
+        ...(cashOutAmount > 0 ? [{
+          entry_date: cashEntryForm.entry_date,
+          entry_type: 'cash_out' as const,
+          amount: cashOutAmount,
+          description: cashEntryForm.description.trim(),
+          updated_at: timestamp,
+        }] : []),
+      ]
 
       const { data, error } = await supabase
         .from('cash_balance_entries')
-        .insert(payload)
+        .insert(payloads)
         .select()
-        .single()
 
-      if (error || !data) {
+      if (error || !data || data.length === 0) {
         setSaveError(error?.message ?? 'Failed to save cash movement entry.')
         return
       }
 
-      const entry = data as CashBalanceEntry
+      const entries = data as CashBalanceEntry[]
 
-      const sheetSync = await fetch('/api/cash-balance-sheet-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entry_id: entry.id }),
-      })
-      if (!sheetSync.ok) {
-        const payload = await sheetSync.json().catch(() => ({})) as { error?: string }
-        setSaveError(`Cash movement saved, but Google Sheets sync failed: ${payload.error ?? 'unknown error'}`)
+      for (const entry of entries) {
+        const sheetSync = await fetch('/api/cash-balance-sheet-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry_id: entry.id }),
+        })
+        if (!sheetSync.ok) {
+          const payload = await sheetSync.json().catch(() => ({})) as { error?: string }
+          setSaveError(`Cash movement saved, but Google Sheets sync failed: ${payload.error ?? 'unknown error'}`)
+          break
+        }
       }
 
       setCashEntries(current =>
-        [entry, ...current].sort((left, right) => {
+        [...entries, ...current].sort((left, right) => {
           if (left.entry_date !== right.entry_date) return right.entry_date.localeCompare(left.entry_date)
           return new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
         })
@@ -309,7 +327,7 @@ export default function EodHistoryPage() {
         ...EMPTY_CASH_ENTRY_FORM,
         entry_date: current.entry_date,
       }))
-      setSaveNotice(`Cash ${entry.entry_type === 'cash_in' ? 'in' : 'out'} recorded for ${entry.entry_date}.`)
+      setSaveNotice(`${entries.length} cash movement record${entries.length === 1 ? '' : 's'} saved for ${cashEntryForm.entry_date}.`)
     } finally {
       setCashEntrySaving(false)
     }
@@ -532,7 +550,7 @@ export default function EodHistoryPage() {
           <div className="grid gap-3 xl:grid-cols-[1.55fr_0.45fr]">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash In / Cash Out</div>
-              <div className="mt-2 grid gap-2 md:grid-cols-[140px_140px_120px_110px]">
+              <div className="mt-2 grid gap-2 md:grid-cols-[140px_120px_120px_110px]">
                 <div>
                   <Label className="text-xs text-muted-foreground">Date</Label>
                   <Input
@@ -543,32 +561,24 @@ export default function EodHistoryPage() {
                   />
                 </div>
                 <div>
-                  <Label className="text-xs text-muted-foreground">Type</Label>
-                  <div className="mt-1 grid h-8 grid-cols-2 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setCashEntryForm(current => ({ ...current, entry_type: 'cash_in' }))}
-                      className={`rounded-md border text-xs font-semibold transition-colors ${cashEntryForm.entry_type === 'cash_in' ? 'border-emerald-600 bg-emerald-100 text-emerald-700' : 'border-emerald-200 bg-white text-emerald-600 hover:bg-emerald-50'}`}
-                    >
-                      Cash In
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCashEntryForm(current => ({ ...current, entry_type: 'cash_out' }))}
-                      className={`rounded-md border text-xs font-semibold transition-colors ${cashEntryForm.entry_type === 'cash_out' ? 'border-red-600 bg-red-100 text-red-700' : 'border-red-200 bg-white text-red-600 hover:bg-red-50'}`}
-                    >
-                      Cash Out
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Amount</Label>
+                  <Label className="text-xs text-emerald-700">Cash In Amount</Label>
                   <Input
                     type="number"
                     step="0.01"
-                    value={cashEntryForm.amount}
-                    onChange={event => setCashEntryForm(current => ({ ...current, amount: event.target.value }))}
-                    className="mt-1 h-8 text-xs"
+                    value={cashEntryForm.cash_in_amount}
+                    onChange={event => setCashEntryForm(current => ({ ...current, cash_in_amount: event.target.value }))}
+                    className="mt-1 h-8 border-emerald-200 text-xs text-emerald-700 placeholder:text-emerald-300"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-red-700">Cash Out Amount</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={cashEntryForm.cash_out_amount}
+                    onChange={event => setCashEntryForm(current => ({ ...current, cash_out_amount: event.target.value }))}
+                    className="mt-1 h-8 border-red-200 text-xs text-red-700 placeholder:text-red-300"
                     placeholder="0.00"
                   />
                 </div>
