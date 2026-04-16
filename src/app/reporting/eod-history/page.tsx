@@ -224,7 +224,7 @@ export default function EodHistoryPage() {
       batch_total: String(report.batch_total),
       cc_tip: String(report.cc_tip),
       cash_tip: String(report.cash_tip),
-      actual_cash_on_hand: String(report.actual_cash_on_hand ?? 0),
+      actual_cash_on_hand: report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : '',
       variance_note: report.variance_note ?? '',
       memo: report.memo ?? '',
     })
@@ -677,8 +677,13 @@ export default function EodHistoryPage() {
                     className="h-8 text-xs"
                   />
                 </TableCell>
-                <TableCell className={`py-2 text-right text-xs font-semibold ${getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) === 0 ? '' : getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                  {formatCurrency(getCashVariance(Number(inlineAudit[report.id]?.actualCash || 0), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0)))}
+                <TableCell className="py-2 text-right text-xs font-semibold">
+                  {(inlineAudit[report.id]?.actualCash ?? '').trim() === '' ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : (() => {
+                    const variance = getCashVariance(Number(inlineAudit[report.id]?.actualCash), Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0))
+                    return <span className={variance === 0 ? '' : variance > 0 ? 'text-emerald-700' : 'text-red-700'}>{formatCurrency(variance)}</span>
+                  })()}
                 </TableCell>
                 <TableCell className="py-2">
                   <Input
@@ -840,9 +845,18 @@ export default function EodHistoryPage() {
               </div>
               <div>
                 <Label>Variance</Label>
-                <div className={`mt-1 flex h-10 items-center rounded-md border bg-white px-3 text-sm font-semibold ${getCashVariance(Number(form.actual_cash_on_hand || 0), Number(form.cash_total || 0), Number(form.cash_tip || 0)) === 0 ? '' : getCashVariance(Number(form.actual_cash_on_hand || 0), Number(form.cash_total || 0), Number(form.cash_tip || 0)) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                  {formatCurrency(getCashVariance(Number(form.actual_cash_on_hand || 0), Number(form.cash_total || 0), Number(form.cash_tip || 0)))}
-                </div>
+                {form.actual_cash_on_hand.trim() === '' ? (
+                  <div className="mt-1 flex h-10 items-center rounded-md border bg-white px-3 text-sm text-muted-foreground">
+                    Enter actual cash
+                  </div>
+                ) : (() => {
+                  const variance = getCashVariance(Number(form.actual_cash_on_hand), Number(form.cash_total || 0), Number(form.cash_tip || 0))
+                  return (
+                    <div className={`mt-1 flex h-10 items-center rounded-md border bg-white px-3 text-sm font-semibold ${variance === 0 ? '' : variance > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {formatCurrency(variance)}
+                    </div>
+                  )
+                })()}
               </div>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
