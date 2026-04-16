@@ -24,6 +24,11 @@ function base64UrlEncode(value: string) {
   return Buffer.from(value).toString('base64url')
 }
 
+function getEncodedSheetRangePrefix(sheetName: string) {
+  const escapedSheetName = sheetName.replace(/'/g, "''")
+  return encodeURIComponent(`'${escapedSheetName}'`)
+}
+
 async function getAccessToken(config: GoogleSheetsConfig) {
   const now = Math.floor(Date.now() / 1000)
   const header = base64UrlEncode(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
@@ -83,7 +88,7 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   }
 
   const accessToken = await getAccessToken(config)
-  const encodedSheetName = encodeURIComponent(config.sheetName)
+  const encodedSheetName = getEncodedSheetRangePrefix(config.sheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
 
   const headersRow = [[
@@ -176,7 +181,7 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
   }
 
   const accessToken = await getAccessToken(config)
-  const encodedSheetName = encodeURIComponent(config.cashLogSheetName)
+  const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
 
   const headersRow = [[

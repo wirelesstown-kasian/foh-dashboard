@@ -165,10 +165,6 @@ export default function EodHistoryPage() {
     () => cashEntries.filter(entry => entry.entry_date >= startDate && entry.entry_date <= endDate),
     [cashEntries, endDate, startDate]
   )
-  const cashEntryNetTotal = useMemo(
-    () => filteredCashEntries.reduce((sum, entry) => sum + getSignedCashAmount(entry), 0),
-    [filteredCashEntries]
-  )
   const eodCloserEmployees = useMemo(
     () => employees.filter(employee => isEodCloserRole(employee.role)),
     [employees]
@@ -532,85 +528,75 @@ export default function EodHistoryPage() {
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
         />
-        <div className="mb-5 rounded-2xl border bg-slate-50/70 p-4">
-          <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="mb-5 rounded-2xl border bg-slate-50/70 p-3">
+          <div className="grid gap-3 xl:grid-cols-[1.55fr_0.45fr]">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash In / Cash Out</div>
-              <div className="mt-3 grid gap-3 md:grid-cols-4">
+              <div className="mt-2 grid gap-2 md:grid-cols-[140px_140px_120px_110px]">
                 <div>
-                  <Label>Date</Label>
+                  <Label className="text-xs text-muted-foreground">Date</Label>
                   <Input
                     type="date"
                     value={cashEntryForm.entry_date}
                     onChange={event => setCashEntryForm(current => ({ ...current, entry_date: event.target.value }))}
-                    className="mt-1"
+                    className="mt-1 h-8 text-xs"
                   />
                 </div>
                 <div>
-                  <Label>Type</Label>
-                  <Select
-                    value={cashEntryForm.entry_type}
-                    onValueChange={(value) => {
-                      if (!value) return
-                      setCashEntryForm(current => ({ ...current, entry_type: value as CashBalanceEntry['entry_type'] }))
-                    }}
-                  >
-                    <SelectTrigger className="mt-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cash_in">Cash In</SelectItem>
-                      <SelectItem value="cash_out">Cash Out</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label className="text-xs text-muted-foreground">Type</Label>
+                  <div className="mt-1 grid h-8 grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setCashEntryForm(current => ({ ...current, entry_type: 'cash_in' }))}
+                      className={`rounded-md border text-xs font-semibold transition-colors ${cashEntryForm.entry_type === 'cash_in' ? 'border-emerald-600 bg-emerald-100 text-emerald-700' : 'border-emerald-200 bg-white text-emerald-600 hover:bg-emerald-50'}`}
+                    >
+                      Cash In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCashEntryForm(current => ({ ...current, entry_type: 'cash_out' }))}
+                      className={`rounded-md border text-xs font-semibold transition-colors ${cashEntryForm.entry_type === 'cash_out' ? 'border-red-600 bg-red-100 text-red-700' : 'border-red-200 bg-white text-red-600 hover:bg-red-50'}`}
+                    >
+                      Cash Out
+                    </button>
+                  </div>
                 </div>
                 <div>
-                  <Label>Amount</Label>
+                  <Label className="text-xs text-muted-foreground">Amount</Label>
                   <Input
                     type="number"
                     step="0.01"
                     value={cashEntryForm.amount}
                     onChange={event => setCashEntryForm(current => ({ ...current, amount: event.target.value }))}
-                    className="mt-1"
+                    className="mt-1 h-8 text-xs"
                     placeholder="0.00"
                   />
                 </div>
                 <div className="flex items-end">
-                  <Button className="w-full" onClick={() => void handleCashEntrySubmit()} disabled={cashEntrySaving}>
+                  <Button className="h-8 w-full text-xs" onClick={() => void handleCashEntrySubmit()} disabled={cashEntrySaving}>
                     {cashEntrySaving ? 'Saving…' : 'Submit'}
                   </Button>
                 </div>
               </div>
-              <div className="mt-3">
-                <Label>Description</Label>
+              <div className="mt-2">
+                <Label className="text-xs text-muted-foreground">Description</Label>
                 <Input
                   value={cashEntryForm.description}
                   onChange={event => setCashEntryForm(current => ({ ...current, description: event.target.value }))}
-                  className="mt-1"
+                  className="mt-1 h-8 text-xs"
                   placeholder="Why cash was added or taken out"
                 />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-xl border bg-white p-4">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="rounded-xl border bg-white p-3">
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current Cash On Hand</div>
-                <div className="mt-2 text-3xl font-bold text-slate-950">{formatCurrency(currentCarryingCash)}</div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Read-only review value based on the latest audited actual cash plus cash in/out logged after that audit.
-                </p>
-              </div>
-              <div className="rounded-xl border bg-white p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Period Cash Movement</div>
-                <div className={`mt-2 text-2xl font-bold ${cashEntryNetTotal === 0 ? 'text-slate-900' : cashEntryNetTotal > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                  {formatCurrency(cashEntryNetTotal)}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {filteredCashEntries.length} cash movement record{filteredCashEntries.length === 1 ? '' : 's'} in this date range.
-                </p>
+                <div className="mt-1 text-2xl font-bold text-slate-950">{formatCurrency(currentCarryingCash)}</div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">Read-only review value.</p>
               </div>
             </div>
           </div>
-          <div className="mt-4 rounded-xl border bg-white">
+          <div className="mt-3 rounded-xl border bg-white">
             <Table>
               <TableHeader>
                 <TableRow>
