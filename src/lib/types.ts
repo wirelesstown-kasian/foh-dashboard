@@ -133,3 +133,15 @@ export interface ShiftClock {
   clock_in_photo_url?: string | null
   clock_out_photo_url?: string | null
 }
+
+export type CashBalanceEntryType = 'cash_in' | 'cash_out'
+
+export interface CashBalanceEntry {
+  id: string
+  entry_date: string
+  entry_type: CashBalanceEntryType
+  amount: number
+  description: string
+  created_at: string
+  updated_at: string
+}

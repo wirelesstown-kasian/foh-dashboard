@@ -8,9 +8,9 @@ import { StaffSidebar } from '@/components/dashboard/StaffSidebar'
 import { TaskFlow } from '@/components/dashboard/TaskFlow'
 import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
+import { MtdLeaderboard } from '@/components/dashboard/MtdLeaderboard'
 import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format } from 'date-fns'
 
@@ -167,17 +167,22 @@ export default function DashboardPage() {
   return (
     <div className="flex min-h-full flex-col">
       <div className="space-y-2.5 border-b bg-white px-4 py-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-lg font-bold">{format(businessDate, 'EEEE, MMMM d, yyyy')}</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-32 overflow-hidden rounded-full bg-gray-200">
-                <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progressPct}%` }} />
+          <div className="flex items-start gap-4">
+            <div className="flex items-center gap-4 pt-1">
+              <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
+              <div className="flex items-center gap-2">
+                <div className="h-2 w-32 overflow-hidden rounded-full bg-gray-200">
+                  <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progressPct}%` }} />
+                </div>
+                <span className="text-sm font-medium">{doneTasks}/{totalTasks} resolved</span>
               </div>
-              <span className="text-sm font-medium">{doneTasks}/{totalTasks} resolved</span>
+            </div>
+            <div className="hidden xl:block">
+              <MtdLeaderboard today={today} />
             </div>
           </div>
         </div>

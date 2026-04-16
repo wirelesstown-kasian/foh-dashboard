@@ -30,7 +30,7 @@ import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
-import { Employee, EodReport, ShiftClock } from '@/lib/types'
+import { CashBalanceEntry, Employee, EodReport, ShiftClock } from '@/lib/types'
 import { getCashVariance, getExpectedCashDeposit } from '@/lib/eodVariance'
 
 function isEodCloserRole(role: Employee['role']) {
@@ -79,6 +79,17 @@ const EMPTY_FORM = {
   memo: '',
 }
 
+const EMPTY_CASH_ENTRY_FORM = {
+  entry_date: '',
+  entry_type: 'cash_out' as CashBalanceEntry['entry_type'],
+  amount: '',
+  description: '',
+}
+
+function getSignedCashAmount(entry: CashBalanceEntry) {
+  return entry.entry_type === 'cash_in' ? Number(entry.amount) : Number(entry.amount) * -1
+}
+
 export default function EodHistoryPage() {
   const { eodReports } = useEodReports()
   const employees = useEmployees()
@@ -90,15 +101,37 @@ export default function EodHistoryPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [cashEntryForm, setCashEntryForm] = useState({
+    ...EMPTY_CASH_ENTRY_FORM,
+    entry_date: format(new Date(), 'yyyy-MM-dd'),
+  })
+  const [cashEntries, setCashEntries] = useState<CashBalanceEntry[]>([])
   const [inlineAudit, setInlineAudit] = useState<Record<string, { actualCash: string; varianceNote: string }>>({})
   const [auditSavingId, setAuditSavingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [cashEntrySaving, setCashEntrySaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
 
   useEffect(() => {
     setReports(eodReports)
   }, [eodReports])
+
+  useEffect(() => {
+    let mounted = true
+    void (async () => {
+      const { data, error } = await supabase
+        .from('cash_balance_entries')
+        .select('*')
+        .order('entry_date', { ascending: false })
+        .order('created_at', { ascending: false })
+      if (!mounted || error) return
+      setCashEntries((data ?? []) as CashBalanceEntry[])
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -128,10 +161,56 @@ export default function EodHistoryPage() {
       ),
     [filteredEodReports]
   )
+  const filteredCashEntries = useMemo(
+    () => cashEntries.filter(entry => entry.entry_date >= startDate && entry.entry_date <= endDate),
+    [cashEntries, endDate, startDate]
+  )
+  const cashEntryNetTotal = useMemo(
+    () => filteredCashEntries.reduce((sum, entry) => sum + getSignedCashAmount(entry), 0),
+    [filteredCashEntries]
+  )
   const eodCloserEmployees = useMemo(
     () => employees.filter(employee => isEodCloserRole(employee.role)),
     [employees]
   )
+  const latestAuditedReport = useMemo(
+    () =>
+      [...reports]
+        .filter(report => Number(report.actual_cash_on_hand ?? 0) > 0)
+        .sort((left, right) => {
+          if (left.session_date !== right.session_date) return right.session_date.localeCompare(left.session_date)
+          return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
+        })[0] ?? null,
+    [reports]
+  )
+  const currentCarryingCash = useMemo(() => {
+    if (!latestAuditedReport) {
+      return cashEntries.reduce((sum, entry) => sum + getSignedCashAmount(entry), 0)
+    }
+
+    const adjustmentsAfterAudit = cashEntries.filter(entry => {
+      if (entry.entry_date > latestAuditedReport.session_date) return true
+      if (entry.entry_date < latestAuditedReport.session_date) return false
+      return new Date(entry.created_at).getTime() > new Date(latestAuditedReport.updated_at).getTime()
+    })
+
+    return Number(latestAuditedReport.actual_cash_on_hand ?? 0) + adjustmentsAfterAudit.reduce((sum, entry) => sum + getSignedCashAmount(entry), 0)
+  }, [cashEntries, latestAuditedReport])
+  const runningBalanceByEntryId = useMemo(() => {
+    const sortedEntries = [...filteredCashEntries].sort((left, right) => {
+      if (left.entry_date !== right.entry_date) return right.entry_date.localeCompare(left.entry_date)
+      return new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+    })
+    const balances = new Map<string, number>()
+    let newerAdjustments = 0
+
+    for (const entry of sortedEntries) {
+      balances.set(entry.id, currentCarryingCash - newerAdjustments)
+      newerAdjustments += getSignedCashAmount(entry)
+    }
+
+    return balances
+  }, [currentCarryingCash, filteredCashEntries])
 
   useEffect(() => {
     setInlineAudit(current => {
@@ -174,6 +253,70 @@ export default function EodHistoryPage() {
     setSaveError(null)
     setSaveNotice(null)
     setDialogOpen(true)
+  }
+
+  const handleCashEntrySubmit = async () => {
+    if (!cashEntryForm.entry_date || !cashEntryForm.amount.trim() || !cashEntryForm.description.trim()) {
+      setSaveError('Date, amount, and description are required for cash in / cash out.')
+      return
+    }
+
+    setCashEntrySaving(true)
+    setSaveError(null)
+    setSaveNotice(null)
+
+    try {
+      const amount = Number(cashEntryForm.amount)
+      if (Number.isNaN(amount) || amount <= 0) {
+        setSaveError('Amount must be greater than 0.')
+        return
+      }
+
+      const payload = {
+        entry_date: cashEntryForm.entry_date,
+        entry_type: cashEntryForm.entry_type,
+        amount,
+        description: cashEntryForm.description.trim(),
+        updated_at: new Date().toISOString(),
+      }
+
+      const { data, error } = await supabase
+        .from('cash_balance_entries')
+        .insert(payload)
+        .select()
+        .single()
+
+      if (error || !data) {
+        setSaveError(error?.message ?? 'Failed to save cash movement entry.')
+        return
+      }
+
+      const entry = data as CashBalanceEntry
+
+      const sheetSync = await fetch('/api/cash-balance-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_id: entry.id }),
+      })
+      if (!sheetSync.ok) {
+        const payload = await sheetSync.json().catch(() => ({})) as { error?: string }
+        setSaveError(`Cash movement saved, but Google Sheets sync failed: ${payload.error ?? 'unknown error'}`)
+      }
+
+      setCashEntries(current =>
+        [entry, ...current].sort((left, right) => {
+          if (left.entry_date !== right.entry_date) return right.entry_date.localeCompare(left.entry_date)
+          return new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+        })
+      )
+      setCashEntryForm(current => ({
+        ...EMPTY_CASH_ENTRY_FORM,
+        entry_date: current.entry_date,
+      }))
+      setSaveNotice(`Cash ${entry.entry_type === 'cash_in' ? 'in' : 'out'} recorded for ${entry.entry_date}.`)
+    } finally {
+      setCashEntrySaving(false)
+    }
   }
 
   const handleSave = async () => {
@@ -374,6 +517,11 @@ export default function EodHistoryPage() {
             {saveNotice}
           </div>
         )}
+        {saveError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {saveError}
+          </div>
+        )}
         <ReportingToolbar
           period={period}
           refDate={refDate}
@@ -384,6 +532,124 @@ export default function EodHistoryPage() {
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
         />
+        <div className="mb-5 rounded-2xl border bg-slate-50/70 p-4">
+          <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash In / Cash Out</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <div>
+                  <Label>Date</Label>
+                  <Input
+                    type="date"
+                    value={cashEntryForm.entry_date}
+                    onChange={event => setCashEntryForm(current => ({ ...current, entry_date: event.target.value }))}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label>Type</Label>
+                  <Select
+                    value={cashEntryForm.entry_type}
+                    onValueChange={(value) => {
+                      if (!value) return
+                      setCashEntryForm(current => ({ ...current, entry_type: value as CashBalanceEntry['entry_type'] }))
+                    }}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cash_in">Cash In</SelectItem>
+                      <SelectItem value="cash_out">Cash Out</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Amount</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={cashEntryForm.amount}
+                    onChange={event => setCashEntryForm(current => ({ ...current, amount: event.target.value }))}
+                    className="mt-1"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button className="w-full" onClick={() => void handleCashEntrySubmit()} disabled={cashEntrySaving}>
+                    {cashEntrySaving ? 'Saving…' : 'Submit'}
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-3">
+                <Label>Description</Label>
+                <Input
+                  value={cashEntryForm.description}
+                  onChange={event => setCashEntryForm(current => ({ ...current, description: event.target.value }))}
+                  className="mt-1"
+                  placeholder="Why cash was added or taken out"
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <div className="rounded-xl border bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current Cash On Hand</div>
+                <div className="mt-2 text-3xl font-bold text-slate-950">{formatCurrency(currentCarryingCash)}</div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Read-only review value based on the latest audited actual cash plus cash in/out logged after that audit.
+                </p>
+              </div>
+              <div className="rounded-xl border bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Period Cash Movement</div>
+                <div className={`mt-2 text-2xl font-bold ${cashEntryNetTotal === 0 ? 'text-slate-900' : cashEntryNetTotal > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {formatCurrency(cashEntryNetTotal)}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {filteredCashEntries.length} cash movement record{filteredCashEntries.length === 1 ? '' : 's'} in this date range.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 rounded-xl border bg-white">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[110px]">Date</TableHead>
+                  <TableHead className="w-[92px]">Type</TableHead>
+                  <TableHead className="w-[110px] text-right">Amount</TableHead>
+                  <TableHead className="w-[130px] text-right">Running Balance</TableHead>
+                  <TableHead>Description</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredCashEntries.map(entry => (
+                  <TableRow key={entry.id}>
+                    <TableCell className="py-2 text-xs font-medium">{format(new Date(`${entry.entry_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
+                    <TableCell className="py-2">
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] ${entry.entry_type === 'cash_in' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                        {entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out'}
+                      </span>
+                    </TableCell>
+                    <TableCell className={`py-2 text-right text-xs font-semibold ${entry.entry_type === 'cash_in' ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {entry.entry_type === 'cash_in' ? '+' : '-'}{formatCurrency(Number(entry.amount))}
+                    </TableCell>
+                    <TableCell className="py-2 text-right text-xs font-semibold text-slate-900">
+                      {formatCurrency(runningBalanceByEntryId.get(entry.id) ?? 0)}
+                    </TableCell>
+                    <TableCell className="py-2 text-xs text-muted-foreground">{entry.description}</TableCell>
+                  </TableRow>
+                ))}
+                {filteredCashEntries.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-4 text-center text-sm text-muted-foreground">
+                      No cash in / cash out records for this range yet.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
         <Table>
           <TableHeader>
             <TableRow>

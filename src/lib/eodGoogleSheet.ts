@@ -1,11 +1,12 @@
 import { createSign } from 'crypto'
-import type { EodReport } from '@/lib/types'
+import type { CashBalanceEntry, EodReport } from '@/lib/types'
 
 type GoogleSheetsConfig = {
   clientEmail: string
   privateKey: string
   spreadsheetId: string
   sheetName: string
+  cashLogSheetName: string
 }
 
 function getConfig(): GoogleSheetsConfig | null {
@@ -13,9 +14,10 @@ function getConfig(): GoogleSheetsConfig | null {
   const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n')
   const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
   const sheetName = process.env.GOOGLE_SHEETS_EOD_SHEET_NAME ?? 'EOD'
+  const cashLogSheetName = process.env.GOOGLE_SHEETS_CASH_LOG_SHEET_NAME ?? 'Cash Log'
 
   if (!clientEmail || !privateKey || !spreadsheetId) return null
-  return { clientEmail, privateKey, spreadsheetId, sheetName }
+  return { clientEmail, privateKey, spreadsheetId, sheetName, cashLogSheetName }
 }
 
 function base64UrlEncode(value: string) {
@@ -157,6 +159,86 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
 
   await googleSheetsRequest(
     `${baseUrl}/${encodedSheetName}!A:O:append?valueInputOption=USER_ENTERED`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({ values }),
+    }
+  )
+
+  return { success: true, skipped: false, action: 'appended' }
+}
+
+export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry) {
+  const config = getConfig()
+  if (!config) {
+    return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+  }
+
+  const accessToken = await getAccessToken(config)
+  const encodedSheetName = encodeURIComponent(config.cashLogSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+
+  const headersRow = [[
+    'Entry ID',
+    'Date',
+    'Type',
+    'Amount',
+    'Signed Amount',
+    'Description',
+    'Created At',
+    'Updated At',
+  ]]
+
+  const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!A1:H1`,
+    accessToken,
+  )
+  if (!headerCheck.values || headerCheck.values.length === 0 || headerCheck.values[0].length === 0) {
+    await googleSheetsRequest(
+      `${baseUrl}/${encodedSheetName}!A1:H1?valueInputOption=USER_ENTERED`,
+      accessToken,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ values: headersRow }),
+      }
+    )
+  }
+
+  const idColumn = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!A2:A`,
+    accessToken,
+  )
+
+  const signedAmount = entry.entry_type === 'cash_in' ? Number(entry.amount) : Number(entry.amount) * -1
+  const values = [[
+    entry.id,
+    entry.entry_date,
+    entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out',
+    Number(entry.amount).toFixed(2),
+    signedAmount.toFixed(2),
+    entry.description,
+    entry.created_at,
+    entry.updated_at,
+  ]]
+
+  const existingRowIndex = (idColumn.values ?? []).findIndex(row => row[0] === entry.id)
+
+  if (existingRowIndex >= 0) {
+    const rowNumber = existingRowIndex + 2
+    await googleSheetsRequest(
+      `${baseUrl}/${encodedSheetName}!A${rowNumber}:H${rowNumber}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ values }),
+      }
+    )
+    return { success: true, skipped: false, action: 'updated', rowNumber }
+  }
+
+  await googleSheetsRequest(
+    `${baseUrl}/${encodedSheetName}!A:H:append?valueInputOption=USER_ENTERED`,
     accessToken,
     {
       method: 'POST',
