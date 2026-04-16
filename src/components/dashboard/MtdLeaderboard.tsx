@@ -128,7 +128,10 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
             </Button>
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-[40px_minmax(0,1fr)_80px_90px_80px_90px] gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+        <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <span className="font-semibold text-slate-600">Score</span> = Tasks 30% + Tasks/Hr 30% + Tips/Hr 25% + Hours 15% — ranked relative to team (0–100)
+        </div>
+        <div className="mt-2 grid grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
           <span>#</span>
           <span>Name</span>
           <span className="text-right">Score</span>
@@ -138,7 +141,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
         </div>
         <div className="mt-3 space-y-2">
           {perfRows.map((row, index) => (
-            <div key={row.emp.id} className="grid grid-cols-[40px_minmax(0,1fr)_80px_90px_80px_90px] items-center gap-3 rounded-xl border px-3 py-3.5 text-base">
+            <div key={row.emp.id} className="grid grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] items-center gap-3 rounded-xl border px-3 py-3.5 text-base">
               <div className="text-center text-lg font-bold text-amber-600">{index + 1}</div>
               <Button
                 variant="ghost"
@@ -147,7 +150,14 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
               >
                 {row.emp.name}
               </Button>
-              <div className="text-right text-base font-bold">{row.monthly?.score ?? '—'}</div>
+              <div className="text-right">
+                <div className="text-base font-bold">{row.monthly?.score ?? '—'}</div>
+                {row.monthly && (
+                  <div className="text-[10px] text-slate-400 leading-tight">
+                    T:{row.monthly.tasks} · {row.monthly.taskRate.toFixed(1)}/hr · {formatCurrency(row.monthly.tipRate)}/hr
+                  </div>
+                )}
+              </div>
               <div className="text-right text-sm text-muted-foreground">{row.monthly ? row.monthly.taskRate.toFixed(1) : '—'}/hr</div>
               <div className="text-right text-sm text-muted-foreground">{row.monthly?.hours.toFixed(1) ?? '—'}h</div>
               <div className="text-right text-sm text-muted-foreground">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div>
