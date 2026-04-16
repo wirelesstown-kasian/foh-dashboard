@@ -174,7 +174,7 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   return { success: true, skipped: false, action: 'appended' }
 }
 
-async function appendCashLogRow(config: GoogleSheetsConfig, accessToken: string, row: string[]) {
+async function upsertCashLogRow(config: GoogleSheetsConfig, accessToken: string, row: string[], entryId: string) {
   const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
 
@@ -191,11 +191,29 @@ async function appendCashLogRow(config: GoogleSheetsConfig, accessToken: string,
     )
   }
 
+  // Check if row with this ID already exists
+  const idColumn = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!A2:A`,
+    accessToken,
+  )
+  const existingIndex = (idColumn.values ?? []).findIndex(r => r[0] === entryId)
+
+  if (existingIndex >= 0) {
+    const rowNumber = existingIndex + 2
+    await googleSheetsRequest(
+      `${baseUrl}/${encodedSheetName}!A${rowNumber}:I${rowNumber}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      { method: 'PUT', body: JSON.stringify({ values: [row] }) },
+    )
+    return 'updated'
+  }
+
   await googleSheetsRequest(
     `${baseUrl}/${encodedSheetName}!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     accessToken,
     { method: 'POST', body: JSON.stringify({ values: [row] }) },
   )
+  return 'appended'
 }
 
 export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry, cashOnHand?: number) {
@@ -218,8 +236,8 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry,
     balance.toFixed(2),
   ]
 
-  await appendCashLogRow(config, accessToken, row)
-  return { success: true, skipped: false, action: 'appended' }
+  const action = await upsertCashLogRow(config, accessToken, row, entry.id)
+  return { success: true, skipped: false, action }
 }
 
 export async function syncEodCashCountToGoogleSheet(report: { id: string; session_date: string; actual_cash_on_hand: number; updated_at: string; cash_on_hand?: number }) {
@@ -242,6 +260,6 @@ export async function syncEodCashCountToGoogleSheet(report: { id: string; sessio
     runningBalance.toFixed(2),  // Cash On Hand = running balance
   ]
 
-  await appendCashLogRow(config, accessToken, row)
-  return { success: true, skipped: false, action: 'appended' }
+  const action = await upsertCashLogRow(config, accessToken, row, `eod_${report.id}`)
+  return { success: true, skipped: false, action }
 }
