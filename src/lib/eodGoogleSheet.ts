@@ -174,50 +174,77 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   return { success: true, skipped: false, action: 'appended' }
 }
 
-async function getCashLogRunningBalance(config: GoogleSheetsConfig, accessToken: string): Promise<number> {
+type SheetMeta = { lastRow: number; headers: boolean }
+
+async function getCashLogMeta(config: GoogleSheetsConfig, accessToken: string): Promise<SheetMeta> {
+  // Use spreadsheets.get to get sheet properties — single API call, no data transfer
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?fields=sheets(properties(title,gridProperties))`
+  try {
+    const result = await googleSheetsRequest<{
+      sheets?: { properties: { title: string; gridProperties: { rowCount: number; columnCount: number } } }[]
+    }>(url, accessToken)
+    const sheet = result.sheets?.find(s => s.properties.title === config.cashLogSheetName)
+    if (!sheet) return { lastRow: 0, headers: false }
+    // rowCount is total allocated rows; we need actual data rows — check header separately
+    return { lastRow: sheet.properties.gridProperties.rowCount, headers: true }
+  } catch {
+    return { lastRow: 0, headers: false }
+  }
+}
+
+async function getCashLogLastDataRow(config: GoogleSheetsConfig, accessToken: string): Promise<number> {
+  // Read only A column with metadata to find actual last data row
+  const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodedSheetName}!A:A?majorDimension=COLUMNS`
+  try {
+    const result = await googleSheetsRequest<{ values?: string[][] }>(url, accessToken)
+    return (result.values?.[0]?.length ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+async function getCashLogRunningBalance(config: GoogleSheetsConfig, accessToken: string, lastDataRow: number): Promise<number> {
+  if (lastDataRow < 2) return 0 // only header or empty
   const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
   try {
+    // Read only the single last I cell — O(1) regardless of sheet size
     const result = await googleSheetsRequest<{ values?: string[][] }>(
-      `${baseUrl}/${encodedSheetName}!I2:I`,
+      `${baseUrl}/${encodedSheetName}!I${lastDataRow}`,
       accessToken,
     )
-    const values = result.values ?? []
-    for (let i = values.length - 1; i >= 0; i--) {
-      const val = parseFloat(values[i]?.[0] ?? '')
-      if (!isNaN(val)) return val
-    }
+    const val = parseFloat(result.values?.[0]?.[0] ?? '')
+    return isNaN(val) ? 0 : val
   } catch {
-    // sheet doesn't exist yet
+    return 0
   }
-  return 0
 }
 
-async function ensureCashLogHeaders(config: GoogleSheetsConfig, accessToken: string) {
+async function ensureCashLogHeaders(config: GoogleSheetsConfig, accessToken: string, lastDataRow: number) {
+  if (lastDataRow >= 1) return // headers already exist
   const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
-  const headersRow = [[
-    'Entry ID',
-    'Date',
-    'Type',
-    'Amount',
-    'Signed Amount',
-    'Description',
-    'Created At',
-    'Updated At',
-    'Cash On Hand',
-  ]]
-  const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A1:I1`,
+  await googleSheetsRequest(
+    `${baseUrl}/${encodedSheetName}!A1:I1?valueInputOption=USER_ENTERED`,
+    accessToken,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ values: [['Entry ID', 'Date', 'Type', 'Amount', 'Signed Amount', 'Description', 'Created At', 'Updated At', 'Cash On Hand']] }),
+    },
+  )
+}
+
+async function findCashLogRowById(config: GoogleSheetsConfig, accessToken: string, entryId: string): Promise<number | null> {
+  // Still needs A column scan for upsert — unavoidable without a separate index
+  const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  const result = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!A2:A`,
     accessToken,
   )
-  if (!headerCheck.values || headerCheck.values.length === 0 || headerCheck.values[0].length === 0) {
-    await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A1:I1?valueInputOption=USER_ENTERED`,
-      accessToken,
-      { method: 'PUT', body: JSON.stringify({ values: headersRow }) },
-    )
-  }
+  const idx = (result.values ?? []).findIndex(r => r[0] === entryId)
+  return idx >= 0 ? idx + 2 : null
 }
 
 async function writeCashLogRow(
@@ -225,27 +252,23 @@ async function writeCashLogRow(
   accessToken: string,
   row: string[],
   entryId: string,
+  lastDataRow: number,
 ) {
   const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
 
-  const idColumn = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A2:A`,
-    accessToken,
-  )
-  const existingRowIndex = (idColumn.values ?? []).findIndex(r => r[0] === entryId)
+  const existingRow = await findCashLogRowById(config, accessToken, entryId)
 
-  if (existingRowIndex >= 0) {
-    const rowNumber = existingRowIndex + 2
+  if (existingRow !== null) {
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A${rowNumber}:I${rowNumber}?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A${existingRow}:I${existingRow}?valueInputOption=USER_ENTERED`,
       accessToken,
       { method: 'PUT', body: JSON.stringify({ values: [row] }) },
     )
-    return { action: 'updated', rowNumber }
+    return { action: 'updated', rowNumber: existingRow }
   }
 
-  const newRowNumber = (idColumn.values ?? []).length + 2
+  const newRowNumber = lastDataRow + 1
   await googleSheetsRequest(
     `${baseUrl}/${encodedSheetName}!A${newRowNumber}:I${newRowNumber}?valueInputOption=USER_ENTERED`,
     accessToken,
@@ -261,10 +284,13 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
   }
 
   const accessToken = await getAccessToken(config)
-  await ensureCashLogHeaders(config, accessToken)
+  // Single call to get actual last data row count
+  const lastDataRow = await getCashLogLastDataRow(config, accessToken)
+  await ensureCashLogHeaders(config, accessToken, lastDataRow)
 
   const signedAmount = entry.entry_type === 'cash_in' ? Number(entry.amount) : Number(entry.amount) * -1
-  const prevBalance = await getCashLogRunningBalance(config, accessToken)
+  // Read only the single last balance cell — O(1)
+  const prevBalance = await getCashLogRunningBalance(config, accessToken, lastDataRow)
   const cashOnHand = prevBalance + signedAmount
 
   const row = [
@@ -279,7 +305,7 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
     cashOnHand.toFixed(2),
   ]
 
-  const result = await writeCashLogRow(config, accessToken, row, entry.id)
+  const result = await writeCashLogRow(config, accessToken, row, entry.id, lastDataRow)
   return { success: true, skipped: false, ...result }
 }
 
@@ -290,7 +316,8 @@ export async function syncEodCashCountToGoogleSheet(report: { id: string; sessio
   }
 
   const accessToken = await getAccessToken(config)
-  await ensureCashLogHeaders(config, accessToken)
+  const lastDataRow = await getCashLogLastDataRow(config, accessToken)
+  await ensureCashLogHeaders(config, accessToken, lastDataRow)
 
   // EOD Cash Count resets the running balance to actual_cash_on_hand (absolute value)
   const cashOnHand = Number(report.actual_cash_on_hand)
@@ -308,6 +335,6 @@ export async function syncEodCashCountToGoogleSheet(report: { id: string; sessio
     cashOnHand.toFixed(2),
   ]
 
-  const result = await writeCashLogRow(config, accessToken, row, entryId)
+  const result = await writeCashLogRow(config, accessToken, row, entryId, lastDataRow)
   return { success: true, skipped: false, ...result }
 }
