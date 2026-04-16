@@ -98,37 +98,37 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
 
   return (
     <>
-      <div className="min-w-[360px] rounded-xl border bg-white p-3">
+      <div className="w-full rounded-xl border bg-white p-4 md:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">MTD Leaderboard</div>
-            <div className="mt-1 text-xs text-muted-foreground">{monthStart} - {rangeEnd}</div>
+            <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">MTD Leaderboard</div>
+            <div className="mt-1 text-sm text-muted-foreground">{monthStart} — {rangeEnd}</div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2"
+              className="h-9 w-9 px-0"
               onClick={() => setMonthRef(current => subMonths(current, 1))}
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
+              <ChevronLeft className="h-4 w-4" />
             </Button>
-            <div className="min-w-[110px] text-center">
-              <div className="text-xs font-semibold text-slate-700">{format(monthRef, 'MMMM yyyy')}</div>
-              <div className="text-[11px] text-muted-foreground">{totalTasks} completed</div>
+            <div className="min-w-32.5 text-center">
+              <div className="text-sm font-semibold text-slate-700">{format(monthRef, 'MMMM yyyy')}</div>
+              <div className="text-xs text-muted-foreground">{totalTasks} tasks completed</div>
             </div>
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2"
+              className="h-9 w-9 px-0"
               onClick={() => setMonthRef(current => addMonths(current, 1))}
               disabled={viewingCurrentMonth}
             >
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
-        <div className="mt-3 grid grid-cols-[28px_minmax(0,1fr)_60px_70px_70px_72px] gap-2 px-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
+        <div className="mt-4 grid grid-cols-[40px_minmax(0,1fr)_80px_90px_80px_90px] gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
           <span>#</span>
           <span>Name</span>
           <span className="text-right">Score</span>
@@ -137,20 +137,20 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
           <span className="text-right">Tips/Hr</span>
         </div>
         <div className="mt-3 space-y-2">
-          {perfRows.slice(0, 5).map((row, index) => (
-            <div key={row.emp.id} className="grid grid-cols-[28px_minmax(0,1fr)_60px_70px_70px_72px] items-center gap-2 rounded-lg border px-2 py-2 text-sm">
-              <div className="text-center font-semibold text-amber-700">{index + 1}</div>
+          {perfRows.map((row, index) => (
+            <div key={row.emp.id} className="grid grid-cols-[40px_minmax(0,1fr)_80px_90px_80px_90px] items-center gap-3 rounded-xl border px-3 py-3.5 text-base">
+              <div className="text-center text-lg font-bold text-amber-600">{index + 1}</div>
               <Button
                 variant="ghost"
-                className="h-auto justify-start px-0 py-0 font-medium text-left hover:bg-transparent hover:underline"
+                className="h-auto justify-start px-0 py-0 text-base font-semibold text-left hover:bg-transparent hover:underline"
                 onClick={() => setDetailEmployeeId(row.emp.id)}
               >
                 {row.emp.name}
               </Button>
-              <div className="text-right font-semibold">{row.monthly?.score ?? '—'}</div>
-              <div className="text-right text-xs text-muted-foreground">{row.monthly ? row.monthly.taskRate.toFixed(1) : '—'}/hr</div>
-              <div className="text-right text-xs text-muted-foreground">{row.monthly?.hours.toFixed(1) ?? '—'}h</div>
-              <div className="text-right text-xs text-muted-foreground">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div>
+              <div className="text-right text-base font-bold">{row.monthly?.score ?? '—'}</div>
+              <div className="text-right text-sm text-muted-foreground">{row.monthly ? row.monthly.taskRate.toFixed(1) : '—'}/hr</div>
+              <div className="text-right text-sm text-muted-foreground">{row.monthly?.hours.toFixed(1) ?? '—'}h</div>
+              <div className="text-right text-sm text-muted-foreground">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div>
             </div>
           ))}
         </div>
