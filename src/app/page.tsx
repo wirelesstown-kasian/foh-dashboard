@@ -8,11 +8,10 @@ import { StaffSidebar } from '@/components/dashboard/StaffSidebar'
 import { TaskFlow } from '@/components/dashboard/TaskFlow'
 import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
-import { MtdLeaderboard } from '@/components/dashboard/MtdLeaderboard'
 import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
-import { format } from 'date-fns'
+import { format, startOfMonth } from 'date-fns'
 
 const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
@@ -28,6 +27,7 @@ export default function DashboardPage() {
   const [categories, setCategories] = useState<TaskCategory[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [completions, setCompletions] = useState<TaskCompletion[]>([])
+  const [monthCompletions, setMonthCompletions] = useState<TaskCompletion[]>([])
   const [session, setSession] = useState<DailySession | null>(null)
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [notes, setNotes] = useState('')
@@ -43,13 +43,15 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     try {
       setLoadError(null)
+      const monthStart = format(startOfMonth(businessDate), 'yyyy-MM-dd')
 
-      const [empRes, schRes, catRes, taskRes, compRes, sessRes, clockRes] = await Promise.all([
+      const [empRes, schRes, catRes, taskRes, compRes, monthCompRes, sessRes, clockRes] = await Promise.all([
         supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true),
         supabase.from('schedules').select('*').eq('date', today),
         supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
         supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),
         supabase.from('task_completions').select('*, employee:employees(*)').eq('session_date', today),
+        supabase.from('task_completions').select('*').gte('session_date', monthStart).lte('session_date', today),
         supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
         fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' })
           .then(async res => {
@@ -72,6 +74,7 @@ export default function DashboardPage() {
       setCategories(catRes.data ?? [])
       setTasks(loadedTasks)
       setCompletions(compRes.data ?? [])
+      setMonthCompletions(monthCompRes.data ?? [])
       setClockRecords(clockRes.records ?? [])
       setSession(loadedSession)
       setNotes(loadedSession?.notes ?? '')
@@ -87,6 +90,7 @@ export default function DashboardPage() {
       setCategories([])
       setTasks([])
       setCompletions([])
+      setMonthCompletions([])
       setClockRecords([])
       setSession(null)
       setNotes('')
@@ -171,24 +175,19 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-lg font-bold">{format(businessDate, 'EEEE, MMMM d, yyyy')}</h1>
           </div>
-          <div className="flex items-start gap-4">
-            <div className="flex items-center gap-4 pt-1">
-              <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-32 overflow-hidden rounded-full bg-gray-200">
-                  <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progressPct}%` }} />
-                </div>
-                <span className="text-sm font-medium">{doneTasks}/{totalTasks} resolved</span>
+          <div className="flex items-center gap-4 pt-1">
+            <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-32 overflow-hidden rounded-full bg-gray-200">
+                <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progressPct}%` }} />
               </div>
-            </div>
-            <div className="hidden xl:block">
-              <MtdLeaderboard today={today} />
+              <span className="text-sm font-medium">{doneTasks}/{totalTasks} resolved</span>
             </div>
           </div>
         </div>
 
         <div className="hidden md:block">
-          <PerformanceBar employees={employees} completions={completions} today={today} />
+          <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} today={today} />
         </div>
         {doneTasks !== completedTasks && (
           <p className="text-xs text-muted-foreground">

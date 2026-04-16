@@ -11,7 +11,7 @@ import { formatCurrency } from '@/lib/reporting'
 import { Button } from '@/components/ui/button'
 
 interface MtdLeaderboardProps {
-  today: string
+  today?: string
 }
 
 export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
@@ -24,7 +24,8 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
 
-  const monthStart = format(new Date(`${today}T12:00:00`), 'yyyy-MM-01')
+  const effectiveToday = today ?? format(new Date(), 'yyyy-MM-dd')
+  const monthStart = format(new Date(`${effectiveToday}T12:00:00`), 'yyyy-MM-01')
   const filteredEmployees = useMemo(
     () => employees.filter(employee => employeeMatchesScheduleDepartment(employee, 'foh')),
     [employees]
@@ -37,11 +38,11 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
       eodReports,
       clockRecords,
       startDate: monthStart,
-      endDate: today,
+      endDate: effectiveToday,
       monthStart,
-      monthEnd: today,
+      monthEnd: effectiveToday,
     }),
-    [clockRecords, completions, eodReports, filteredEmployees, monthStart, today]
+    [clockRecords, completions, eodReports, effectiveToday, filteredEmployees, monthStart]
   )
 
   const detailTarget = perfRows.find(row => row.emp.id === detailEmployeeId) ?? null
@@ -54,7 +55,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
       filteredCompletions,
       totalTasks,
       startDate: monthStart,
-      endDate: today,
+      endDate: effectiveToday,
       departmentLabel: 'FOH',
     })
 
@@ -67,7 +68,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
         body: JSON.stringify({
           employee_id: employeeId,
           start_date: monthStart,
-          end_date: today,
+          end_date: effectiveToday,
           department: 'foh',
           report_html: buildReportHtml(employeeId),
         }),
@@ -94,7 +95,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">MTD Leaderboard</div>
-            <div className="mt-1 text-xs text-muted-foreground">{monthStart} - {today}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{monthStart} - {effectiveToday}</div>
           </div>
           <div className="text-right">
             <div className="text-xs text-muted-foreground">Tasks</div>

@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Calendar,
   FileText,
+  Trophy,
   ShieldCheck,
   Lock,
   UserRound,
@@ -18,6 +19,7 @@ import {
 
 const publicTabs = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { label: 'Leaderboard', href: '/leaderboard', icon: Trophy },
   { label: 'Schedule', href: '/schedule', icon: Calendar },
   { label: 'EOD', href: '/eod', icon: FileText },
 ]
