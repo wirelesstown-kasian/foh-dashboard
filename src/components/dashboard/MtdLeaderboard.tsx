@@ -129,7 +129,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
           </div>
         </div>
         <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          <span className="font-semibold text-slate-600">Score</span> = Tasks 30% + Tasks/Hr 30% + Tips/Hr 25% + Hours 15% — ranked relative to team (0–100)
+          <span className="font-semibold text-slate-600">Score</span> = Task Completion Rate 40% + Tasks/Hr 35% + Tips/Hr 25% — relative to team (0–100). Fair for any schedule type.
         </div>
         <div className="mt-2 grid grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
           <span>#</span>
@@ -154,7 +154,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
                 <div className="text-base font-bold">{row.monthly?.score ?? '—'}</div>
                 {row.monthly && (
                   <div className="text-[10px] text-slate-400 leading-tight">
-                    T:{row.monthly.tasks} · {row.monthly.taskRate.toFixed(1)}/hr · {formatCurrency(row.monthly.tipRate)}/hr
+                    {(row.monthly.taskCompletionRate * 100).toFixed(0)}% · {row.monthly.taskRate.toFixed(1)}/hr · {formatCurrency(row.monthly.tipRate)}/hr
                   </div>
                 )}
               </div>

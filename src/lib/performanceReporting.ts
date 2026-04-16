@@ -7,12 +7,12 @@ export interface EmployeeMonthPerformance {
   tasks: number
   hours: number
   totalTips: number
-  taskRate: number
-  tipRate: number
-  taskRank: number
+  taskCompletionRate: number   // avg daily share: my tasks / total tasks that day, across days worked
+  taskRate: number             // tasks per hour
+  tipRate: number              // tips per hour
+  taskCompletionRateRank: number
   taskRateRank: number
   tipRateRank: number
-  hoursRank: number
   score: number
 }
 
@@ -77,9 +77,12 @@ export function buildPerformanceRows({
 
   const monthHoursByEmp = new Map<string, number>()
   const monthTipsByEmp = new Map<string, number>()
+  const workingDatesByEmp = new Map<string, Set<string>>()
 
   for (const record of monthClockRecords) {
     monthHoursByEmp.set(record.employee_id, (monthHoursByEmp.get(record.employee_id) ?? 0) + getEffectiveClockHours(record))
+    if (!workingDatesByEmp.has(record.employee_id)) workingDatesByEmp.set(record.employee_id, new Set())
+    workingDatesByEmp.get(record.employee_id)!.add(record.session_date)
   }
 
   for (const eod of monthEods) {
@@ -92,43 +95,64 @@ export function buildPerformanceRows({
     }
   }
 
+  // Build daily total task map: date → total tasks completed by all employees that day
+  const dailyTotalTaskMap = new Map<string, number>()
+  for (const completion of monthCompletions) {
+    dailyTotalTaskMap.set(completion.session_date, (dailyTotalTaskMap.get(completion.session_date) ?? 0) + 1)
+  }
+
+  // Per employee: avg(my tasks that day / total tasks that day) across days worked
+  function getTaskCompletionRate(empId: string): number {
+    const workingDates = workingDatesByEmp.get(empId)
+    if (!workingDates || workingDates.size === 0) return 0
+    let total = 0
+    for (const date of workingDates) {
+      const myTasks = monthCompletions.filter(c => c.employee_id === empId && c.session_date === date).length
+      const dayTotal = dailyTotalTaskMap.get(date) ?? 0
+      total += dayTotal > 0 ? myTasks / dayTotal : 0
+    }
+    return total / workingDates.size
+  }
+
   const baseStats = employees
     .map(emp => {
       const tasks = monthCompletions.filter(completion => completion.employee_id === emp.id).length
       const hours = monthHoursByEmp.get(emp.id) ?? 0
       const totalTips = monthTipsByEmp.get(emp.id) ?? 0
+      const taskCompletionRate = getTaskCompletionRate(emp.id)
       return {
         emp,
         tasks,
         hours,
         totalTips,
+        taskCompletionRate,
         taskRate: hours > 0 ? tasks / hours : 0,
         tipRate: hours > 0 ? totalTips / hours : 0,
       }
     })
     .filter(item => item.tasks > 0 || item.hours > 0 || item.totalTips > 0)
 
-  const taskRankMap = getRankMap(baseStats, item => item.tasks, item => item.emp.id)
+  const taskCompletionRateRankMap = getRankMap(
+    baseStats.filter(item => (workingDatesByEmp.get(item.emp.id)?.size ?? 0) > 0),
+    item => item.taskCompletionRate,
+    item => item.emp.id,
+  )
   const taskRateRankMap = getRankMap(baseStats.filter(item => item.hours > 0), item => item.taskRate, item => item.emp.id)
   const tipRateRankMap = getRankMap(baseStats.filter(item => item.hours > 0), item => item.tipRate, item => item.emp.id)
-  const hoursRankMap = getRankMap(baseStats, item => item.hours, item => item.emp.id)
 
   const employeeMonthStats: EmployeeMonthPerformance[] = baseStats.map(item => {
-    const taskRank = taskRankMap.get(item.emp.id) ?? 1
+    const taskCompletionRateRank = taskCompletionRateRankMap.get(item.emp.id) ?? 1
     const taskRateRank = taskRateRankMap.get(item.emp.id) ?? 1
     const tipRateRank = tipRateRankMap.get(item.emp.id) ?? 1
-    const hoursRank = hoursRankMap.get(item.emp.id) ?? 1
     return {
       ...item,
-      taskRank,
+      taskCompletionRateRank,
       taskRateRank,
       tipRateRank,
-      hoursRank,
       score: Math.round(
-        scoreFromRank(taskRank, Math.max(taskRankMap.size, 1)) * 0.3 +
-        scoreFromRank(taskRateRank, Math.max(taskRateRankMap.size, 1)) * 0.3 +
-        scoreFromRank(tipRateRank, Math.max(tipRateRankMap.size, 1)) * 0.25 +
-        scoreFromRank(hoursRank, Math.max(hoursRankMap.size, 1)) * 0.15
+        scoreFromRank(taskCompletionRateRank, Math.max(taskCompletionRateRankMap.size, 1)) * 0.40 +
+        scoreFromRank(taskRateRank, Math.max(taskRateRankMap.size, 1)) * 0.35 +
+        scoreFromRank(tipRateRank, Math.max(tipRateRankMap.size, 1)) * 0.25
       ),
     }
   })
@@ -187,10 +211,9 @@ export function buildPerformanceReportHtml({
   }
 
   const rankCount = Math.max(employeeMonthStats.length, 1)
-  const taskScore = monthly ? Math.round(scoreFromRank(monthly.taskRank, rankCount) * 0.3) : 0
-  const taskRateScore = monthly ? Math.round(scoreFromRank(monthly.taskRateRank, rankCount) * 0.3) : 0
+  const taskCompletionRateScore = monthly ? Math.round(scoreFromRank(monthly.taskCompletionRateRank, rankCount) * 0.40) : 0
+  const taskRateScore = monthly ? Math.round(scoreFromRank(monthly.taskRateRank, rankCount) * 0.35) : 0
   const tipRateScore = monthly ? Math.round(scoreFromRank(monthly.tipRateRank, rankCount) * 0.25) : 0
-  const hoursScore = monthly ? Math.round(scoreFromRank(monthly.hoursRank, rankCount) * 0.15) : 0
 
   const leaderboardHtml = perfRows.map((perfRow, index) => {
     const isFocused = perfRow.emp.id === employeeId
@@ -199,6 +222,7 @@ export function buildPerformanceReportHtml({
       <td>${perfRow.emp.name}${isFocused ? ' ◀' : ''}</td>
       <td class="right">${perfRow.monthly?.score ?? '—'}</td>
       <td class="right">${perfRow.done}</td>
+      <td class="right">${perfRow.monthly ? (perfRow.monthly.taskCompletionRate * 100).toFixed(1) + '%' : '—'}</td>
       <td class="right">${perfRow.monthly ? perfRow.monthly.taskRate.toFixed(2) : '—'}</td>
       <td class="right">${perfRow.monthly ? formatCurrency(perfRow.monthly.tipRate) : '—'}</td>
     </tr>`
@@ -217,13 +241,15 @@ export function buildPerformanceReportHtml({
     <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
     <div class="summary">
       <div class="card"><strong>Overall Rank</strong><div class="metric">#${overallRank}</div><div class="muted">of ${staffCount}</div></div>
-      <div class="card"><strong>Performance Score</strong><div class="metric">${monthly?.score ?? '—'}</div><div class="muted">Monthly weighted KPI</div></div>
+      <div class="card"><strong>Performance Score</strong><div class="metric">${monthly?.score ?? '—'}</div><div class="muted">Shift-adjusted KPI</div></div>
       <div class="card"><strong>Tasks This Period</strong><div class="metric">${row.done}</div><div class="muted">Share ${share}</div></div>
       <div class="card"><strong>Total Tips</strong><div class="metric">${monthly ? formatCurrency(monthly.totalTips) : '—'}</div><div class="muted">This month</div></div>
     </div>
     <p>
       ${row.emp.name} is ranked #${overallRank} of ${staffCount} in ${departmentLabel}.
-      Monthly pace: ${monthly ? monthly.taskRate.toFixed(2) : '0.00'} tasks/hr — ${monthly?.hours.toFixed(2) ?? '0.00'} hrs worked — ${monthly ? formatCurrency(monthly.tipRate) : '$0.00'} tips/hr.
+      Avg task share per shift: ${monthly ? (monthly.taskCompletionRate * 100).toFixed(1) + '%' : '—'} —
+      ${monthly ? monthly.taskRate.toFixed(2) : '0.00'} tasks/hr —
+      ${monthly ? formatCurrency(monthly.tipRate) : '$0.00'} tips/hr.
     </p>
     <div class="report-grid">
       <div>
@@ -231,13 +257,13 @@ export function buildPerformanceReportHtml({
         <table class="compact-table">
           <thead><tr><th>KPI</th><th class="right">Weight</th><th class="right">Rank</th><th class="right">Component</th></tr></thead>
           <tbody>
-            <tr><td>Completed Tasks</td><td class="right">30%</td><td class="right">${monthly ? `#${monthly.taskRank}` : '—'}</td><td class="right">${taskScore}</td></tr>
-            <tr><td>Tasks / Hr</td><td class="right">30%</td><td class="right">${monthly ? `#${monthly.taskRateRank}` : '—'}</td><td class="right">${taskRateScore}</td></tr>
+            <tr><td>Task Completion Rate</td><td class="right">40%</td><td class="right">${monthly ? `#${monthly.taskCompletionRateRank}` : '—'}</td><td class="right">${taskCompletionRateScore}</td></tr>
+            <tr><td>Tasks / Hr</td><td class="right">35%</td><td class="right">${monthly ? `#${monthly.taskRateRank}` : '—'}</td><td class="right">${taskRateScore}</td></tr>
             <tr><td>Tips / Hr</td><td class="right">25%</td><td class="right">${monthly ? `#${monthly.tipRateRank}` : '—'}</td><td class="right">${tipRateScore}</td></tr>
-            <tr><td>Hours Worked</td><td class="right">15%</td><td class="right">${monthly ? `#${monthly.hoursRank}` : '—'}</td><td class="right">${hoursScore}</td></tr>
             <tr style="font-weight:700;border-top:2px solid #d1d5db"><td>Total Score</td><td></td><td></td><td class="right">${monthly?.score ?? '—'}</td></tr>
           </tbody>
         </table>
+        <p style="font-size:11px;color:#6b7280;margin-top:6px">Task Completion Rate = avg daily share of tasks completed, across shifts worked. Fair for any schedule type.</p>
         <h3>Daily Activity</h3>
         <table class="compact-table">
           <thead><tr><th>Date</th><th class="right">Tasks</th><th class="right">Day Share</th></tr></thead>
@@ -247,7 +273,7 @@ export function buildPerformanceReportHtml({
       <div>
         <h3>Team Leaderboard</h3>
         <table class="compact-table">
-          <thead><tr><th>#</th><th>Name</th><th class="right">Score</th><th class="right">Tasks</th><th class="right">Tasks/Hr</th><th class="right">Tips/Hr</th></tr></thead>
+          <thead><tr><th>#</th><th>Name</th><th class="right">Score</th><th class="right">Tasks</th><th class="right">Rate</th><th class="right">Tasks/Hr</th><th class="right">Tips/Hr</th></tr></thead>
           <tbody>${leaderboardHtml}</tbody>
         </table>
       </div>

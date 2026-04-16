@@ -99,8 +99,8 @@ export function PerformanceReportDialog({
                   <p className="mt-2 text-sm leading-6 text-slate-700">
                     Overall rank is #{perfRows.findIndex(item => item.emp.id === detailTarget.emp.id) + 1} of {perfRows.length}.
                     {' '}
-                    Tasks per hour rank is #{detailTarget.monthly?.taskRateRank ?? '—'}, working hours rank is #{detailTarget.monthly?.hoursRank ?? '—'},
-                    and completed tasks rank is #{detailTarget.monthly?.taskRank ?? '—'} for the current month.
+                    Task completion rate rank is #{detailTarget.monthly?.taskCompletionRateRank ?? '—'}, tasks per hour rank is #{detailTarget.monthly?.taskRateRank ?? '—'},
+                    and tips per hour rank is #{detailTarget.monthly?.tipRateRank ?? '—'} for the current month.
                   </p>
                 </div>
               </div>
@@ -112,16 +112,12 @@ export function PerformanceReportDialog({
                     <span className="text-sm font-semibold">#{perfRows.findIndex(item => item.emp.id === detailTarget.emp.id) + 1}</span>
                   </div>
                   <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
+                    <span className="text-sm font-medium">Task Completion Rate Rank</span>
+                    <span className="text-sm font-semibold">#{detailTarget.monthly?.taskCompletionRateRank ?? '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
                     <span className="text-sm font-medium">Tasks / Hr Rank</span>
                     <span className="text-sm font-semibold">#{detailTarget.monthly?.taskRateRank ?? '—'}</span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                    <span className="text-sm font-medium">Working Hours Rank</span>
-                    <span className="text-sm font-semibold">#{detailTarget.monthly?.hoursRank ?? '—'}</span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                    <span className="text-sm font-medium">Completed Tasks Rank</span>
-                    <span className="text-sm font-semibold">#{detailTarget.monthly?.taskRank ?? '—'}</span>
                   </div>
                   <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
                     <span className="text-sm font-medium">Tips / Hr Rank</span>
@@ -135,10 +131,9 @@ export function PerformanceReportDialog({
               const monthly = detailTarget.monthly
               const rankCount = Math.max(employeeMonthStats.length, 1)
               const rows = [
-                { label: 'Completed Tasks', weight: '30%', rank: monthly.taskRank, score: Math.round(scoreFromRank(monthly.taskRank, rankCount) * 0.30) },
-                { label: 'Tasks / Hr', weight: '30%', rank: monthly.taskRateRank, score: Math.round(scoreFromRank(monthly.taskRateRank, rankCount) * 0.30) },
+                { label: 'Task Completion Rate', weight: '40%', rank: monthly.taskCompletionRateRank, score: Math.round(scoreFromRank(monthly.taskCompletionRateRank, rankCount) * 0.40) },
+                { label: 'Tasks / Hr', weight: '35%', rank: monthly.taskRateRank, score: Math.round(scoreFromRank(monthly.taskRateRank, rankCount) * 0.35) },
                 { label: 'Tips / Hr', weight: '25%', rank: monthly.tipRateRank, score: Math.round(scoreFromRank(monthly.tipRateRank, rankCount) * 0.25) },
-                { label: 'Hours Worked', weight: '15%', rank: monthly.hoursRank, score: Math.round(scoreFromRank(monthly.hoursRank, rankCount) * 0.15) },
               ]
               return (
                 <div className="rounded-2xl border bg-white p-5">
