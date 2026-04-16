@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { syncEodReportToGoogleSheet } from '@/lib/eodGoogleSheet'
+import { syncEodReportToGoogleSheet, syncEodCashCountToGoogleSheet } from '@/lib/eodGoogleSheet'
 
 export async function POST(req: NextRequest) {
 
@@ -18,8 +18,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error?.message ?? 'Report not found' }, { status: 404 })
     }
 
-    const result = await syncEodReportToGoogleSheet(report)
-    return NextResponse.json(result)
+    const [eodResult, cashResult] = await Promise.all([
+      syncEodReportToGoogleSheet(report),
+      report.actual_cash_on_hand != null
+        ? syncEodCashCountToGoogleSheet({
+            id: report.id,
+            session_date: report.session_date,
+            actual_cash_on_hand: Number(report.actual_cash_on_hand),
+            updated_at: report.updated_at,
+          })
+        : Promise.resolve({ success: true, skipped: true, reason: 'No actual_cash_on_hand' }),
+    ])
+    return NextResponse.json({ eod: eodResult, cashLog: cashResult })
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to sync EOD report to Google Sheets' },

@@ -174,16 +174,28 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   return { success: true, skipped: false, action: 'appended' }
 }
 
-export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry) {
-  const config = getConfig()
-  if (!config) {
-    return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
-  }
-
-  const accessToken = await getAccessToken(config)
+async function getCashLogRunningBalance(config: GoogleSheetsConfig, accessToken: string): Promise<number> {
   const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  try {
+    const result = await googleSheetsRequest<{ values?: string[][] }>(
+      `${baseUrl}/${encodedSheetName}!I2:I`,
+      accessToken,
+    )
+    const values = result.values ?? []
+    for (let i = values.length - 1; i >= 0; i--) {
+      const val = parseFloat(values[i]?.[0] ?? '')
+      if (!isNaN(val)) return val
+    }
+  } catch {
+    // sheet doesn't exist yet
+  }
+  return 0
+}
 
+async function ensureCashLogHeaders(config: GoogleSheetsConfig, accessToken: string) {
+  const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
   const headersRow = [[
     'Entry ID',
     'Date',
@@ -195,7 +207,6 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
     'Updated At',
     'Cash On Hand',
   ]]
-
   const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
     `${baseUrl}/${encodedSheetName}!A1:I1`,
     accessToken,
@@ -204,47 +215,59 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
     await googleSheetsRequest(
       `${baseUrl}/${encodedSheetName}!A1:I1?valueInputOption=USER_ENTERED`,
       accessToken,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ values: headersRow }),
-      }
+      { method: 'PUT', body: JSON.stringify({ values: headersRow }) },
     )
   }
+}
+
+async function writeCashLogRow(
+  config: GoogleSheetsConfig,
+  accessToken: string,
+  row: string[],
+  entryId: string,
+) {
+  const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
 
   const idColumn = await googleSheetsRequest<{ values?: string[][] }>(
     `${baseUrl}/${encodedSheetName}!A2:A`,
     accessToken,
   )
-
-  const signedAmount = entry.entry_type === 'cash_in' ? Number(entry.amount) : Number(entry.amount) * -1
-  const existingRowIndex = (idColumn.values ?? []).findIndex(row => row[0] === entry.id)
+  const existingRowIndex = (idColumn.values ?? []).findIndex(r => r[0] === entryId)
 
   if (existingRowIndex >= 0) {
     const rowNumber = existingRowIndex + 2
-    const values = [[
-      entry.id,
-      entry.entry_date,
-      entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out',
-      Number(entry.amount).toFixed(2),
-      signedAmount.toFixed(2),
-      entry.description,
-      entry.created_at,
-      entry.updated_at,
-      `=SUM($E$2:E${rowNumber})`,
-    ]]
     await googleSheetsRequest(
       `${baseUrl}/${encodedSheetName}!A${rowNumber}:I${rowNumber}?valueInputOption=USER_ENTERED`,
       accessToken,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ values }),
-      }
+      { method: 'PUT', body: JSON.stringify({ values: [row] }) },
     )
-    return { success: true, skipped: false, action: 'updated', rowNumber }
+    return { action: 'updated', rowNumber }
   }
 
   const newRowNumber = (idColumn.values ?? []).length + 2
-  const values = [[
+  await googleSheetsRequest(
+    `${baseUrl}/${encodedSheetName}!A${newRowNumber}:I${newRowNumber}?valueInputOption=USER_ENTERED`,
+    accessToken,
+    { method: 'PUT', body: JSON.stringify({ values: [row] }) },
+  )
+  return { action: 'appended', rowNumber: newRowNumber }
+}
+
+export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry) {
+  const config = getConfig()
+  if (!config) {
+    return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+  }
+
+  const accessToken = await getAccessToken(config)
+  await ensureCashLogHeaders(config, accessToken)
+
+  const signedAmount = entry.entry_type === 'cash_in' ? Number(entry.amount) : Number(entry.amount) * -1
+  const prevBalance = await getCashLogRunningBalance(config, accessToken)
+  const cashOnHand = prevBalance + signedAmount
+
+  const row = [
     entry.id,
     entry.entry_date,
     entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out',
@@ -253,17 +276,38 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry)
     entry.description,
     entry.created_at,
     entry.updated_at,
-    `=SUM($E$2:E${newRowNumber})`,
-  ]]
+    cashOnHand.toFixed(2),
+  ]
 
-  await googleSheetsRequest(
-    `${baseUrl}/${encodedSheetName}!A${newRowNumber}:I${newRowNumber}?valueInputOption=USER_ENTERED`,
-    accessToken,
-    {
-      method: 'PUT',
-      body: JSON.stringify({ values }),
-    }
-  )
+  const result = await writeCashLogRow(config, accessToken, row, entry.id)
+  return { success: true, skipped: false, ...result }
+}
 
-  return { success: true, skipped: false, action: 'appended', rowNumber: newRowNumber }
+export async function syncEodCashCountToGoogleSheet(report: { id: string; session_date: string; actual_cash_on_hand: number; updated_at: string }) {
+  const config = getConfig()
+  if (!config) {
+    return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+  }
+
+  const accessToken = await getAccessToken(config)
+  await ensureCashLogHeaders(config, accessToken)
+
+  // EOD Cash Count resets the running balance to actual_cash_on_hand (absolute value)
+  const cashOnHand = Number(report.actual_cash_on_hand)
+  const entryId = `eod_${report.id}`
+
+  const row = [
+    entryId,
+    report.session_date,
+    'EOD Cash Count',
+    cashOnHand.toFixed(2),
+    cashOnHand.toFixed(2),
+    'EOD drawer reconciliation',
+    report.updated_at,
+    report.updated_at,
+    cashOnHand.toFixed(2),
+  ]
+
+  const result = await writeCashLogRow(config, accessToken, row, entryId)
+  return { success: true, skipped: false, ...result }
 }
