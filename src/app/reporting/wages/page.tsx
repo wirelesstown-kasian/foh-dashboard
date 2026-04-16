@@ -111,30 +111,51 @@ export default function WageReportPage() {
         monthTipsByEmp.set(dist.employee_id, (monthTipsByEmp.get(dist.employee_id) ?? 0) + Number(dist.net_tip))
       }
     }
+    // Build working dates per employee (for task completion rate)
+    const workingDatesByEmp = new Map<string, Set<string>>()
+    for (const r of clockRecords) {
+      if (!filteredEmpIds.has(r.employee_id) || r.session_date < monthStart || r.session_date > monthEnd) continue
+      if (!workingDatesByEmp.has(r.employee_id)) workingDatesByEmp.set(r.employee_id, new Set())
+      workingDatesByEmp.get(r.employee_id)!.add(r.session_date)
+    }
+    // Daily total task map
+    const dailyTotalTaskMap = new Map<string, number>()
+    for (const c of monthCompletions) {
+      dailyTotalTaskMap.set(c.session_date, (dailyTotalTaskMap.get(c.session_date) ?? 0) + 1)
+    }
+
     const base = filteredEmployees.map(emp => {
       const tasks = monthCompletions.filter(c => c.employee_id === emp.id).length
       const hrs = monthHoursByEmp.get(emp.id) ?? 0
       const totalTips = monthTipsByEmp.get(emp.id) ?? 0
-      return { empId: emp.id, tasks, hours: hrs, totalTips, taskRate: hrs > 0 ? tasks / hrs : 0, tipRate: hrs > 0 ? totalTips / hrs : 0 }
+      const workingDates = workingDatesByEmp.get(emp.id)
+      let taskCompletionRate = 0
+      if (workingDates && workingDates.size > 0) {
+        let total = 0
+        for (const date of workingDates) {
+          const myTasks = monthCompletions.filter(c => c.employee_id === emp.id && c.session_date === date).length
+          const dayTotal = dailyTotalTaskMap.get(date) ?? 0
+          total += dayTotal > 0 ? myTasks / dayTotal : 0
+        }
+        taskCompletionRate = total / workingDates.size
+      }
+      return { empId: emp.id, tasks, hours: hrs, totalTips, taskCompletionRate, taskRate: hrs > 0 ? tasks / hrs : 0, tipRate: hrs > 0 ? totalTips / hrs : 0 }
     }).filter(item => item.tasks > 0 || item.hours > 0)
 
-    const taskRM = getRankMap(base, i => i.tasks, i => i.empId)
+    const completionRateRM = getRankMap(base.filter(i => (workingDatesByEmp.get(i.empId)?.size ?? 0) > 0), i => i.taskCompletionRate, i => i.empId)
     const rateRM = getRankMap(base.filter(i => i.hours > 0), i => i.taskRate, i => i.empId)
     const tipRM = getRankMap(base.filter(i => i.hours > 0), i => i.tipRate, i => i.empId)
-    const hrsRM = getRankMap(base, i => i.hours, i => i.empId)
 
     const scored = base.map(item => {
-      const taskRank = taskRM.get(item.empId) ?? 1
+      const completionRateRank = completionRateRM.get(item.empId) ?? 1
       const rateRank = rateRM.get(item.empId) ?? 1
       const tipRank = tipRM.get(item.empId) ?? 1
-      const hrsRank = hrsRM.get(item.empId) ?? 1
       return {
         ...item,
         score: Math.round(
-          scoreFromRank(taskRank, Math.max(taskRM.size, 1)) * 0.3 +
-          scoreFromRank(rateRank, Math.max(rateRM.size, 1)) * 0.3 +
-          scoreFromRank(tipRank, Math.max(tipRM.size, 1)) * 0.25 +
-          scoreFromRank(hrsRank, Math.max(hrsRM.size, 1)) * 0.15
+          scoreFromRank(completionRateRank, Math.max(completionRateRM.size, 1)) * 0.40 +
+          scoreFromRank(rateRank, Math.max(rateRM.size, 1)) * 0.35 +
+          scoreFromRank(tipRank, Math.max(tipRM.size, 1)) * 0.25
         ),
       }
     }).sort((a, b) => b.score - a.score || b.tasks - a.tasks)
