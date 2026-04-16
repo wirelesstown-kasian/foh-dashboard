@@ -227,18 +227,19 @@ export async function syncEodCashCountToGoogleSheet(report: { id: string; sessio
   if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
 
   const accessToken = await getAccessToken(config)
-  const cashOnHand = report.cash_on_hand ?? Number(report.actual_cash_on_hand)
+  const actualCash = Number(report.actual_cash_on_hand)
+  const runningBalance = report.cash_on_hand ?? actualCash
 
   const row = [
     `eod_${report.id}`,
     report.session_date,
     'EOD Cash Count',
-    cashOnHand.toFixed(2),
-    cashOnHand.toFixed(2),
+    actualCash.toFixed(2),      // Amount = actual cash counted
+    actualCash.toFixed(2),      // Signed Amount = actual cash (always positive addition)
     'EOD drawer reconciliation',
     report.updated_at,
     report.updated_at,
-    cashOnHand.toFixed(2),
+    runningBalance.toFixed(2),  // Cash On Hand = running balance
   ]
 
   await appendCashLogRow(config, accessToken, row)
