@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { format } from 'date-fns'
+import { addMonths, endOfMonth, format, isSameMonth, startOfMonth, subMonths } from 'date-fns'
 import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
@@ -9,6 +9,7 @@ import { buildPerformanceReportHtml, buildPerformanceRows } from '@/lib/performa
 import { PerformanceReportDialog } from '@/components/reporting/PerformanceReportDialog'
 import { formatCurrency } from '@/lib/reporting'
 import { Button } from '@/components/ui/button'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface MtdLeaderboardProps {
   today?: string
@@ -23,9 +24,15 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
 
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
+  const [monthRef, setMonthRef] = useState(() => startOfMonth(new Date()))
 
   const effectiveToday = today ?? format(new Date(), 'yyyy-MM-dd')
-  const monthStart = format(new Date(`${effectiveToday}T12:00:00`), 'yyyy-MM-01')
+  const todayDate = new Date(`${effectiveToday}T12:00:00`)
+  const viewingCurrentMonth = isSameMonth(monthRef, todayDate)
+  const rangeStartDate = startOfMonth(monthRef)
+  const rangeEndDate = viewingCurrentMonth ? todayDate : endOfMonth(monthRef)
+  const monthStart = format(rangeStartDate, 'yyyy-MM-dd')
+  const rangeEnd = format(rangeEndDate, 'yyyy-MM-dd')
   const filteredEmployees = useMemo(
     () => employees.filter(employee => employeeMatchesScheduleDepartment(employee, 'foh')),
     [employees]
@@ -38,11 +45,11 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
       eodReports,
       clockRecords,
       startDate: monthStart,
-      endDate: effectiveToday,
+      endDate: rangeEnd,
       monthStart,
-      monthEnd: effectiveToday,
+      monthEnd: rangeEnd,
     }),
-    [clockRecords, completions, eodReports, effectiveToday, filteredEmployees, monthStart]
+    [clockRecords, completions, eodReports, filteredEmployees, monthStart, rangeEnd]
   )
 
   const detailTarget = perfRows.find(row => row.emp.id === detailEmployeeId) ?? null
@@ -55,7 +62,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
       filteredCompletions,
       totalTasks,
       startDate: monthStart,
-      endDate: effectiveToday,
+      endDate: rangeEnd,
       departmentLabel: 'FOH',
     })
 
@@ -68,7 +75,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
         body: JSON.stringify({
           employee_id: employeeId,
           start_date: monthStart,
-          end_date: effectiveToday,
+          end_date: rangeEnd,
           department: 'foh',
           report_html: buildReportHtml(employeeId),
         }),
@@ -95,12 +102,39 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">MTD Leaderboard</div>
-            <div className="mt-1 text-xs text-muted-foreground">{monthStart} - {effectiveToday}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{monthStart} - {rangeEnd}</div>
           </div>
-          <div className="text-right">
-            <div className="text-xs text-muted-foreground">Tasks</div>
-            <div className="text-sm font-semibold">{totalTasks}</div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => setMonthRef(current => subMonths(current, 1))}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <div className="min-w-[110px] text-center">
+              <div className="text-xs font-semibold text-slate-700">{format(monthRef, 'MMMM yyyy')}</div>
+              <div className="text-[11px] text-muted-foreground">{totalTasks} completed</div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => setMonthRef(current => addMonths(current, 1))}
+              disabled={viewingCurrentMonth}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
           </div>
+        </div>
+        <div className="mt-3 grid grid-cols-[28px_minmax(0,1fr)_60px_70px_70px_72px] gap-2 px-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
+          <span>#</span>
+          <span>Name</span>
+          <span className="text-right">Score</span>
+          <span className="text-right">Tasks/Hr</span>
+          <span className="text-right">Hours</span>
+          <span className="text-right">Tips/Hr</span>
         </div>
         <div className="mt-3 space-y-2">
           {perfRows.slice(0, 5).map((row, index) => (
@@ -119,14 +153,6 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
               <div className="text-right text-xs text-muted-foreground">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div>
             </div>
           ))}
-        </div>
-        <div className="mt-3 grid grid-cols-[28px_minmax(0,1fr)_60px_70px_70px_72px] gap-2 px-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">
-          <span>#</span>
-          <span>Name</span>
-          <span className="text-right">Score</span>
-          <span className="text-right">Tasks/Hr</span>
-          <span className="text-right">Hours</span>
-          <span className="text-right">Tips/Hr</span>
         </div>
       </div>
 
