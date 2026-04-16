@@ -117,6 +117,13 @@ export default function EodHistoryPage() {
 
   useEffect(() => {
     setReports(eodReports)
+    setSavedAuditIds(current => {
+      const next = new Set(current)
+      for (const report of eodReports) {
+        if (Number(report.actual_cash_on_hand ?? 0) > 0) next.add(report.id)
+      }
+      return next
+    })
   }, [eodReports])
 
   useEffect(() => {
