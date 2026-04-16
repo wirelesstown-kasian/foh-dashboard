@@ -4,7 +4,7 @@ import { syncCashBalanceEntryToGoogleSheet } from '@/lib/eodGoogleSheet'
 
 export async function POST(req: NextRequest) {
   try {
-    const { entry_id } = await req.json() as { entry_id?: string }
+    const { entry_id, cash_on_hand } = await req.json() as { entry_id?: string; cash_on_hand?: number }
     if (!entry_id) return NextResponse.json({ error: 'Missing entry_id' }, { status: 400 })
 
     const { data: entry, error } = await supabaseAdmin
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error?.message ?? 'Cash balance entry not found' }, { status: 404 })
     }
 
-    const result = await syncCashBalanceEntryToGoogleSheet(entry)
+    const result = await syncCashBalanceEntryToGoogleSheet(entry, cash_on_hand)
     return NextResponse.json(result)
   } catch (error) {
     return NextResponse.json(

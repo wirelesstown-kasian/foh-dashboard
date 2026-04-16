@@ -304,11 +304,15 @@ export default function EodHistoryPage() {
 
       const entries = data as CashBalanceEntry[]
 
+      // Calculate running balance for each new entry using the same logic as the UI display
+      let runningBalance = currentCarryingCash
+      // entries are in insertion order (cash_in first if both), compute balance sequentially
       for (const entry of entries) {
+        runningBalance += entry.entry_type === 'cash_in' ? Number(entry.amount) : -Number(entry.amount)
         const sheetSync = await fetch('/api/cash-balance-sheet-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entry_id: entry.id }),
+          body: JSON.stringify({ entry_id: entry.id, cash_on_hand: runningBalance }),
         })
         if (!sheetSync.ok) {
           const payload = await sheetSync.json().catch(() => ({})) as { error?: string }
