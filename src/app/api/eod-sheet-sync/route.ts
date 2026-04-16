@@ -3,20 +3,26 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { syncEodReportToGoogleSheet, syncEodCashCountToGoogleSheet } from '@/lib/eodGoogleSheet'
 
 export async function POST(req: NextRequest) {
-
   try {
     const { report_id } = await req.json() as { report_id?: string }
     if (!report_id) return NextResponse.json({ error: 'Missing report_id' }, { status: 400 })
 
-    const { data: report, error } = await supabaseAdmin
-      .from('eod_reports')
-      .select('*, closed_by:employees(name)')
-      .eq('id', report_id)
-      .single()
+    const [{ data: report, error }, { data: allReports }, { data: allCashEntries }] = await Promise.all([
+      supabaseAdmin.from('eod_reports').select('*, closed_by:employees(name)').eq('id', report_id).single(),
+      supabaseAdmin.from('eod_reports').select('actual_cash_on_hand').gt('actual_cash_on_hand', 0),
+      supabaseAdmin.from('cash_balance_entries').select('entry_type, amount'),
+    ])
 
     if (error || !report) {
       return NextResponse.json({ error: error?.message ?? 'Report not found' }, { status: 404 })
     }
+
+    // Running balance = sum of all EOD actual cash + sum of all cash in/out entries (same logic as UI)
+    const eodCashTotal = (allReports ?? []).reduce((sum, r) => sum + Number(r.actual_cash_on_hand ?? 0), 0)
+    const cashEntryTotal = (allCashEntries ?? []).reduce((sum, e) => {
+      return sum + (e.entry_type === 'cash_in' ? Number(e.amount) : -Number(e.amount))
+    }, 0)
+    const runningBalance = eodCashTotal + cashEntryTotal
 
     const [eodResult, cashResult] = await Promise.all([
       syncEodReportToGoogleSheet(report),
@@ -26,6 +32,7 @@ export async function POST(req: NextRequest) {
             session_date: report.session_date,
             actual_cash_on_hand: Number(report.actual_cash_on_hand),
             updated_at: report.updated_at,
+            cash_on_hand: runningBalance,
           })
         : Promise.resolve({ success: true, skipped: true, reason: 'No actual_cash_on_hand' }),
     ])

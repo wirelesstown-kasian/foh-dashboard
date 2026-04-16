@@ -169,29 +169,11 @@ export default function EodHistoryPage() {
     () => employees.filter(employee => isEodCloserRole(employee.role)),
     [employees]
   )
-  const latestAuditedReport = useMemo(
-    () =>
-      [...reports]
-        .filter(report => Number(report.actual_cash_on_hand ?? 0) > 0)
-        .sort((left, right) => {
-          if (left.session_date !== right.session_date) return right.session_date.localeCompare(left.session_date)
-          return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
-        })[0] ?? null,
-    [reports]
-  )
   const currentCarryingCash = useMemo(() => {
-    if (!latestAuditedReport) {
-      return cashEntries.reduce((sum, entry) => sum + getSignedCashAmount(entry), 0)
-    }
-
-    const adjustmentsAfterAudit = cashEntries.filter(entry => {
-      if (entry.entry_date > latestAuditedReport.session_date) return true
-      if (entry.entry_date < latestAuditedReport.session_date) return false
-      return new Date(entry.created_at).getTime() > new Date(latestAuditedReport.updated_at).getTime()
-    })
-
-    return Number(latestAuditedReport.actual_cash_on_hand ?? 0) + adjustmentsAfterAudit.reduce((sum, entry) => sum + getSignedCashAmount(entry), 0)
-  }, [cashEntries, latestAuditedReport])
+    const eodCashTotal = reports.reduce((sum, report) => sum + Number(report.actual_cash_on_hand ?? 0), 0)
+    const cashEntryTotal = cashEntries.reduce((sum, entry) => sum + getSignedCashAmount(entry), 0)
+    return eodCashTotal + cashEntryTotal
+  }, [cashEntries, reports])
   const runningBalanceByEntryId = useMemo(() => {
     const sortedEntries = [...filteredCashEntries].sort((left, right) => {
       if (left.entry_date !== right.entry_date) return right.entry_date.localeCompare(left.entry_date)

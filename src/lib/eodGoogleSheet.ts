@@ -222,12 +222,12 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry,
   return { success: true, skipped: false, action: 'appended' }
 }
 
-export async function syncEodCashCountToGoogleSheet(report: { id: string; session_date: string; actual_cash_on_hand: number; updated_at: string }) {
+export async function syncEodCashCountToGoogleSheet(report: { id: string; session_date: string; actual_cash_on_hand: number; updated_at: string; cash_on_hand?: number }) {
   const config = getConfig()
   if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
 
   const accessToken = await getAccessToken(config)
-  const cashOnHand = Number(report.actual_cash_on_hand)
+  const cashOnHand = report.cash_on_hand ?? Number(report.actual_cash_on_hand)
 
   const row = [
     `eod_${report.id}`,
