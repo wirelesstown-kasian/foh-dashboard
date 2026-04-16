@@ -187,7 +187,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="hidden md:block">
-          <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} today={today} />
+          <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} clockRecords={clockRecords} today={today} />
         </div>
         {doneTasks !== completedTasks && (
           <p className="text-xs text-muted-foreground">
