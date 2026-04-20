@@ -138,6 +138,7 @@ export default function EodPage() {
   const businessDate = getBusinessDate()
   const today = getBusinessDateString()
   const [session, setSession] = useState<DailySession | null>(null)
+  const [appCanManageAdmin, setAppCanManageAdmin] = useState(false)
   const [employees, setEmployees] = useState<Employee[]>([])
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
@@ -174,7 +175,7 @@ export default function EodPage() {
 
   const [form, setForm] = useState({
     cash_total: '',
-    batch_total: '',
+    net_revenue: '',
     cc_tip: '',
     cash_tip: '',
     sales_tax: '',
@@ -186,8 +187,47 @@ export default function EodPage() {
   const tipEligibleEmployees = employees.filter(employee => isTipEligibleRole(employee.role))
   const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
 
+  const toFinancialForm = useCallback((value: Partial<{
+    cash_total: string | number | null
+    batch_total: string | number | null
+    net_revenue: string | number | null
+    cc_tip: string | number | null
+    cash_tip: string | number | null
+    sales_tax: string | number | null
+    memo: string | null
+    closed_by: string | null
+  }>) => {
+    const cashTotal = value.cash_total != null ? String(value.cash_total) : ''
+    const salesTax = value.sales_tax != null ? String(value.sales_tax) : ''
+    const hasLegacyRevenueValues =
+      value.batch_total != null ||
+      value.net_revenue != null ||
+      cashTotal.trim() !== '' ||
+      salesTax.trim() !== ''
+    const resolvedNetRevenue = value.net_revenue != null
+      ? String(value.net_revenue)
+      : hasLegacyRevenueValues
+        ? String(
+            Math.max(
+              0,
+              (Number(value.cash_total ?? 0) || 0) + (Number(value.batch_total ?? 0) || 0) - (Number(value.sales_tax ?? 0) || 0)
+            )
+          )
+        : ''
+
+    return {
+      cash_total: cashTotal,
+      net_revenue: resolvedNetRevenue,
+      cc_tip: value.cc_tip != null ? String(value.cc_tip) : '',
+      cash_tip: value.cash_tip != null ? String(value.cash_tip) : '',
+      sales_tax: salesTax,
+      memo: value.memo ?? '',
+      closed_by: value.closed_by ?? '',
+    }
+  }, [])
+
   const load = useCallback(async () => {
-    const [sessRes, empRes, schRes, eodRes, clockRes] = await Promise.all([
+    const [sessRes, empRes, schRes, eodRes, clockRes, appSessionRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
       supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
       supabase.from('schedules').select('*').eq('date', today),
@@ -195,8 +235,12 @@ export default function EodPage() {
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
       )),
+      fetch('/api/app-session', { cache: 'no-store' }).then(async res => (
+        (await res.json().catch(() => ({}))) as { can_manage_admin?: boolean }
+      )),
     ])
     setSession(sessRes.data ?? null)
+    setAppCanManageAdmin(appSessionRes.can_manage_admin === true)
     setStartingCash(Number(sessRes.data?.starting_cash ?? 0))
     setEmployees(empRes.data ?? [])
     setSchedules(schRes.data ?? [])
@@ -207,15 +251,15 @@ export default function EodPage() {
     setCurrentReportId(eod?.id ?? null)
 
     if (eod) {
-      setForm({
-        cash_total: String(eod.cash_total),
-        batch_total: String(eod.batch_total),
-        cc_tip: String(eod.cc_tip),
-        cash_tip: String(eod.cash_tip),
-        sales_tax: eod.sales_tax != null ? String(eod.sales_tax) : '',
-        memo: eod.memo ?? '',
-        closed_by: eod.closed_by_employee_id ?? '',
-      })
+      setForm(toFinancialForm({
+        cash_total: eod.cash_total,
+        batch_total: eod.batch_total,
+        cc_tip: eod.cc_tip,
+        cash_tip: eod.cash_tip,
+        sales_tax: eod.sales_tax,
+        memo: eod.memo,
+        closed_by: eod.closed_by_employee_id,
+      }))
       setTipRows((eod.tip_distributions ?? [])
         .filter((d: TipDistribution & { employee?: Employee }) => {
           const role = d.employee?.role ?? (empRes.data ?? []).find((employee: Employee) => employee.id === d.employee_id)?.role
@@ -241,7 +285,7 @@ export default function EodPage() {
       setTipDistributionSaved(false)
     }
     setLoading(false)
-  }, [today])
+  }, [toFinancialForm, today])
 
   useEffect(() => {
     void load()
@@ -253,8 +297,8 @@ export default function EodPage() {
     const storedFinancials = window.localStorage.getItem(getFinancialDraftKey(today))
     if (storedFinancials && !existing) {
       try {
-        const parsed = JSON.parse(storedFinancials) as typeof form
-        setForm(parsed)
+        const parsed = JSON.parse(storedFinancials) as Partial<typeof form & { batch_total?: string }>
+        setForm(toFinancialForm(parsed))
         setFinancialsSaved(true)
       } catch {
         window.localStorage.removeItem(getFinancialDraftKey(today))
@@ -273,7 +317,7 @@ export default function EodPage() {
     } catch {
       window.localStorage.removeItem(getTipDraftKey(today))
     }
-  }, [existing, loading, today])
+  }, [existing, loading, toFinancialForm, today])
 
   const openClockRecords = clockRecords.filter(record => !record.clock_out_at)
   const openClockStaff = openClockRecords.map(record => ({
@@ -283,7 +327,8 @@ export default function EodPage() {
   }))
   const pendingApprovalRecords = clockRecords.filter(record => record.approval_status === 'pending_review')
   const hasOpenClockWarnings = openClockRecords.length > 0
-  const isLocked = !managerOverride && (!!existing || !session || session.current_phase !== 'complete')
+  const hasManagerAccess = managerOverride || appCanManageAdmin
+  const isLocked = !hasManagerAccess && (!!existing || !session || session.current_phase !== 'complete')
 
   const DENOM_VALUES: Record<string, number> = {
     d100: 100, d50: 50, d20: 20, d10: 10, d5: 5,
@@ -298,11 +343,13 @@ export default function EodPage() {
   const registerTotal = effectiveCoinTotal + effectiveBillTotal
   const cashFromDrawer = Math.max(0, registerTotal - startingCash)
 
-  const grossRevenue = (parseFloat(form.cash_total) || 0) + (parseFloat(form.batch_total) || 0)
+  const cashTotal = parseFloat(form.cash_total) || 0
+  const netRevenue = parseFloat(form.net_revenue) || 0
   const salesTax = parseFloat(form.sales_tax) || 0
-  const netRevenue = grossRevenue - salesTax
+  const grossRevenue = netRevenue + salesTax
+  const batchTotal = grossRevenue - cashTotal
   const tipTotal = (parseFloat(form.cc_tip) || 0) + (parseFloat(form.cash_tip) || 0)
-  const totalCashDeposit = (parseFloat(form.cash_total) || 0) + (parseFloat(form.cash_tip) || 0)
+  const totalCashDeposit = cashTotal + (parseFloat(form.cash_tip) || 0)
 
   const tipResults = calculateTips(
     tipTotal,
@@ -392,12 +439,16 @@ export default function EodPage() {
     setSaving(true)
     setSaveError(null)
     try {
+      if (batchTotal < 0) {
+        throw new Error('Net revenue plus sales tax must be at least as much as cash amount.')
+      }
+
       const payload = {
         session_date: today,
         closed_by_employee_id: form.closed_by || null,
         starting_cash: startingCash,
-        cash_total: parseFloat(form.cash_total) || 0,
-        batch_total: parseFloat(form.batch_total) || 0,
+        cash_total: cashTotal,
+        batch_total: batchTotal,
         revenue_total: grossRevenue,
         cc_tip: parseFloat(form.cc_tip) || 0,
         cash_tip: parseFloat(form.cash_tip) || 0,
@@ -570,8 +621,10 @@ export default function EodPage() {
             <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Closed By</span><span className="font-medium">{closedByName}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Starting Cash</span><span>${startingCash.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Cash Total</span><span>${(parseFloat(form.cash_total) || 0).toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Batch Total</span><span>${(parseFloat(form.batch_total) || 0).toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Cash Amount</span><span>${cashTotal.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Net Revenue</span><span>${netRevenue.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Sales Tax</span><span>${salesTax.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Calculated Batch</span><span>${batchTotal.toFixed(2)}</span></div>
               <div className="flex justify-between font-semibold border-t pt-2"><span>Gross Revenue</span><span>${grossRevenue.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">CC Tips</span><span>${(parseFloat(form.cc_tip) || 0).toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Cash Tips</span><span>${(parseFloat(form.cash_tip) || 0).toFixed(2)}</span></div>
@@ -625,10 +678,11 @@ export default function EodPage() {
   const eodAlreadySaved = !!existing
   const canSaveFinancials =
     form.cash_total.trim() !== '' &&
-    form.batch_total.trim() !== '' &&
+    form.net_revenue.trim() !== '' &&
     form.cc_tip.trim() !== '' &&
     form.cash_tip.trim() !== '' &&
-    form.sales_tax.trim() !== ''
+    form.sales_tax.trim() !== '' &&
+    batchTotal >= 0
   const financialStepState: 'saved' | 'dirty' | 'locked' =
     financialsSaved ? 'saved' : canSaveFinancials ? 'dirty' : 'locked'
   const tipStepState: 'saved' | 'dirty' | 'ready' | 'locked' =
@@ -809,6 +863,11 @@ export default function EodPage() {
           </div>
         ) : (
           <>
+            {appCanManageAdmin && !managerOverride && (
+              <div className="mb-6 rounded-xl border border-blue-300 bg-blue-50 px-5 py-4 text-sm text-blue-800">
+                Manager access is active. You can view and prepare EOD before all dashboard tasks are complete.
+              </div>
+            )}
             {(openClockRecords.length > 0 || pendingApprovalRecords.length > 0) && (
               <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-800">
                 <p className="font-semibold">Attendance Warning</p>
@@ -1018,12 +1077,12 @@ export default function EodPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <Label>Cash Total</Label>
+                      <Label>Cash Amount</Label>
                       <Input type="number" step="0.01" value={form.cash_total} onChange={e => setField('cash_total', e.target.value)} placeholder="0.00" />
                     </div>
                     <div>
-                      <Label>Batch Total</Label>
-                      <Input type="number" step="0.01" value={form.batch_total} onChange={e => setField('batch_total', e.target.value)} placeholder="0.00" />
+                      <Label>Net Revenue</Label>
+                      <Input type="number" step="0.01" value={form.net_revenue} onChange={e => setField('net_revenue', e.target.value)} placeholder="0.00" />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -1032,12 +1091,23 @@ export default function EodPage() {
                       <Input type="number" step="0.01" value={form.sales_tax} onChange={e => setField('sales_tax', e.target.value)} placeholder="0.00" />
                     </div>
                     <div>
-                      <Label>Gross Revenue</Label>
+                      <Label>Calculated Batch</Label>
                       <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold">
-                        ${grossRevenue.toFixed(2)}
+                        ${batchTotal.toFixed(2)}
                       </div>
                     </div>
                   </div>
+                  <div>
+                    <Label>Gross Revenue</Label>
+                    <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold">
+                      ${grossRevenue.toFixed(2)}
+                    </div>
+                  </div>
+                  {batchTotal < 0 && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      Net revenue plus sales tax must be at least as much as cash amount.
+                    </div>
+                  )}
                 </div>
               </div>
 

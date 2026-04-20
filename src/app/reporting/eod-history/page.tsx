@@ -161,7 +161,7 @@ export default function EodHistoryPage() {
             revenue: sum.revenue + report.revenue_total,
             tax: sum.tax + tax,
             tip: sum.tip + report.tip_total,
-            net: sum.net + (report.revenue_total - tax - report.tip_total),
+            net: sum.net + (report.revenue_total - tax),
             deposit: sum.deposit + report.cash_deposit,
             variance: sum.variance + Number(report.cash_variance ?? 0),
           }
@@ -694,7 +694,7 @@ export default function EodHistoryPage() {
                 <TableCell className="py-2 text-right text-xs font-semibold">{formatCurrency(report.revenue_total)}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-muted-foreground">{formatCurrency(Number(report.sales_tax ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-green-700">{formatCurrency(report.tip_total)}</TableCell>
-                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0) - report.tip_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs">{formatCurrency(report.cash_deposit)}</TableCell>
                 <TableCell className="py-2">
                   <Input
@@ -823,7 +823,7 @@ export default function EodHistoryPage() {
               </Select>
             </div>
             <div>
-              <Label>Cash Total</Label>
+              <Label>EOD Cash</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -833,7 +833,7 @@ export default function EodHistoryPage() {
               />
             </div>
             <div>
-              <Label>Batch Total</Label>
+              <Label>Total Batch Amount</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -904,7 +904,7 @@ export default function EodHistoryPage() {
               </div>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Actual Cash on Hand - (Cash Total + Cash Tip) = Variance
+              Actual Cash on Hand - (EOD Cash + Cash Tip) = Variance
             </p>
           </div>
 
