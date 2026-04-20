@@ -345,10 +345,10 @@ export default function EodPage() {
 
   const cashTotal = parseFloat(form.cash_total) || 0
   const netRevenue = parseFloat(form.net_revenue) || 0
-  const salesTax = parseFloat(form.sales_tax) || 0
-  const grossRevenue = netRevenue + salesTax
-  const batchTotal = grossRevenue - cashTotal
   const tipTotal = (parseFloat(form.cc_tip) || 0) + (parseFloat(form.cash_tip) || 0)
+  const salesTax = parseFloat(form.sales_tax) || 0
+  const grossRevenue = netRevenue + salesTax + tipTotal
+  const batchTotal = grossRevenue - cashTotal
   const totalCashDeposit = cashTotal + (parseFloat(form.cash_tip) || 0)
 
   const tipResults = calculateTips(
@@ -440,7 +440,7 @@ export default function EodPage() {
     setSaveError(null)
     try {
       if (batchTotal < 0) {
-        throw new Error('Net revenue plus sales tax must be at least as much as cash amount.')
+        throw new Error('Net revenue plus sales tax and total tip must be at least as much as cash amount.')
       }
 
       const payload = {
@@ -842,6 +842,14 @@ export default function EodPage() {
                 {pendingApprovalRecords.length > 0 && <p className="mt-1">{pendingApprovalRecords.length} auto clock-out{pendingApprovalRecords.length > 1 ? 's are' : ' is'} pending manager approval.</p>}
               </div>
             )}
+            <div className="flex flex-col items-center gap-3">
+              <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
+                Manager PIN Access
+              </Button>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                Managers can open EOD from here without waiting for all dashboard tasks to be completed.
+              </p>
+            </div>
             {eodAlreadySaved && (
               <div className="flex flex-col items-center gap-3">
                 <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
@@ -1105,7 +1113,7 @@ export default function EodPage() {
                   </div>
                   {batchTotal < 0 && (
                     <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                      Net revenue plus sales tax must be at least as much as cash amount.
+                      Net revenue plus sales tax and total tip must be at least as much as cash amount.
                     </div>
                   )}
                 </div>
@@ -1298,8 +1306,8 @@ export default function EodPage() {
       </div>
       <PinModal
         open={showUnlockPin}
-        title="Unlock Saved EOD"
-        description="Manager PIN required to reopen this EOD"
+        title="Unlock EOD"
+        description="Enter manager PIN to open this EOD screen"
         onConfirm={handleManagerUnlock}
         onClose={() => { setShowUnlockPin(false); setUnlockError(null) }}
         error={unlockError}
