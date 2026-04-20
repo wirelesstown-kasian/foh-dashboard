@@ -273,11 +273,24 @@ export async function POST(req: NextRequest) {
   // 2. Full revenue and tip settlement report to admin only
     const closedByName = escapeHtml((report.closed_by as { name?: string } | null)?.name ?? 'N/A')
     const memoHtml = report.memo
-      ? `<p><strong>Memo:</strong> ${escapeHtml(report.memo)}</p>`
+      ? `<div style="margin-top:14px;padding:12px 14px;border:1px solid #d1d5db;border-radius:12px;background:#f8fafc"><div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px">Memo</div><div style="font-size:13px;color:#111827;line-height:1.6">${escapeHtml(report.memo)}</div></div>`
       : ''
     const varianceNoteHtml = report.variance_note
-      ? `<p><strong>Variance Note:</strong> ${escapeHtml(report.variance_note)}</p>`
+      ? `<div style="margin-top:14px;padding:12px 14px;border:1px solid #fecaca;border-radius:12px;background:#fef2f2"><div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#b91c1c;margin-bottom:6px">Variance Note</div><div style="font-size:13px;color:#7f1d1d;line-height:1.6">${escapeHtml(report.variance_note)}</div></div>`
       : ''
+
+    const grossRevenue = Number(report.revenue_total ?? 0)
+    const salesTax = Number(report.sales_tax ?? 0)
+    const tipTotal = Number(report.tip_total ?? 0)
+    const netRevenue = grossRevenue - salesTax - tipTotal
+    const cashTotal = Number(report.cash_total ?? 0)
+    const batchTotal = Number(report.batch_total ?? 0)
+    const ccTip = Number(report.cc_tip ?? 0)
+    const cashTip = Number(report.cash_tip ?? 0)
+    const expectedCash = Number(report.cash_deposit ?? 0)
+    const actualCash = Number(report.actual_cash_on_hand ?? 0)
+    const variance = Number(report.cash_variance ?? 0)
+    const startingCash = Number(report.starting_cash ?? 0)
 
     const tipRows = tipDists.map(d =>
     `<tr>
@@ -287,30 +300,51 @@ export async function POST(req: NextRequest) {
       <td>-$${Number(d.house_deduction).toFixed(2)}</td>
       <td><strong>$${Number(d.net_tip).toFixed(2)}</strong></td>
     </tr>`
-  ).join('')
+  ).join('') || `<tr><td colspan="5" style="text-align:center;color:#6b7280">No tip distribution rows saved.</td></tr>`
 
     const adminEodHtml = renderEmailShell(logoUrl, `
       ${attendanceWarningHtml}
-      <h2 style="color:#1a1a1a">FOH End of Day Report — ${report.session_date}</h2>
-      <p><strong>Closed by:</strong> ${closedByName}</p>
-      <h3>Revenue</h3>
+      <h2 style="color:#111827;margin:0">FOH End of Day Report</h2>
+      <p style="margin:6px 0 0;color:#475569"><strong>${report.session_date}</strong> · Closed by ${closedByName}</p>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0 12px">
+        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:#f8fafc">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b">Gross Revenue</div>
+          <div style="font-size:24px;font-weight:800;color:#111827;margin-top:4px">$${grossRevenue.toFixed(2)}</div>
+        </div>
+        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:#ecfeff">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0f766e">Net Revenue</div>
+          <div style="font-size:24px;font-weight:800;color:#0f766e;margin-top:4px">$${netRevenue.toFixed(2)}</div>
+        </div>
+        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:#fff7ed">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#c2410c">Expected Cash</div>
+          <div style="font-size:24px;font-weight:800;color:#9a3412;margin-top:4px">$${expectedCash.toFixed(2)}</div>
+        </div>
+        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:${variance === 0 ? '#f8fafc' : variance > 0 ? '#ecfdf5' : '#fef2f2'}">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${variance === 0 ? '#64748b' : variance > 0 ? '#047857' : '#b91c1c'}">Variance</div>
+          <div style="font-size:24px;font-weight:800;color:${variance === 0 ? '#111827' : variance > 0 ? '#047857' : '#b91c1c'};margin-top:4px">$${variance.toFixed(2)}</div>
+        </div>
+      </div>
+      <h3 style="margin-top:18px">Revenue Summary</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
-        <tr><td>Starting Cash</td><td style="text-align:right">$${Number(report.starting_cash ?? 0).toFixed(2)}</td></tr>
-        <tr><td>Cash Total</td><td style="text-align:right">$${Number(report.cash_total).toFixed(2)}</td></tr>
-        <tr><td>Batch Total</td><td style="text-align:right">$${Number(report.batch_total).toFixed(2)}</td></tr>
-        <tr style="background:#f5f5f5"><td><strong>Gross Revenue</strong></td><td style="text-align:right"><strong>$${Number(report.revenue_total).toFixed(2)}</strong></td></tr>
-        <tr><td>Sales Tax</td><td style="text-align:right">$${Number(report.sales_tax ?? 0).toFixed(2)}</td></tr>
-        <tr><td>Tip Total</td><td style="text-align:right">$${Number(report.tip_total).toFixed(2)}</td></tr>
-        <tr style="background:#e8f5e9"><td><strong>Net Revenue</strong></td><td style="text-align:right"><strong>$${(Number(report.revenue_total) - Number(report.sales_tax ?? 0) - Number(report.tip_total)).toFixed(2)}</strong></td></tr>
-        <tr><td>CC Tips</td><td style="text-align:right">$${Number(report.cc_tip).toFixed(2)}</td></tr>
-        <tr><td>Cash Tips</td><td style="text-align:right">$${Number(report.cash_tip).toFixed(2)}</td></tr>
-        <tr><td>Expected Cash</td><td style="text-align:right">$${Number(report.cash_deposit).toFixed(2)}</td></tr>
-        <tr><td>Actual Cash on Hand</td><td style="text-align:right">$${Number(report.actual_cash_on_hand ?? 0).toFixed(2)}</td></tr>
-        <tr><td>Variance</td><td style="text-align:right">$${Number(report.cash_variance ?? 0).toFixed(2)}</td></tr>
+        <tr><td>Starting Cash</td><td style="text-align:right">$${startingCash.toFixed(2)}</td></tr>
+        <tr><td>Cash Revenue</td><td style="text-align:right">$${cashTotal.toFixed(2)}</td></tr>
+        <tr><td>Batch Total</td><td style="text-align:right">$${batchTotal.toFixed(2)}</td></tr>
+        <tr style="background:#f8fafc"><td><strong>Gross Revenue</strong></td><td style="text-align:right"><strong>$${grossRevenue.toFixed(2)}</strong></td></tr>
+        <tr><td>Sales Tax</td><td style="text-align:right">$${salesTax.toFixed(2)}</td></tr>
+        <tr><td>Tip Total</td><td style="text-align:right">$${tipTotal.toFixed(2)}</td></tr>
+        <tr style="background:#ecfeff"><td><strong>Net Revenue</strong></td><td style="text-align:right"><strong>$${netRevenue.toFixed(2)}</strong></td></tr>
+      </table>
+      <h3 style="margin-top:18px">Tip & Cash Audit</h3>
+      <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+        <tr><td>CC Tips</td><td style="text-align:right">$${ccTip.toFixed(2)}</td></tr>
+        <tr><td>Cash Tips</td><td style="text-align:right">$${cashTip.toFixed(2)}</td></tr>
+        <tr><td>Expected Cash Deposit</td><td style="text-align:right">$${expectedCash.toFixed(2)}</td></tr>
+        <tr><td>Actual Cash on Hand</td><td style="text-align:right">$${actualCash.toFixed(2)}</td></tr>
+        <tr style="background:${variance === 0 ? '#f8fafc' : variance > 0 ? '#ecfdf5' : '#fef2f2'}"><td><strong>Variance</strong></td><td style="text-align:right"><strong>$${variance.toFixed(2)}</strong></td></tr>
       </table>
       ${varianceNoteHtml}
       ${memoHtml}
-      <h3>Tip Distribution</h3>
+      <h3 style="margin-top:18px">Tip Distribution</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
         <tr style="background:#f5f5f5"><th>Name</th><th>Hours</th><th>Tip Share</th><th>Deduction</th><th>Net Tip</th></tr>
         ${tipRows}

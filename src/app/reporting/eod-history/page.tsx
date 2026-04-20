@@ -707,10 +707,10 @@ export default function EodHistoryPage() {
               <TableHead className="w-[92px]">Date</TableHead>
               <TableHead className="w-[88px] text-right">Cash</TableHead>
               <TableHead className="w-[124px]">Batch Total</TableHead>
-              <TableHead className="w-[96px] text-right">Revenue</TableHead>
+              <TableHead className="w-[96px] text-right">Gross Revenue</TableHead>
               <TableHead className="w-[82px] text-right">Tax</TableHead>
               <TableHead className="w-[82px] text-right">Tips</TableHead>
-              <TableHead className="w-[96px] text-right text-emerald-700">Net</TableHead>
+              <TableHead className="w-[96px] text-right text-emerald-700">Net Revenue</TableHead>
               <TableHead className="w-[96px] text-right">Deposit</TableHead>
               <TableHead className="w-[150px]">Actual Cash</TableHead>
               <TableHead className="w-[90px] text-right">Variance</TableHead>
