@@ -67,7 +67,7 @@ export async function sendWeeklyScheduleEmails({
     })
   }
 
-  const emailPromises: Promise<void>[] = []
+  const emailQueue: Array<Parameters<typeof sendEmail>[0]> = []
   const fohSchedules = (schedules as Array<{
     date: string
     start_time: string
@@ -177,31 +177,35 @@ export async function sendWeeklyScheduleEmails({
     `)
 
     const weekStartShort = weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    emailPromises.push(
-      sendEmail({
-        resendKey,
-        to: employee.email,
-        subject: `Your Schedule — Week of ${weekStartShort}`,
-        html,
-        fromName: emailSettings.from_name,
-        fromEmail: emailSettings.from_email,
-        replyTo: emailSettings.reply_to,
-      })
-    )
+    emailQueue.push({
+      resendKey,
+      to: employee.email,
+      subject: `Your Schedule — Week of ${weekStartShort}`,
+      html,
+      fromName: emailSettings.from_name,
+      fromEmail: emailSettings.from_email,
+      replyTo: emailSettings.reply_to,
+    })
   }
 
-  if (emailPromises.length === 0) {
+  if (emailQueue.length === 0) {
     return { success: true, sent: 0, message: 'No scheduled employees have an email address' }
   }
 
-  const results = await Promise.allSettled(emailPromises)
-  const errors = results
-    .filter(result => result.status === 'rejected')
-    .map(result => (result as PromiseRejectedResult).reason?.message ?? 'Unknown error')
-
-  if (errors.length > 0) {
-    return { success: false, errors, sent: results.length - errors.length }
+  const errors: string[] = []
+  let sent = 0
+  for (const params of emailQueue) {
+    try {
+      await sendEmail(params)
+      sent++
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : 'Unknown error')
+    }
   }
 
-  return { success: true, sent: results.length }
+  if (errors.length > 0) {
+    return { success: false, errors, sent }
+  }
+
+  return { success: true, sent }
 }
