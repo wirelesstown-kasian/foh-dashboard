@@ -798,6 +798,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       const scheduledSendDateStr = formatDate(scheduledSendAt)
       const sendImmediately = publishMode === 'immediate'
 
+      // Only reset email_sent_at when queuing a future send.
+      // For immediate mode the client sends and marks it right after.
+      // Resetting it unconditionally causes the cron to re-fire on every re-publish.
+      const isFutureQueuedSend = !sendImmediately && scheduledSendAt > new Date()
+
       const publicationResult = await supabase
         .from('schedule_publications')
         .upsert({
@@ -806,7 +811,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           scheduled_send_date: scheduledSendDateStr,
           scheduled_send_at: scheduledSendAt.toISOString(),
           published_at: new Date().toISOString(),
-          email_sent_at: null,
+          ...(isFutureQueuedSend ? { email_sent_at: null } : {}),
         }, { onConflict: 'week_start' })
       if (publicationResult.error) throw publicationResult.error
 
