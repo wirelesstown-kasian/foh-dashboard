@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
+import { PinModal } from '@/components/layout/PinModal'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { Button } from '@/components/ui/button'
@@ -72,6 +73,8 @@ const EMPTY_FORM = {
   closed_by_employee_id: '',
   cash_total: '',
   batch_total: '',
+  delivery_order_amount: '',
+  sales_tax: '',
   cc_tip: '',
   cash_tip: '',
   actual_cash_on_hand: '',
@@ -101,6 +104,8 @@ export default function EodHistoryPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [showEditPin, setShowEditPin] = useState(false)
+  const [editPinError, setEditPinError] = useState<string | null>(null)
   const [cashEntryForm, setCashEntryForm] = useState({
     ...EMPTY_CASH_ENTRY_FORM,
     entry_date: format(new Date(), 'yyyy-MM-dd'),
@@ -172,7 +177,7 @@ export default function EodHistoryPage() {
             revenue: sum.revenue + report.revenue_total,
             tax: sum.tax + tax,
             tip: sum.tip + report.tip_total,
-            net: sum.net + (report.revenue_total - tax - report.tip_total),
+            net: sum.net + (report.revenue_total - tax - report.tip_total + Number(report.delivery_order_amount ?? 0)),
             deposit: sum.deposit + report.cash_deposit,
             variance: sum.variance + Number(report.cash_variance ?? 0),
           }
@@ -243,6 +248,8 @@ export default function EodHistoryPage() {
       closed_by_employee_id: report.closed_by_employee_id ?? '',
       cash_total: String(report.cash_total),
       batch_total: String(report.batch_total),
+      delivery_order_amount: String(report.delivery_order_amount ?? 0),
+      sales_tax: report.sales_tax != null ? String(report.sales_tax) : '',
       cc_tip: String(report.cc_tip),
       cash_tip: String(report.cash_tip),
       actual_cash_on_hand: report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : '',
@@ -340,7 +347,7 @@ export default function EodHistoryPage() {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = async (editedByName?: string | null) => {
     if (!form.session_date) {
       setSaveError('Session date is required')
       return
@@ -353,11 +360,19 @@ export default function EodHistoryPage() {
     try {
       const cashTotal = Number(form.cash_total || 0)
       const batchTotal = Number(form.batch_total || 0)
+      const deliveryOrderAmount = Number(form.delivery_order_amount || 0)
+      const salesTax = Number(form.sales_tax || 0)
       const ccTip = Number(form.cc_tip || 0)
       const cashTip = Number(form.cash_tip || 0)
       const actualCashOnHand = Number(form.actual_cash_on_hand || 0)
       const expectedCash = getExpectedCashDeposit(cashTotal, cashTip)
       const cashVariance = getCashVariance(actualCashOnHand, cashTotal, cashTip)
+      const nextMemo = editingReportId
+        ? [
+          form.memo.trim(),
+          editedByName ? `[Edited ${new Date().toLocaleString('en-US')}] by ${editedByName}` : '',
+        ].filter(Boolean).join('\n')
+        : form.memo.trim()
 
       const payload = {
         session_date: form.session_date,
@@ -365,6 +380,8 @@ export default function EodHistoryPage() {
         cash_total: cashTotal,
         batch_total: batchTotal,
         revenue_total: cashTotal + batchTotal,
+        delivery_order_amount: deliveryOrderAmount,
+        sales_tax: salesTax,
         cc_tip: ccTip,
         cash_tip: cashTip,
         tip_total: ccTip + cashTip,
@@ -372,7 +389,7 @@ export default function EodHistoryPage() {
         actual_cash_on_hand: actualCashOnHand,
         cash_variance: cashVariance,
         variance_note: form.variance_note.trim() || null,
-        memo: form.memo.trim() || null,
+        memo: nextMemo || null,
       }
 
       const query = editingReportId
@@ -468,6 +485,37 @@ export default function EodHistoryPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleEditPinConfirm = async (pin: string) => {
+    setEditPinError(null)
+
+    const response = await fetch('/api/manager-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as { error?: string }
+      const message = payload.error ?? 'Manager PIN required'
+      setEditPinError(message)
+      throw new Error(message)
+    }
+
+    const payload = await response.json() as { managerId?: string }
+    const editedByName = employees.find(employee => employee.id === payload.managerId)?.name ?? 'Manager'
+    setShowEditPin(false)
+    await handleSave(editedByName)
+  }
+
+  const handleSaveClick = async () => {
+    if (editingReportId) {
+      setEditPinError(null)
+      setShowEditPin(true)
+      return
+    }
+    await handleSave()
   }
 
   const handleAuditSave = async (report: EodReport) => {
@@ -756,7 +804,7 @@ export default function EodHistoryPage() {
                 <TableCell className="py-2 text-right text-xs font-semibold">{formatCurrency(Number(report.cash_total ?? 0) + Number(inlineAudit[report.id]?.batchTotal ?? report.batch_total ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-muted-foreground">{formatCurrency(Number(report.sales_tax ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-green-700">{formatCurrency(report.tip_total)}</TableCell>
-                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency((Number(report.cash_total ?? 0) + Number(inlineAudit[report.id]?.batchTotal ?? report.batch_total ?? 0)) - Number(report.sales_tax ?? 0) - Number(report.tip_total ?? 0))}</TableCell>
+                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency((Number(report.cash_total ?? 0) + Number(inlineAudit[report.id]?.batchTotal ?? report.batch_total ?? 0)) - Number(report.sales_tax ?? 0) - Number(report.tip_total ?? 0) + Number(report.delivery_order_amount ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs">{formatCurrency(report.cash_deposit)}</TableCell>
                 <TableCell className="py-2">
                   <Input
@@ -859,7 +907,7 @@ export default function EodHistoryPage() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingReportId ? 'Edit Manual EOD Entry' : 'Add Manual EOD Entry'}</DialogTitle>
             <DialogDescription>
@@ -884,7 +932,11 @@ export default function EodHistoryPage() {
                 onValueChange={(value: string | null) => setForm(current => ({ ...current, closed_by_employee_id: value === 'none' ? '' : (value ?? '') }))}
               >
                 <SelectTrigger className="mt-1">
-                  <SelectValue />
+                  <span className={form.closed_by_employee_id ? '' : 'text-muted-foreground'}>
+                    {form.closed_by_employee_id
+                      ? (employees.find(employee => employee.id === form.closed_by_employee_id)?.name ?? 'Unknown staff')
+                      : 'None'}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
@@ -911,6 +963,26 @@ export default function EodHistoryPage() {
                 step="0.01"
                 value={form.batch_total}
                 onChange={event => setForm(current => ({ ...current, batch_total: event.target.value }))}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Delivery Order Amount</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.delivery_order_amount}
+                onChange={event => setForm(current => ({ ...current, delivery_order_amount: event.target.value }))}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Sales Tax</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.sales_tax}
+                onChange={event => setForm(current => ({ ...current, sales_tax: event.target.value }))}
                 className="mt-1"
               />
             </div>
@@ -1010,12 +1082,20 @@ export default function EodHistoryPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSaveClick} disabled={saving}>
               {saving ? 'Saving…' : editingReportId ? 'Save Changes' : 'Create Entry'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <PinModal
+        open={showEditPin}
+        title="Approve EOD Edit"
+        description="Enter manager PIN to save these EOD changes"
+        onConfirm={handleEditPinConfirm}
+        onClose={() => { setShowEditPin(false); setEditPinError(null) }}
+        error={editPinError}
+      />
     </div>
   )
 }

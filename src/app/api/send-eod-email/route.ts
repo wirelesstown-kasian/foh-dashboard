@@ -282,7 +282,8 @@ export async function POST(req: NextRequest) {
     const grossRevenue = Number(report.revenue_total ?? 0)
     const salesTax = Number(report.sales_tax ?? 0)
     const tipTotal = Number(report.tip_total ?? 0)
-    const netRevenue = grossRevenue - salesTax - tipTotal
+    const deliveryOrderAmount = Number(report.delivery_order_amount ?? 0)
+    const netRevenue = grossRevenue - salesTax - tipTotal + deliveryOrderAmount
     const cashTotal = Number(report.cash_total ?? 0)
     const batchTotal = Number(report.batch_total ?? 0)
     const ccTip = Number(report.cc_tip ?? 0)
@@ -332,6 +333,7 @@ export async function POST(req: NextRequest) {
         <tr style="background:#f8fafc"><td><strong>Gross Revenue</strong></td><td style="text-align:right"><strong>$${grossRevenue.toFixed(2)}</strong></td></tr>
         <tr><td>Sales Tax</td><td style="text-align:right">$${salesTax.toFixed(2)}</td></tr>
         <tr><td>Tip Total</td><td style="text-align:right">$${tipTotal.toFixed(2)}</td></tr>
+        <tr><td>Delivery Orders</td><td style="text-align:right">$${deliveryOrderAmount.toFixed(2)}</td></tr>
         <tr style="background:#ecfeff"><td><strong>Net Revenue</strong></td><td style="text-align:right"><strong>$${netRevenue.toFixed(2)}</strong></td></tr>
       </table>
       <h3 style="margin-top:18px">Tip & Cash Audit</h3>

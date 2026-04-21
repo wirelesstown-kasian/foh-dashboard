@@ -85,6 +85,7 @@ export interface EodReport {
   cash_total: number
   batch_total: number
   revenue_total: number
+  delivery_order_amount: number
   cc_tip: number
   cash_tip: number
   tip_total: number
