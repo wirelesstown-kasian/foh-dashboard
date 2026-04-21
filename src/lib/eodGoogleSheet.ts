@@ -101,8 +101,6 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
     'CC Tip',
     'Cash Tip',
     'Tip Total',
-    'Delivery Orders',
-    'Net Revenue',
     'Expected Cash',
     'Actual Cash On Hand',
     'Variance',
@@ -111,10 +109,8 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
     'Updated At',
   ]]
 
-  const netRevenue = Number(report.revenue_total) - Number(report.sales_tax ?? 0) - Number(report.tip_total) + Number(report.delivery_order_amount ?? 0)
-
   const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A1:Q1`,
+    `${baseUrl}/${encodedSheetName}!A1:O1`,
     accessToken,
   )
   const expectedHeaders = headersRow[0]
@@ -122,7 +118,7 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   const headersMatch = expectedHeaders.length === currentHeaders.length && expectedHeaders.every((header, index) => currentHeaders[index] === header)
   if (!headersMatch) {
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A1:Q1?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A1:O1?valueInputOption=USER_ENTERED`,
       accessToken,
       {
         method: 'PUT',
@@ -146,8 +142,6 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
     Number(report.cc_tip).toFixed(2),
     Number(report.cash_tip).toFixed(2),
     Number(report.tip_total).toFixed(2),
-    Number(report.delivery_order_amount ?? 0).toFixed(2),
-    netRevenue.toFixed(2),
     Number(report.cash_deposit).toFixed(2),
     Number(report.actual_cash_on_hand).toFixed(2),
     Number(report.cash_variance).toFixed(2),
@@ -161,7 +155,7 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   if (existingRowIndex >= 0) {
     const rowNumber = existingRowIndex + 2
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A${rowNumber}:Q${rowNumber}?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A${rowNumber}:O${rowNumber}?valueInputOption=USER_ENTERED`,
       accessToken,
       {
         method: 'PUT',
@@ -172,7 +166,7 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   }
 
   await googleSheetsRequest(
-    `${baseUrl}/${encodedSheetName}!A:Q:append?valueInputOption=USER_ENTERED`,
+    `${baseUrl}/${encodedSheetName}!A:O:append?valueInputOption=USER_ENTERED`,
     accessToken,
     {
       method: 'POST',

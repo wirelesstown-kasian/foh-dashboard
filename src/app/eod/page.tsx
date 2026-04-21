@@ -176,7 +176,6 @@ export default function EodPage() {
   const [form, setForm] = useState({
     cash_total: '',
     net_revenue: '',
-    delivery_order_amount: '',
     cc_tip: '',
     cash_tip: '',
     sales_tax: '',
@@ -192,7 +191,6 @@ export default function EodPage() {
     cash_total: string | number | null
     batch_total: string | number | null
     net_revenue: string | number | null
-    delivery_order_amount: string | number | null
     tip_total: string | number | null
     cc_tip: string | number | null
     cash_tip: string | number | null
@@ -202,7 +200,6 @@ export default function EodPage() {
   }>) => {
     const cashTotal = value.cash_total != null ? String(value.cash_total) : ''
     const salesTax = value.sales_tax != null ? String(value.sales_tax) : ''
-    const deliveryOrderAmount = value.delivery_order_amount != null ? String(value.delivery_order_amount) : ''
     const hasLegacyRevenueValues =
       value.batch_total != null ||
       value.net_revenue != null ||
@@ -225,7 +222,6 @@ export default function EodPage() {
     return {
       cash_total: cashTotal,
       net_revenue: resolvedNetRevenue,
-      delivery_order_amount: deliveryOrderAmount,
       cc_tip: value.cc_tip != null ? String(value.cc_tip) : '',
       cash_tip: value.cash_tip != null ? String(value.cash_tip) : '',
       sales_tax: salesTax,
@@ -262,7 +258,6 @@ export default function EodPage() {
       setForm(toFinancialForm({
         cash_total: eod.cash_total,
         batch_total: eod.batch_total,
-        delivery_order_amount: eod.delivery_order_amount,
         tip_total: eod.tip_total,
         cc_tip: eod.cc_tip,
         cash_tip: eod.cash_tip,
@@ -354,12 +349,10 @@ export default function EodPage() {
   const cashFromDrawer = Math.max(0, registerTotal - startingCash)
 
   const cashTotal = parseFloat(form.cash_total) || 0
-  const netRevenueBase = parseFloat(form.net_revenue) || 0
-  const deliveryOrderAmount = parseFloat(form.delivery_order_amount) || 0
+  const netRevenue = parseFloat(form.net_revenue) || 0
   const tipTotal = (parseFloat(form.cc_tip) || 0) + (parseFloat(form.cash_tip) || 0)
   const salesTax = parseFloat(form.sales_tax) || 0
-  const netRevenue = netRevenueBase + deliveryOrderAmount
-  const grossRevenue = netRevenueBase + salesTax + tipTotal
+  const grossRevenue = netRevenue + salesTax + tipTotal
   const batchTotal = grossRevenue - cashTotal
   const totalCashDeposit = cashTotal + (parseFloat(form.cash_tip) || 0)
 
@@ -462,7 +455,6 @@ export default function EodPage() {
         cash_total: cashTotal,
         batch_total: batchTotal,
         revenue_total: grossRevenue,
-        delivery_order_amount: deliveryOrderAmount,
         cc_tip: parseFloat(form.cc_tip) || 0,
         cash_tip: parseFloat(form.cash_tip) || 0,
         tip_total: tipTotal,
@@ -635,9 +627,7 @@ export default function EodPage() {
               <div className="flex justify-between"><span className="text-muted-foreground">Closed By</span><span className="font-medium">{closedByName}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Starting Cash</span><span>${startingCash.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Cash Amount</span><span>${cashTotal.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Net Revenue</span><span>${netRevenueBase.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Delivery Orders</span><span>${deliveryOrderAmount.toFixed(2)}</span></div>
-              <div className="flex justify-between font-semibold"><span>Net Revenue Total</span><span>${netRevenue.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Net Revenue</span><span>${netRevenue.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Sales Tax</span><span>${salesTax.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Calculated Batch</span><span>${batchTotal.toFixed(2)}</span></div>
               <div className="flex justify-between font-semibold border-t pt-2"><span>Gross Revenue</span><span>${grossRevenue.toFixed(2)}</span></div>
@@ -1108,10 +1098,6 @@ export default function EodPage() {
                       <Input type="number" step="0.01" value={form.net_revenue} onChange={e => setField('net_revenue', e.target.value)} placeholder="0.00" />
                     </div>
                   </div>
-                  <div>
-                    <Label>Delivery Order Amount</Label>
-                    <Input type="number" step="0.01" value={form.delivery_order_amount} onChange={e => setField('delivery_order_amount', e.target.value)} placeholder="0.00" />
-                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label>Sales Tax</Label>
@@ -1122,12 +1108,6 @@ export default function EodPage() {
                       <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold">
                         ${batchTotal.toFixed(2)}
                       </div>
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Net Revenue Total</Label>
-                    <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold">
-                      ${netRevenue.toFixed(2)}
                     </div>
                   </div>
                   <div>

@@ -73,7 +73,6 @@ const EMPTY_FORM = {
   closed_by_employee_id: '',
   cash_total: '',
   batch_total: '',
-  delivery_order_amount: '',
   sales_tax: '',
   cc_tip: '',
   cash_tip: '',
@@ -177,7 +176,7 @@ export default function EodHistoryPage() {
             revenue: sum.revenue + report.revenue_total,
             tax: sum.tax + tax,
             tip: sum.tip + report.tip_total,
-            net: sum.net + (report.revenue_total - tax - report.tip_total + Number(report.delivery_order_amount ?? 0)),
+            net: sum.net + (report.revenue_total - tax - report.tip_total),
             deposit: sum.deposit + report.cash_deposit,
             variance: sum.variance + Number(report.cash_variance ?? 0),
           }
@@ -248,7 +247,6 @@ export default function EodHistoryPage() {
       closed_by_employee_id: report.closed_by_employee_id ?? '',
       cash_total: String(report.cash_total),
       batch_total: String(report.batch_total),
-      delivery_order_amount: String(report.delivery_order_amount ?? 0),
       sales_tax: report.sales_tax != null ? String(report.sales_tax) : '',
       cc_tip: String(report.cc_tip),
       cash_tip: String(report.cash_tip),
@@ -360,7 +358,6 @@ export default function EodHistoryPage() {
     try {
       const cashTotal = Number(form.cash_total || 0)
       const batchTotal = Number(form.batch_total || 0)
-      const deliveryOrderAmount = Number(form.delivery_order_amount || 0)
       const salesTax = Number(form.sales_tax || 0)
       const ccTip = Number(form.cc_tip || 0)
       const cashTip = Number(form.cash_tip || 0)
@@ -380,7 +377,6 @@ export default function EodHistoryPage() {
         cash_total: cashTotal,
         batch_total: batchTotal,
         revenue_total: cashTotal + batchTotal,
-        delivery_order_amount: deliveryOrderAmount,
         sales_tax: salesTax,
         cc_tip: ccTip,
         cash_tip: cashTip,
@@ -804,7 +800,7 @@ export default function EodHistoryPage() {
                 <TableCell className="py-2 text-right text-xs font-semibold">{formatCurrency(Number(report.cash_total ?? 0) + Number(inlineAudit[report.id]?.batchTotal ?? report.batch_total ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-muted-foreground">{formatCurrency(Number(report.sales_tax ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-green-700">{formatCurrency(report.tip_total)}</TableCell>
-                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency((Number(report.cash_total ?? 0) + Number(inlineAudit[report.id]?.batchTotal ?? report.batch_total ?? 0)) - Number(report.sales_tax ?? 0) - Number(report.tip_total ?? 0) + Number(report.delivery_order_amount ?? 0))}</TableCell>
+                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency((Number(report.cash_total ?? 0) + Number(inlineAudit[report.id]?.batchTotal ?? report.batch_total ?? 0)) - Number(report.sales_tax ?? 0) - Number(report.tip_total ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs">{formatCurrency(report.cash_deposit)}</TableCell>
                 <TableCell className="py-2">
                   <Input
@@ -963,16 +959,6 @@ export default function EodHistoryPage() {
                 step="0.01"
                 value={form.batch_total}
                 onChange={event => setForm(current => ({ ...current, batch_total: event.target.value }))}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label>Delivery Order Amount</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.delivery_order_amount}
-                onChange={event => setForm(current => ({ ...current, delivery_order_amount: event.target.value }))}
                 className="mt-1"
               />
             </div>
