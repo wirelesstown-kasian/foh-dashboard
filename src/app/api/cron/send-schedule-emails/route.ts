@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getEmailSettings } from '@/lib/appSettings'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { sendWeeklyScheduleEmails } from '@/lib/scheduleEmail'
 
@@ -11,6 +12,11 @@ export async function GET(req: NextRequest) {
 
   const nowIso = new Date().toISOString()
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
+  const emailSettings = await getEmailSettings()
+
+  if (!emailSettings.queued_schedule_emails_enabled) {
+    return NextResponse.json({ success: true, skipped: true, reason: 'Queued schedule emails are disabled in Email Settings' })
+  }
 
   const { data: pendingPublications, error } = await supabaseAdmin
     .from('schedule_publications')

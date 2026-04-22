@@ -33,7 +33,7 @@ export async function sendPreviousWeekSummaryEmail({
   referenceDate?: Date
 }) {
   const emailSettings = await getEmailSettings()
-  if (!emailSettings.eod_admin_summary_enabled || !emailSettings.eod_report_email) {
+  if (!emailSettings.weekly_summary_emails_enabled || !emailSettings.weekly_summary_recipient) {
     return { success: true, skipped: true, reason: 'Weekly summary email is disabled.' }
   }
 
@@ -139,7 +139,7 @@ export async function sendPreviousWeekSummaryEmail({
 
   await sendEmail({
     resendKey,
-    to: emailSettings.eod_report_email,
+    to: emailSettings.weekly_summary_recipient,
     subject: `Weekly Summary — ${weekStart} to ${weekEnd}`,
     html: weeklyHtml,
     fromName: emailSettings.from_name,

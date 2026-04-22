@@ -8,6 +8,11 @@ export interface EmailSettings {
   eod_tip_emails_enabled: boolean
   eod_admin_summary_enabled: boolean
   schedule_emails_enabled: boolean
+  queued_schedule_emails_enabled: boolean
+  schedule_default_send_day: string
+  schedule_default_send_time: string
+  weekly_summary_emails_enabled: boolean
+  weekly_summary_recipient: string
   wage_report_emails_enabled: boolean
 }
 
@@ -41,6 +46,11 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   eod_tip_emails_enabled: true,
   eod_admin_summary_enabled: true,
   schedule_emails_enabled: true,
+  queued_schedule_emails_enabled: true,
+  schedule_default_send_day: 'sunday',
+  schedule_default_send_time: '21:00',
+  weekly_summary_emails_enabled: true,
+  weekly_summary_recipient: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
   wage_report_emails_enabled: true,
   role_definitions: [
     { key: 'manager', label: 'Manager', description: 'Admin access and oversight', color: '#8b5cf6', is_active: true, display_order: 0 },
@@ -64,6 +74,17 @@ function normalizeBoolean(value: unknown, fallback: boolean) {
 
 function normalizeString(value: unknown, fallback: string) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+function normalizeWeekday(value: unknown, fallback: string) {
+  const allowedDays = new Set(['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'])
+  if (typeof value !== 'string') return fallback
+  const normalized = value.trim().toLowerCase()
+  return allowedDays.has(normalized) ? normalized : fallback
+}
+
+function normalizeTime(value: unknown, fallback: string) {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value.trim()) ? value.trim() : fallback
 }
 
 function normalizeOptionalString(value: unknown) {
@@ -115,8 +136,23 @@ export async function getAppSettings(): Promise<AppSettings> {
       settings.primary_department_definitions = normalizeDefinitions(row.value, settings.primary_department_definitions)
       continue
     }
-    if (row.key === 'eod_tip_emails_enabled' || row.key === 'eod_admin_summary_enabled' || row.key === 'schedule_emails_enabled' || row.key === 'wage_report_emails_enabled') {
+    if (
+      row.key === 'eod_tip_emails_enabled' ||
+      row.key === 'eod_admin_summary_enabled' ||
+      row.key === 'schedule_emails_enabled' ||
+      row.key === 'queued_schedule_emails_enabled' ||
+      row.key === 'weekly_summary_emails_enabled' ||
+      row.key === 'wage_report_emails_enabled'
+    ) {
       settings[row.key] = normalizeBoolean(row.value, settings[row.key])
+      continue
+    }
+    if (row.key === 'schedule_default_send_day') {
+      settings.schedule_default_send_day = normalizeWeekday(row.value, settings.schedule_default_send_day)
+      continue
+    }
+    if (row.key === 'schedule_default_send_time') {
+      settings.schedule_default_send_time = normalizeTime(row.value, settings.schedule_default_send_time)
       continue
     }
     settings[row.key] = normalizeString(row.value, settings[row.key])
@@ -135,6 +171,11 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     eod_tip_emails_enabled: settings.eod_tip_emails_enabled,
     eod_admin_summary_enabled: settings.eod_admin_summary_enabled,
     schedule_emails_enabled: settings.schedule_emails_enabled,
+    queued_schedule_emails_enabled: settings.queued_schedule_emails_enabled,
+    schedule_default_send_day: settings.schedule_default_send_day,
+    schedule_default_send_time: settings.schedule_default_send_time,
+    weekly_summary_emails_enabled: settings.weekly_summary_emails_enabled,
+    weekly_summary_recipient: settings.weekly_summary_recipient,
     wage_report_emails_enabled: settings.wage_report_emails_enabled,
   }
 }

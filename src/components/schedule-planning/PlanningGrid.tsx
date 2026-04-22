@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
 import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import type { EmailSettings } from '@/lib/appSettings'
 
 type ShiftDraft = {
   id?: string
@@ -32,13 +33,36 @@ type ShiftDraft = {
 
 type PublishMode = 'immediate' | 'queued'
 
-const QUEUED_SEND_HOUR = 21
-const QUEUED_SEND_MINUTE = 0
+const DEFAULT_SCHEDULE_EMAIL_SETTINGS: Pick<EmailSettings, 'schedule_default_send_day' | 'schedule_default_send_time'> = {
+  schedule_default_send_day: 'sunday',
+  schedule_default_send_time: '21:00',
+}
 
 function formatTimeInputValue(date: Date) {
   const hour = String(date.getHours()).padStart(2, '0')
   const minute = String(date.getMinutes()).padStart(2, '0')
   return `${hour}:${minute}`
+}
+
+function getQueuedDayOffset(day: string) {
+  switch (day) {
+    case 'sunday':
+      return -1
+    case 'monday':
+      return 0
+    case 'tuesday':
+      return 1
+    case 'wednesday':
+      return 2
+    case 'thursday':
+      return 3
+    case 'friday':
+      return 4
+    case 'saturday':
+      return 5
+    default:
+      return -1
+  }
 }
 
 function snapTimeToHalfHour(value: string) {
@@ -165,6 +189,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [staffRemovalTarget, setStaffRemovalTarget] = useState<Employee | null>(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [publishFeedback, setPublishFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
+  const [scheduleEmailDefaults, setScheduleEmailDefaults] = useState(DEFAULT_SCHEDULE_EMAIL_SETTINGS)
   const allowedTimeOptions = getAllowedTimeOptions()
 
   useEffect(() => {
@@ -179,12 +204,40 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const currentRowsKey = `${currentDraftKey}_rows`
   const mondayDate = days[0] ? formatDate(days[0]) : null
 
+  useEffect(() => {
+    let mounted = true
+
+    const loadEmailSettings = async () => {
+      const res = await fetch('/api/app-settings', { cache: 'no-store' })
+      const data = res.ok
+        ? await res.json() as { settings?: Partial<EmailSettings> }
+        : {}
+      if (!mounted || !data.settings) return
+      setScheduleEmailDefaults({
+        schedule_default_send_day: data.settings.schedule_default_send_day ?? DEFAULT_SCHEDULE_EMAIL_SETTINGS.schedule_default_send_day,
+        schedule_default_send_time: data.settings.schedule_default_send_time ?? DEFAULT_SCHEDULE_EMAIL_SETTINGS.schedule_default_send_time,
+      })
+    }
+
+    void loadEmailSettings()
+    const handleSettingsUpdate = () => {
+      void loadEmailSettings()
+    }
+    window.addEventListener('app-settings-updated', handleSettingsUpdate)
+
+    return () => {
+      mounted = false
+      window.removeEventListener('app-settings-updated', handleSettingsUpdate)
+    }
+  }, [])
+
   const getQueuedSendAt = useCallback((weekStartDate: Date) => {
     const queued = new Date(weekStartDate)
-    queued.setDate(queued.getDate() - 1)
-    queued.setHours(QUEUED_SEND_HOUR, QUEUED_SEND_MINUTE, 0, 0)
+    queued.setDate(queued.getDate() + getQueuedDayOffset(scheduleEmailDefaults.schedule_default_send_day))
+    const [hourText = '21', minuteText = '00'] = scheduleEmailDefaults.schedule_default_send_time.split(':')
+    queued.setHours(Number(hourText), Number(minuteText), 0, 0)
     return queued
-  }, [])
+  }, [scheduleEmailDefaults.schedule_default_send_day, scheduleEmailDefaults.schedule_default_send_time])
 
   const getSelectedQueuedSendAt = useCallback(() => {
     const fallback = getQueuedSendAt(days[0] ?? new Date())
