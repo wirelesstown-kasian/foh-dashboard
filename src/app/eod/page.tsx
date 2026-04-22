@@ -255,17 +255,7 @@ export default function EodPage() {
     setCurrentReportId(eod?.id ?? null)
 
     if (eod) {
-      setForm(toFinancialForm({
-        cash_total: eod.cash_total,
-        batch_total: eod.batch_total,
-        tip_total: eod.tip_total,
-        cc_tip: eod.cc_tip,
-        cash_tip: eod.cash_tip,
-        sales_tax: eod.sales_tax,
-        memo: eod.memo,
-        closed_by: eod.closed_by_employee_id,
-      }))
-      setTipRows((eod.tip_distributions ?? [])
+      const savedTipRows = (eod.tip_distributions ?? [])
         .filter((d: TipDistribution & { employee?: Employee }) => {
           const role = d.employee?.role ?? (empRes.data ?? []).find((employee: Employee) => employee.id === d.employee_id)?.role
           return !!role && isTipEligibleRole(role)
@@ -279,9 +269,26 @@ export default function EodPage() {
             clock_out_at: clockRecord?.clock_out_at ?? null,
             name: d.employee?.name ?? '',
           }
-        }))
+        })
+
+      setForm(toFinancialForm({
+        cash_total: eod.cash_total,
+        batch_total: eod.batch_total,
+        tip_total: eod.tip_total,
+        cc_tip: eod.cc_tip,
+        cash_tip: eod.cash_tip,
+        sales_tax: eod.sales_tax,
+        memo: eod.memo,
+        closed_by: eod.closed_by_employee_id,
+      }))
+      if (savedTipRows.length > 0) {
+        setTipRows(savedTipRows)
+      } else {
+        const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
+        setTipRows(clockBasedRows)
+      }
       setFinancialsSaved(true)
-      setTipDistributionSaved(true)
+      setTipDistributionSaved(savedTipRows.length > 0)
     } else {
       const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
 
@@ -311,7 +318,7 @@ export default function EodPage() {
     }
 
     const stored = window.localStorage.getItem(getTipDraftKey(today))
-    if (!stored) return
+    if (!stored || ((existing?.tip_distributions?.length ?? 0) > 0)) return
 
     try {
       const parsed = JSON.parse(stored) as TipRow[]
@@ -333,7 +340,8 @@ export default function EodPage() {
   const pendingApprovalRecords = clockRecords.filter(record => record.approval_status === 'pending_review')
   const hasOpenClockWarnings = openClockRecords.length > 0
   const hasManagerAccess = managerOverride || appCanManageAdmin
-  const isLocked = !hasManagerAccess && (!!existing || !session || session.current_phase !== 'complete')
+  const hasFinalizedEod = !!existing && (existing.tip_distributions?.length ?? 0) > 0
+  const isLocked = !hasManagerAccess && (hasFinalizedEod || !session || session.current_phase !== 'complete')
 
   const DENOM_VALUES: Record<string, number> = {
     d100: 100, d50: 50, d20: 20, d10: 10, d5: 5,
@@ -414,10 +422,66 @@ export default function EodPage() {
   }
 
   const handleFinancialSave = async () => {
+    if (batchTotal < 0) {
+      setSaveError('Net revenue plus sales tax and total tip must be at least as much as cash amount.')
+      return
+    }
+
     window.localStorage.setItem(getFinancialDraftKey(today), JSON.stringify(form))
-    setFinancialsSaved(true)
     setSaveError(null)
-    setShowFinancialConfirm(false)
+
+    try {
+      const payload = {
+        session_date: today,
+        closed_by_employee_id: form.closed_by || null,
+        starting_cash: startingCash,
+        cash_total: cashTotal,
+        batch_total: batchTotal,
+        revenue_total: grossRevenue,
+        cc_tip: parseFloat(form.cc_tip) || 0,
+        cash_tip: parseFloat(form.cash_tip) || 0,
+        tip_total: tipTotal,
+        cash_deposit: totalCashDeposit,
+        sales_tax: salesTax,
+        memo: form.memo || null,
+        updated_at: new Date().toISOString(),
+      }
+
+      let reportId = currentReportId
+
+      if (existing) {
+        const updateResult = await supabase
+          .from('eod_reports')
+          .update(payload)
+          .eq('id', existing.id)
+          .select()
+          .single()
+
+        if (updateResult.error || !updateResult.data) throw updateResult.error ?? new Error('Failed to save revenue and tips.')
+        reportId = updateResult.data.id
+        setExisting(current => current
+          ? { ...current, ...(updateResult.data as EodReport), tip_distributions: current.tip_distributions }
+          : (updateResult.data as EodReport)
+        )
+      } else {
+        const insertResult = await supabase
+          .from('eod_reports')
+          .insert(payload)
+          .select()
+          .single()
+
+        if (insertResult.error || !insertResult.data) throw insertResult.error ?? new Error('Failed to save revenue and tips.')
+        reportId = insertResult.data.id
+        setExisting({ ...(insertResult.data as EodReport), tip_distributions: [] })
+      }
+
+      setCurrentReportId(reportId ?? null)
+      setFinancialsSaved(true)
+      setShowFinancialConfirm(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save revenue and tips.'
+      setSaveError(message)
+    }
   }
 
   const saveTipDistributions = async (reportId: string) => {
@@ -680,7 +744,7 @@ export default function EodPage() {
     </Dialog>
   )
 
-  const eodAlreadySaved = !!existing
+  const eodAlreadySaved = hasFinalizedEod
   const canSaveFinancials =
     form.cash_total.trim() !== '' &&
     form.net_revenue.trim() !== '' &&
