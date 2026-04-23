@@ -109,10 +109,12 @@ function CurrencyInput({
   value,
   onChange,
   placeholder,
+  onBlur,
 }: {
   value: string
   onChange: (value: string) => void
   placeholder?: string
+  onBlur?: () => void
 }) {
   return (
     <div className="relative mt-1">
@@ -122,6 +124,7 @@ function CurrencyInput({
         step="0.01"
         value={value}
         onChange={event => onChange(event.target.value)}
+        onBlur={onBlur}
         placeholder={placeholder}
         className="pl-7"
       />
@@ -131,6 +134,14 @@ function CurrencyInput({
 
 function getTipTotalFromForm(form: { cc_tip: string; cash_tip: string }) {
   return (Number(form.cc_tip || 0) || 0) + (Number(form.cash_tip || 0) || 0)
+}
+
+function formatDecimalInputValue(value: string) {
+  const trimmed = value.trim()
+  if (trimmed === '') return ''
+  const numericValue = Number(trimmed)
+  if (Number.isNaN(numericValue)) return value
+  return numericValue.toFixed(2)
 }
 
 export default function EodHistoryPage() {
@@ -1020,6 +1031,7 @@ export default function EodHistoryPage() {
               <CurrencyInput
                 value={form.cash_total}
                 onChange={value => syncFormFromBatchInputs(current => ({ ...current, cash_total: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, cash_total: formatDecimalInputValue(current.cash_total) }))}
                 placeholder="0.00"
               />
             </div>
@@ -1028,6 +1040,7 @@ export default function EodHistoryPage() {
               <CurrencyInput
                 value={form.batch_total}
                 onChange={value => syncFormFromBatchInputs(current => ({ ...current, batch_total: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, batch_total: formatDecimalInputValue(current.batch_total) }))}
                 placeholder="0.00"
               />
             </div>
@@ -1036,6 +1049,7 @@ export default function EodHistoryPage() {
               <CurrencyInput
                 value={form.net_revenue}
                 onChange={syncFormFromNetRevenue}
+                onBlur={() => syncFormFromNetRevenue(formatDecimalInputValue(form.net_revenue))}
                 placeholder="0.00"
               />
             </div>
@@ -1044,6 +1058,7 @@ export default function EodHistoryPage() {
               <CurrencyInput
                 value={form.sales_tax}
                 onChange={value => syncFormFromBatchInputs(current => ({ ...current, sales_tax: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, sales_tax: formatDecimalInputValue(current.sales_tax) }))}
                 placeholder="0.00"
               />
             </div>
@@ -1052,6 +1067,7 @@ export default function EodHistoryPage() {
               <CurrencyInput
                 value={form.cc_tip}
                 onChange={value => syncFormFromBatchInputs(current => ({ ...current, cc_tip: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, cc_tip: formatDecimalInputValue(current.cc_tip) }))}
                 placeholder="0.00"
               />
             </div>
@@ -1060,6 +1076,7 @@ export default function EodHistoryPage() {
               <CurrencyInput
                 value={form.cash_tip}
                 onChange={value => syncFormFromBatchInputs(current => ({ ...current, cash_tip: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, cash_tip: formatDecimalInputValue(current.cash_tip) }))}
                 placeholder="0.00"
               />
             </div>
@@ -1073,6 +1090,7 @@ export default function EodHistoryPage() {
                 <CurrencyInput
                   value={form.actual_cash_on_hand}
                   onChange={value => setForm(current => ({ ...current, actual_cash_on_hand: value }))}
+                  onBlur={() => setForm(current => ({ ...current, actual_cash_on_hand: formatDecimalInputValue(current.actual_cash_on_hand) }))}
                   placeholder="0.00"
                 />
               </div>
@@ -1081,6 +1099,7 @@ export default function EodHistoryPage() {
                 <CurrencyInput
                   value={form.delivery_payment}
                   onChange={value => setForm(current => ({ ...current, delivery_payment: value }))}
+                  onBlur={() => setForm(current => ({ ...current, delivery_payment: formatDecimalInputValue(current.delivery_payment) }))}
                   placeholder="0.00"
                 />
               </div>
