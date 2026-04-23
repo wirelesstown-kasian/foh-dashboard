@@ -140,8 +140,15 @@ function formatDecimalInputValue(value: string) {
   const trimmed = value.trim()
   if (trimmed === '') return ''
   const numericValue = Number(trimmed)
+  if (!Number.isFinite(numericValue)) return ''
   if (Number.isNaN(numericValue)) return value
   return numericValue.toFixed(2)
+}
+
+function isFiniteCurrencyInput(value: string) {
+  const trimmed = value.trim()
+  if (trimmed === '') return true
+  return Number.isFinite(Number(trimmed))
 }
 
 export default function EodHistoryPage() {
@@ -342,6 +349,11 @@ export default function EodHistoryPage() {
       return
     }
 
+    if (!isFiniteCurrencyInput(cashEntryForm.cash_in_amount) || !isFiniteCurrencyInput(cashEntryForm.cash_out_amount)) {
+      setSaveError('Cash in and cash out amounts must be valid numbers.')
+      return
+    }
+
     setCashEntrySaving(true)
     setSaveError(null)
     setSaveNotice(null)
@@ -425,6 +437,21 @@ export default function EodHistoryPage() {
   const handleSave = async (editedByName?: string | null) => {
     if (!form.session_date) {
       setSaveError('Session date is required')
+      return
+    }
+
+    const currencyFields = [
+      form.cash_total,
+      form.batch_total,
+      form.net_revenue,
+      form.delivery_payment,
+      form.sales_tax,
+      form.cc_tip,
+      form.cash_tip,
+      form.actual_cash_on_hand,
+    ]
+    if (currencyFields.some(value => !isFiniteCurrencyInput(value))) {
+      setSaveError('All amount fields must be valid numbers.')
       return
     }
 
@@ -604,6 +631,11 @@ export default function EodHistoryPage() {
 
     if (!hasActualInput && !hasDeliveryInput && !hasNoteInput) {
       setSaveError('Enter actual cash, delivery payment, or a variance note.')
+      return
+    }
+
+    if (!isFiniteCurrencyInput(currentAudit.actualCash) || !isFiniteCurrencyInput(currentAudit.deliveryPayment)) {
+      setSaveError('Actual cash and delivery payment must be valid numbers.')
       return
     }
 
@@ -881,6 +913,17 @@ export default function EodHistoryPage() {
                         },
                       }))
                     }}
+                    onBlur={event => {
+                      const formattedValue = formatDecimalInputValue(event.target.value)
+                      setInlineAudit(current => ({
+                        ...current,
+                        [report.id]: {
+                          actualCash: formattedValue,
+                          deliveryPayment: current[report.id]?.deliveryPayment ?? (Number(report.delivery_order_amount ?? 0) > 0 ? String(report.delivery_order_amount ?? 0) : ''),
+                          varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+                        },
+                      }))
+                    }}
                     placeholder="Actual cash required"
                     className="h-8 text-xs"
                   />
@@ -897,6 +940,17 @@ export default function EodHistoryPage() {
                         [report.id]: {
                           actualCash: current[report.id]?.actualCash ?? (report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''),
                           deliveryPayment: event.target.value,
+                          varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+                        },
+                      }))
+                    }}
+                    onBlur={event => {
+                      const formattedValue = formatDecimalInputValue(event.target.value)
+                      setInlineAudit(current => ({
+                        ...current,
+                        [report.id]: {
+                          actualCash: current[report.id]?.actualCash ?? (report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''),
+                          deliveryPayment: formattedValue,
                           varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
                         },
                       }))
