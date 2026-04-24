@@ -81,7 +81,93 @@ async function googleSheetsRequest<T>(url: string, accessToken: string, init?: R
   return response.json() as Promise<T>
 }
 
-export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by?: { name?: string | null } | null }) {
+type EodSheetReport = EodReport & { closed_by?: { name?: string | null } | null }
+
+const EOD_SHEET_HEADERS = [
+  'Session Date',
+  'Cash',
+  'Batch Total',
+  'Gross Revenue',
+  'Sales Tax',
+  'Tips',
+  'Net Revenue',
+  'Cash Deposit',
+  'Actual Cash On Hand',
+  'Delivery Payment',
+  'Variance',
+  'Variance Note',
+  'Memo',
+  'Closed By',
+  'Updated At',
+  'Report ID',
+]
+
+function buildEodSheetRow(report: EodSheetReport) {
+  const deliveryPayment = Number(report.delivery_order_amount ?? 0)
+  const grossRevenue = Number(report.revenue_total ?? 0)
+  const salesTax = Number(report.sales_tax ?? 0)
+  const tipTotal = Number(report.tip_total ?? 0)
+  const netRevenue = grossRevenue - salesTax - tipTotal
+  const displayBatchRevenue = Number(report.batch_total ?? 0) - deliveryPayment
+
+  return [
+    report.session_date,
+    Number(report.cash_total ?? 0).toFixed(2),
+    displayBatchRevenue.toFixed(2),
+    grossRevenue.toFixed(2),
+    salesTax.toFixed(2),
+    tipTotal.toFixed(2),
+    netRevenue.toFixed(2),
+    Number(report.cash_deposit ?? 0).toFixed(2),
+    Number(report.actual_cash_on_hand ?? 0).toFixed(2),
+    deliveryPayment.toFixed(2),
+    Number(report.cash_variance ?? 0).toFixed(2),
+    report.variance_note ?? '',
+    report.memo ?? '',
+    report.closed_by?.name ?? '',
+    report.updated_at,
+    report.id,
+  ]
+}
+
+async function ensureEodSheetHeaders(config: GoogleSheetsConfig, accessToken: string) {
+  const encodedSheetName = getEncodedSheetRangePrefix(config.sheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  const expectedHeaders = EOD_SHEET_HEADERS
+  const headerRange = `${encodedSheetName}!A1:P1`
+
+  const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${headerRange}`,
+    accessToken,
+  )
+  const currentHeaders = headerCheck.values?.[0] ?? []
+  const headersMatch = expectedHeaders.length === currentHeaders.length && expectedHeaders.every((header, index) => currentHeaders[index] === header)
+
+  if (!headersMatch) {
+    await googleSheetsRequest(
+      `${baseUrl}/${headerRange}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ values: [expectedHeaders] }),
+      }
+    )
+  }
+}
+
+async function clearEodSheet(config: GoogleSheetsConfig, accessToken: string) {
+  const encodedSheetName = getEncodedSheetRangePrefix(config.sheetName)
+  await googleSheetsRequest(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodedSheetName}!A:P:clear`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }
+  )
+}
+
+export async function syncEodReportToGoogleSheet(report: EodSheetReport) {
   const config = getConfig()
   if (!config) {
     return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
@@ -91,71 +177,16 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   const encodedSheetName = getEncodedSheetRangePrefix(config.sheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
 
-  const headersRow = [[
-    'Session Date',
-    'Closed By',
-    'Cash Revenue',
-    'Batch Revenue',
-    'Delivery Payment',
-    'Gross Revenue',
-    'Sales Tax',
-    'CC Tip',
-    'Cash Tip',
-    'Tip Total',
-    'Expected Cash',
-    'Actual Cash On Hand',
-    'Variance',
-    'Variance Note',
-    'Memo',
-    'Updated At',
-  ]]
+  await ensureEodSheetHeaders(config, accessToken)
 
-  const deliveryPayment = Number(report.delivery_order_amount ?? 0)
-  const displayBatchRevenue = Number(report.batch_total) - deliveryPayment
-
-  const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A1:P1`,
-    accessToken,
-  )
-  const expectedHeaders = headersRow[0]
-  const currentHeaders = headerCheck.values?.[0] ?? []
-  const headersMatch = expectedHeaders.length === currentHeaders.length && expectedHeaders.every((header, index) => currentHeaders[index] === header)
-  if (!headersMatch) {
-    await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A1:P1?valueInputOption=USER_ENTERED`,
-      accessToken,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ values: headersRow }),
-      }
-    )
-  }
-
-  const sessionDateColumn = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A2:A`,
+  const reportIdColumn = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!P2:P`,
     accessToken,
   )
 
-  const values = [[
-    report.session_date,
-    report.closed_by?.name ?? '',
-    Number(report.cash_total).toFixed(2),
-    displayBatchRevenue.toFixed(2),
-    deliveryPayment.toFixed(2),
-    Number(report.revenue_total).toFixed(2),
-    Number(report.sales_tax ?? 0).toFixed(2),
-    Number(report.cc_tip).toFixed(2),
-    Number(report.cash_tip).toFixed(2),
-    Number(report.tip_total).toFixed(2),
-    Number(report.cash_deposit).toFixed(2),
-    Number(report.actual_cash_on_hand).toFixed(2),
-    Number(report.cash_variance).toFixed(2),
-    report.variance_note ?? '',
-    report.memo ?? '',
-    report.updated_at,
-  ]]
+  const values = [buildEodSheetRow(report)]
 
-  const existingRowIndex = (sessionDateColumn.values ?? []).findIndex(row => row[0] === report.session_date)
+  const existingRowIndex = (reportIdColumn.values ?? []).findIndex(row => row[0] === report.id)
 
   if (existingRowIndex >= 0) {
     const rowNumber = existingRowIndex + 2
@@ -180,6 +211,42 @@ export async function syncEodReportToGoogleSheet(report: EodReport & { closed_by
   )
 
   return { success: true, skipped: false, action: 'appended' }
+}
+
+export async function resetEodSheetInGoogleSheet(reports: EodSheetReport[]) {
+  const config = getConfig()
+  if (!config) {
+    return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+  }
+
+  const accessToken = await getAccessToken(config)
+  const encodedSheetName = getEncodedSheetRangePrefix(config.sheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+
+  await clearEodSheet(config, accessToken)
+
+  const sortedReports = [...reports].sort((left, right) => {
+    if (left.session_date !== right.session_date) return left.session_date < right.session_date ? 1 : -1
+    return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
+  })
+
+  const values = [EOD_SHEET_HEADERS, ...sortedReports.map(buildEodSheetRow)]
+
+  await googleSheetsRequest(
+    `${baseUrl}/${encodedSheetName}!A1:P?valueInputOption=USER_ENTERED`,
+    accessToken,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ values }),
+    }
+  )
+
+  return {
+    success: true,
+    skipped: false,
+    action: 'reset',
+    rowCount: Math.max(values.length - 1, 0),
+  }
 }
 
 async function upsertCashLogRow(config: GoogleSheetsConfig, accessToken: string, row: string[], entryId: string) {

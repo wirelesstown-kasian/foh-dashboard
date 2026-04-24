@@ -1,10 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { syncEodReportToGoogleSheet, syncEodCashCountToGoogleSheet } from '@/lib/eodGoogleSheet'
+import { resetEodSheetInGoogleSheet, syncEodReportToGoogleSheet, syncEodCashCountToGoogleSheet } from '@/lib/eodGoogleSheet'
 
 export async function POST(req: NextRequest) {
   try {
-    const { report_id } = await req.json() as { report_id?: string }
+    const { report_id, reset_sheet } = await req.json() as { report_id?: string; reset_sheet?: boolean }
+
+    if (reset_sheet) {
+      const { data: reports, error } = await supabaseAdmin
+        .from('eod_reports')
+        .select('*, closed_by:employees(name)')
+        .order('session_date', { ascending: false })
+        .order('updated_at', { ascending: false })
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+
+      const result = await resetEodSheetInGoogleSheet(reports ?? [])
+      return NextResponse.json({ eod: result, cashLog: { success: true, skipped: true, reason: 'Reset only affects the EOD sheet.' } })
+    }
+
     if (!report_id) return NextResponse.json({ error: 'Missing report_id' }, { status: 400 })
 
     const [{ data: report, error }, { data: allReports }, { data: allCashEntries }] = await Promise.all([
