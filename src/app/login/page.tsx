@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-full" />}>
+      <LoginForm />
+    </Suspense>
+  )
+}
+
+function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
