@@ -99,12 +99,12 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
   return (
     <>
       <div className="w-full rounded-xl border bg-white p-4 md:p-6">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
           <div>
             <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">MTD Leaderboard</div>
-            <div className="mt-1 text-sm text-muted-foreground">{monthStart} — {rangeEnd}</div>
+            <div className="mt-0.5 text-sm text-muted-foreground">{monthStart} — {rangeEnd}</div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -113,7 +113,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <div className="min-w-32.5 text-center">
+            <div className="min-w-32 text-center">
               <div className="text-sm font-semibold text-slate-700">{format(monthRef, 'MMMM yyyy')}</div>
               <div className="text-xs text-muted-foreground">{totalTasks} tasks completed</div>
             </div>
@@ -129,19 +129,19 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
           </div>
         </div>
         <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          <span className="font-semibold text-slate-600">Score</span> = Task Completion Rate 40% + Tasks/Hr 35% + Tips/Hr 25% — relative to team (0–100). Fair for any schedule type.
+          <span className="font-semibold text-slate-600">Score</span> = Completion 40% + Tasks/Hr 35% + Tips/Hr 25% — relative to team (0–100).
         </div>
-        <div className="mt-2 grid grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+        <div className="mt-2 grid grid-cols-[32px_minmax(0,1fr)_72px] md:grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] gap-2 md:gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
           <span>#</span>
           <span>Name</span>
           <span className="text-right">Score</span>
-          <span className="text-right">Tasks/Hr</span>
-          <span className="text-right">Hours</span>
-          <span className="text-right">Tips/Hr</span>
+          <span className="hidden text-right md:block">Tasks/Hr</span>
+          <span className="hidden text-right md:block">Hours</span>
+          <span className="hidden text-right md:block">Tips/Hr</span>
         </div>
         <div className="mt-3 space-y-2">
           {perfRows.map((row, index) => (
-            <div key={row.emp.id} className="grid grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] items-center gap-3 rounded-xl border px-3 py-3.5 text-base">
+            <div key={row.emp.id} className="grid grid-cols-[32px_minmax(0,1fr)_72px] md:grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] items-center gap-2 md:gap-3 rounded-xl border px-3 py-3 text-base">
               <div className="text-center text-lg font-bold text-amber-600">{index + 1}</div>
               <Button
                 variant="ghost"
@@ -158,9 +158,9 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
                   </div>
                 )}
               </div>
-              <div className="text-right text-sm text-muted-foreground">{row.monthly ? row.monthly.taskRate.toFixed(1) : '—'}/hr</div>
-              <div className="text-right text-sm text-muted-foreground">{row.monthly?.hours.toFixed(1) ?? '—'}h</div>
-              <div className="text-right text-sm text-muted-foreground">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div>
+              <div className="hidden text-right text-sm text-muted-foreground md:block">{row.monthly ? row.monthly.taskRate.toFixed(1) : '—'}/hr</div>
+              <div className="hidden text-right text-sm text-muted-foreground md:block">{row.monthly?.hours.toFixed(1) ?? '—'}h</div>
+              <div className="hidden text-right text-sm text-muted-foreground md:block">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div>
             </div>
           ))}
         </div>
