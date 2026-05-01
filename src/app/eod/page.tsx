@@ -1095,7 +1095,7 @@ export default function EodPage() {
                     </div>
                   )
                 }
-                const SubtotalRow = ({ label, computed, override, setOverride, isCoin }: {
+                const renderSubtotalRow = ({ label, computed, override, setOverride, isCoin }: {
                   label: string; computed: number; override: string;
                   setOverride: (v: string) => void; isCoin: boolean
                 }) => (
@@ -1146,12 +1146,12 @@ export default function EodPage() {
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
                       <div className="space-y-1.5">{coins.map(renderRow)}</div>
-                      <SubtotalRow label="Coin Total" computed={computedCoinTotal} override={coinSubtotalOverride} setOverride={setCoinSubtotalOverride} isCoin={true} />
+                      {renderSubtotalRow({ label: 'Coin Total', computed: computedCoinTotal, override: coinSubtotalOverride, setOverride: setCoinSubtotalOverride, isCoin: true })}
                     </div>
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
                       <div className="space-y-1.5">{bills.map(renderRow)}</div>
-                      <SubtotalRow label="Bill Total" computed={computedBillTotal} override={billSubtotalOverride} setOverride={setBillSubtotalOverride} isCoin={false} />
+                      {renderSubtotalRow({ label: 'Bill Total', computed: computedBillTotal, override: billSubtotalOverride, setOverride: setBillSubtotalOverride, isCoin: false })}
                     </div>
                   </div>
                 )
