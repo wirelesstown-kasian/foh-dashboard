@@ -1,9 +1,8 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
+import { LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -125,26 +124,12 @@ export default function LoginPage() {
             >
               {saving ? 'Signing In…' : 'Sign In'}
             </Button>
-            <Link
-              href="/"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back To Dashboard
-            </Link>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               Create the first app login in <span className="font-medium">Staffing</span> before using this page.
             </div>
-            <Link
-              href="/"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back To Dashboard
-            </Link>
           </div>
         )}
       </div>
