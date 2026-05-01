@@ -171,14 +171,14 @@ export default function DashboardPage() {
   return (
     <div className="flex min-h-full flex-col">
       <div className="space-y-2.5 border-b bg-white px-4 py-3">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between md:gap-4">
           <div>
             <h1 className="text-lg font-bold">{format(businessDate, 'EEEE, MMMM d, yyyy')}</h1>
           </div>
-          <div className="flex items-center gap-4 pt-1">
+          <div className="flex flex-wrap items-center gap-3 md:gap-4 md:pt-1">
             <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
             <div className="flex items-center gap-2">
-              <div className="h-2 w-32 overflow-hidden rounded-full bg-gray-200">
+              <div className="h-2 w-28 overflow-hidden rounded-full bg-gray-200">
                 <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progressPct}%` }} />
               </div>
               <span className="text-sm font-medium">{doneTasks}/{totalTasks} resolved</span>
@@ -186,9 +186,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="hidden md:block">
-          <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} clockRecords={clockRecords} today={today} />
-        </div>
+        <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} clockRecords={clockRecords} today={today} />
         {doneTasks !== completedTasks && (
           <p className="text-xs text-muted-foreground">
             {completedTasks} completed, {doneTasks - completedTasks} marked incomplete

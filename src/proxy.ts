@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { parseAppSessionValue, APP_SESSION_COOKIE } from '@/lib/appAuth'
+import { isValidAdminSession, ADMIN_SESSION_COOKIE } from '@/lib/adminSession'
 
 function getHomePathForRole(role: string) {
   return role === 'manager' ? '/admin' : '/schedule'
@@ -9,13 +10,14 @@ function getHomePathForRole(role: string) {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const session = parseAppSessionValue(request.cookies.get(APP_SESSION_COOKIE)?.value)
+  const hasAdminSession = isValidAdminSession(request.cookies.get(ADMIN_SESSION_COOKIE)?.value)
 
   if (pathname === '/login') {
-    if (!session) return NextResponse.next()
-    return NextResponse.redirect(new URL(getHomePathForRole(session.role), request.url))
+    if (!session && !hasAdminSession) return NextResponse.next()
+    return NextResponse.redirect(new URL(session ? getHomePathForRole(session.role) : '/admin', request.url))
   }
 
-  if (session) {
+  if (session || hasAdminSession) {
     return NextResponse.next()
   }
 

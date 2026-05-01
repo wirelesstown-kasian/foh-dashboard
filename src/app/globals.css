@@ -147,6 +147,11 @@
     outline: none !important;
     box-shadow: none !important;
   }
+
+  /* Prevent iOS rubber-band scroll making the whole page float */
+  body {
+    overscroll-behavior: none;
+  }
 }
 
 @media (pointer: coarse) and (orientation: landscape) {
