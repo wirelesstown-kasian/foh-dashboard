@@ -1,7 +1,9 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { APP_SESSION_COOKIE } from '@/lib/appAuth'
+
+// Inlined to avoid pulling appAuth.ts (which imports Node.js crypto) into Edge Runtime
+const APP_SESSION_COOKIE = 'foh_app_session'
 
 const ADMIN_PATHS = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/roles-departments', '/reporting', '/email-settings']
 
