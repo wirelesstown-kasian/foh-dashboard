@@ -547,7 +547,20 @@ export default function EodPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report_id: reportId }),
       })
-      void sheetSync
+      const sheetSyncPayload = await sheetSync.json().catch(() => ({})) as {
+        error?: string
+        eod?: { error?: string; success?: boolean; skipped?: boolean; reason?: string }
+        cashLog?: { error?: string; success?: boolean; skipped?: boolean; reason?: string }
+      }
+      if (!sheetSync.ok) {
+        const detail = [
+          sheetSyncPayload.eod?.error ? `EOD sheet: ${sheetSyncPayload.eod.error}` : '',
+          sheetSyncPayload.cashLog?.error ? `Cash Log: ${sheetSyncPayload.cashLog.error}` : '',
+          sheetSyncPayload.error ?? '',
+        ].filter(Boolean).join(' | ')
+        setSaveError(`EOD saved, but Google Sheets sync failed${detail ? `: ${detail}` : '.'}`)
+      }
+
       await load()
       window.localStorage.removeItem(getFinancialDraftKey(today))
       window.localStorage.removeItem(getTipDraftKey(today))

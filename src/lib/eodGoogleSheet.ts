@@ -179,14 +179,22 @@ export async function syncEodReportToGoogleSheet(report: EodSheetReport) {
 
   await ensureEodSheetHeaders(config, accessToken)
 
-  const reportIdColumn = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!P2:P`,
-    accessToken,
-  )
+  const [reportIdColumn, sessionDateColumn] = await Promise.all([
+    googleSheetsRequest<{ values?: string[][] }>(
+      `${baseUrl}/${encodedSheetName}!P2:P`,
+      accessToken,
+    ),
+    googleSheetsRequest<{ values?: string[][] }>(
+      `${baseUrl}/${encodedSheetName}!A2:A`,
+      accessToken,
+    ),
+  ])
 
   const values = [buildEodSheetRow(report)]
 
-  const existingRowIndex = (reportIdColumn.values ?? []).findIndex(row => row[0] === report.id)
+  const reportIdMatchIndex = (reportIdColumn.values ?? []).findIndex(row => row[0] === report.id)
+  const sessionDateMatchIndex = (sessionDateColumn.values ?? []).findIndex(row => row[0] === report.session_date)
+  const existingRowIndex = reportIdMatchIndex >= 0 ? reportIdMatchIndex : sessionDateMatchIndex
 
   if (existingRowIndex >= 0) {
     const rowNumber = existingRowIndex + 2
@@ -202,7 +210,7 @@ export async function syncEodReportToGoogleSheet(report: EodSheetReport) {
   }
 
   await googleSheetsRequest(
-    `${baseUrl}/${encodedSheetName}!A:P:append?valueInputOption=USER_ENTERED`,
+    `${baseUrl}/${encodedSheetName}!A:P:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     accessToken,
     {
       method: 'POST',
@@ -252,31 +260,43 @@ export async function resetEodSheetInGoogleSheet(reports: EodSheetReport[]) {
 async function upsertCashLogRow(config: GoogleSheetsConfig, accessToken: string, row: string[], entryId: string) {
   const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  const cashLogHeaders = ['Date', 'Type', 'Amount Entered', 'Current Balance', 'Description', 'Row Key']
 
   // Write headers if sheet is empty
   const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A1:I1`,
+    `${baseUrl}/${encodedSheetName}!A1:F1`,
     accessToken,
   )
-  if (!headerCheck.values?.[0]?.length) {
+  const currentHeaders = headerCheck.values?.[0] ?? []
+  const headersMatch = cashLogHeaders.length === currentHeaders.length && cashLogHeaders.every((header, index) => currentHeaders[index] === header)
+  if (!headersMatch) {
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A1:I1?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A1:F1?valueInputOption=USER_ENTERED`,
       accessToken,
-      { method: 'PUT', body: JSON.stringify({ values: [['Entry ID', 'Date', 'Type', 'Amount', 'Signed Amount', 'Description', 'Created At', 'Updated At', 'Cash On Hand']] }) },
+      { method: 'PUT', body: JSON.stringify({ values: [cashLogHeaders] }) },
     )
   }
 
-  // Check if row with this ID already exists
-  const idColumn = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!A2:A`,
-    accessToken,
-  )
-  const existingIndex = (idColumn.values ?? []).findIndex(r => r[0] === entryId)
+  // Check if row with this ID already exists.
+  // Prefer the new Row Key column, but fall back to the old A column layout so existing rows can still be updated.
+  const [rowKeyColumn, legacyIdColumn] = await Promise.all([
+    googleSheetsRequest<{ values?: string[][] }>(
+      `${baseUrl}/${encodedSheetName}!F2:F`,
+      accessToken,
+    ),
+    googleSheetsRequest<{ values?: string[][] }>(
+      `${baseUrl}/${encodedSheetName}!A2:A`,
+      accessToken,
+    ),
+  ])
+  const rowKeyMatchIndex = (rowKeyColumn.values ?? []).findIndex(r => r[0] === entryId)
+  const legacyIdMatchIndex = (legacyIdColumn.values ?? []).findIndex(r => r[0] === entryId)
+  const existingIndex = rowKeyMatchIndex >= 0 ? rowKeyMatchIndex : legacyIdMatchIndex
 
   if (existingIndex >= 0) {
     const rowNumber = existingIndex + 2
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A${rowNumber}:I${rowNumber}?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A${rowNumber}:F${rowNumber}?valueInputOption=USER_ENTERED`,
       accessToken,
       { method: 'PUT', body: JSON.stringify({ values: [row] }) },
     )
@@ -284,7 +304,7 @@ async function upsertCashLogRow(config: GoogleSheetsConfig, accessToken: string,
   }
 
   await googleSheetsRequest(
-    `${baseUrl}/${encodedSheetName}!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    `${baseUrl}/${encodedSheetName}!A:F:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     accessToken,
     { method: 'POST', body: JSON.stringify({ values: [row] }) },
   )
@@ -296,19 +316,15 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry,
   if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
 
   const accessToken = await getAccessToken(config)
-  const signedAmount = entry.entry_type === 'cash_in' ? Number(entry.amount) : -Number(entry.amount)
   const balance = cashOnHand ?? 0
 
   const row = [
-    entry.id,
     entry.entry_date,
     entry.entry_type === 'cash_in' ? 'Cash In' : 'Cash Out',
     Number(entry.amount).toFixed(2),
-    signedAmount.toFixed(2),
-    entry.description,
-    entry.created_at,
-    entry.updated_at,
     balance.toFixed(2),
+    entry.description,
+    entry.id,
   ]
 
   const action = await upsertCashLogRow(config, accessToken, row, entry.id)
@@ -324,15 +340,12 @@ export async function syncEodCashCountToGoogleSheet(report: { id: string; sessio
   const runningBalance = report.cash_on_hand ?? actualCash
 
   const row = [
-    `eod_${report.id}`,
     report.session_date,
     'EOD Cash Count',
-    actualCash.toFixed(2),      // Amount = actual cash counted
-    actualCash.toFixed(2),      // Signed Amount = actual cash (always positive addition)
+    actualCash.toFixed(2),
+    runningBalance.toFixed(2),
     'EOD drawer reconciliation',
-    report.updated_at,
-    report.updated_at,
-    runningBalance.toFixed(2),  // Cash On Hand = running balance
+    `eod_${report.id}`,
   ]
 
   const action = await upsertCashLogRow(config, accessToken, row, `eod_${report.id}`)

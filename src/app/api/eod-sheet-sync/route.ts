@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     }, 0)
     const runningBalance = eodCashTotal + cashEntryTotal
 
-    const [eodResult, cashResult] = await Promise.all([
+    const [eodResult, cashResult] = await Promise.allSettled([
       syncEodReportToGoogleSheet(report),
       report.actual_cash_on_hand != null
         ? syncEodCashCountToGoogleSheet({
@@ -52,7 +52,19 @@ export async function POST(req: NextRequest) {
           })
         : Promise.resolve({ success: true, skipped: true, reason: 'No actual_cash_on_hand' }),
     ])
-    return NextResponse.json({ eod: eodResult, cashLog: cashResult })
+
+    if (eodResult.status === 'rejected' || cashResult.status === 'rejected') {
+      return NextResponse.json(
+        {
+          error: 'Google Sheets sync failed',
+          eod: eodResult.status === 'fulfilled' ? eodResult.value : { success: false, error: eodResult.reason instanceof Error ? eodResult.reason.message : 'Unknown EOD sheet error' },
+          cashLog: cashResult.status === 'fulfilled' ? cashResult.value : { success: false, error: cashResult.reason instanceof Error ? cashResult.reason.message : 'Unknown cash log sheet error' },
+        },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ eod: eodResult.value, cashLog: cashResult.value })
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to sync EOD report to Google Sheets' },
