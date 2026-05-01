@@ -1104,18 +1104,21 @@ export default function EodPage() {
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">{label}</span>
                     <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
                     <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={override}
                       onChange={e => {
-                        setOverride(e.target.value)
-                        recomputeCashTotal(denoms, isCoin ? e.target.value : coinSubtotalOverride, isCoin ? billSubtotalOverride : e.target.value)
+                        const nextValue = e.target.value
+                        if (!/^\d*\.?\d{0,2}$/.test(nextValue)) return
+
+                        setOverride(nextValue)
+                        recomputeCashTotal(denoms, isCoin ? nextValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : nextValue)
                       }}
-                      onFocus={() => {
+                      onFocus={e => {
                         if (override === '') {
                           const initialValue = computed > 0 ? computed.toFixed(2) : ''
                           setOverride(initialValue)
+                          requestAnimationFrame(() => e.target.select())
                         }
                       }}
                       onBlur={e => {
