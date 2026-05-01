@@ -48,6 +48,8 @@ export async function POST(req: NextRequest) {
             session_date: report.session_date,
             actual_cash_on_hand: Number(report.actual_cash_on_hand),
             updated_at: report.updated_at,
+            cash_total: Number(report.cash_total ?? 0),
+            cash_tip: Number(report.cash_tip ?? 0),
             cash_on_hand: runningBalance,
           })
         : Promise.resolve({ success: true, skipped: true, reason: 'No actual_cash_on_hand' }),

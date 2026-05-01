@@ -1107,10 +1107,31 @@ export default function EodPage() {
                       type="number"
                       min="0"
                       step="0.01"
-                      value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
+                      value={override}
                       onChange={e => {
                         setOverride(e.target.value)
                         recomputeCashTotal(denoms, isCoin ? e.target.value : coinSubtotalOverride, isCoin ? billSubtotalOverride : e.target.value)
+                      }}
+                      onFocus={() => {
+                        if (override === '') {
+                          const initialValue = computed > 0 ? computed.toFixed(2) : ''
+                          setOverride(initialValue)
+                        }
+                      }}
+                      onBlur={e => {
+                        const trimmed = e.target.value.trim()
+                        if (trimmed === '') {
+                          setOverride('')
+                          recomputeCashTotal(denoms, isCoin ? '' : coinSubtotalOverride, isCoin ? billSubtotalOverride : '')
+                          return
+                        }
+
+                        const numericValue = Number(trimmed)
+                        if (!Number.isFinite(numericValue)) return
+
+                        const formattedValue = numericValue.toFixed(2)
+                        setOverride(formattedValue)
+                        recomputeCashTotal(denoms, isCoin ? formattedValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : formattedValue)
                       }}
                       placeholder="0.00"
                       className="h-8 w-20 text-center text-xs px-1 font-semibold"
@@ -1168,7 +1189,16 @@ export default function EodPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label>Cash Amount</Label>
-                      <Input type="number" step="0.01" value={form.cash_total} onChange={e => setField('cash_total', e.target.value)} placeholder="0.00" />
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={form.cash_total}
+                        readOnly
+                        aria-readonly="true"
+                        placeholder="0.00"
+                        className="bg-muted font-semibold text-slate-700"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Imported from the cash drawer calculator above.</p>
                     </div>
                     <div>
                       <Label>Net Revenue</Label>

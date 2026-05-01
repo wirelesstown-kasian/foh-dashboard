@@ -81,6 +81,35 @@ async function googleSheetsRequest<T>(url: string, accessToken: string, init?: R
   return response.json() as Promise<T>
 }
 
+async function ensureSheetExists(config: GoogleSheetsConfig, accessToken: string, sheetName: string) {
+  const metadata = await googleSheetsRequest<{
+    sheets?: Array<{ properties?: { title?: string } }>
+  }>(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?fields=sheets.properties.title`,
+    accessToken,
+  )
+
+  const exists = (metadata.sheets ?? []).some(sheet => sheet.properties?.title === sheetName)
+  if (exists) return
+
+  await googleSheetsRequest(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}:batchUpdate`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        requests: [
+          {
+            addSheet: {
+              properties: { title: sheetName },
+            },
+          },
+        ],
+      }),
+    }
+  )
+}
+
 type EodSheetReport = EodReport & { closed_by?: { name?: string | null } | null }
 
 const EOD_SHEET_HEADERS = [
@@ -131,6 +160,8 @@ function buildEodSheetRow(report: EodSheetReport) {
 }
 
 async function ensureEodSheetHeaders(config: GoogleSheetsConfig, accessToken: string) {
+  await ensureSheetExists(config, accessToken, config.sheetName)
+
   const encodedSheetName = getEncodedSheetRangePrefix(config.sheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
   const expectedHeaders = EOD_SHEET_HEADERS
@@ -156,6 +187,8 @@ async function ensureEodSheetHeaders(config: GoogleSheetsConfig, accessToken: st
 }
 
 async function clearEodSheet(config: GoogleSheetsConfig, accessToken: string) {
+  await ensureSheetExists(config, accessToken, config.sheetName)
+
   const encodedSheetName = getEncodedSheetRangePrefix(config.sheetName)
   await googleSheetsRequest(
     `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodedSheetName}!A:P:clear`,
@@ -258,6 +291,8 @@ export async function resetEodSheetInGoogleSheet(reports: EodSheetReport[]) {
 }
 
 async function upsertCashLogRow(config: GoogleSheetsConfig, accessToken: string, row: string[], entryId: string) {
+  await ensureSheetExists(config, accessToken, config.cashLogSheetName)
+
   const encodedSheetName = getEncodedSheetRangePrefix(config.cashLogSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
   const cashLogHeaders = ['Date', 'Type', 'Amount Entered', 'Current Balance', 'Description', 'Row Key']
@@ -331,18 +366,27 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry,
   return { success: true, skipped: false, action }
 }
 
-export async function syncEodCashCountToGoogleSheet(report: { id: string; session_date: string; actual_cash_on_hand: number; updated_at: string; cash_on_hand?: number }) {
+export async function syncEodCashCountToGoogleSheet(report: {
+  id: string
+  session_date: string
+  actual_cash_on_hand: number
+  updated_at: string
+  cash_total?: number
+  cash_tip?: number
+  cash_on_hand?: number
+}) {
   const config = getConfig()
   if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
 
   const accessToken = await getAccessToken(config)
   const actualCash = Number(report.actual_cash_on_hand)
+  const amountEntered = Number(report.cash_total ?? 0) + Number(report.cash_tip ?? 0)
   const runningBalance = report.cash_on_hand ?? actualCash
 
   const row = [
     report.session_date,
     'EOD Cash Count',
-    actualCash.toFixed(2),
+    amountEntered.toFixed(2),
     runningBalance.toFixed(2),
     'EOD drawer reconciliation',
     `eod_${report.id}`,
