@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
@@ -18,6 +19,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     let mounted = true
+    const nextPath = searchParams.get('next')
 
     void (async () => {
       const res = await fetch('/api/app-session', { cache: 'no-store' })
@@ -28,13 +30,13 @@ export default function LoginPage() {
       if (!mounted) return
       setLoginReady(data.login_ready !== false)
       if (!data.authenticated) return
-      router.replace(data.can_manage_admin ? '/admin' : '/schedule')
+      router.replace(nextPath || (data.can_manage_admin ? '/admin' : '/schedule'))
     })()
 
     return () => {
       mounted = false
     }
-  }, [router])
+  }, [router, searchParams])
 
   const handleSubmit = async () => {
     setSaving(true)
@@ -52,7 +54,8 @@ export default function LoginPage() {
         return
       }
 
-      router.push(data.can_manage_admin ? '/admin' : '/schedule')
+      const nextPath = searchParams.get('next')
+      router.push(nextPath || (data.can_manage_admin ? '/admin' : '/schedule'))
       router.refresh()
     } finally {
       setSaving(false)

@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 
 export const APP_SESSION_COOKIE = 'foh_app_session'
-const APP_SESSION_DURATION_SECONDS = 60 * 60 * 8
+const APP_SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30
 
 export interface AppSessionPayload {
   employeeId: string
@@ -68,4 +68,3 @@ export function parseAppSessionValue(value: string | undefined | null) {
 export function getAppSessionMaxAge() {
   return APP_SESSION_DURATION_SECONDS
 }
-

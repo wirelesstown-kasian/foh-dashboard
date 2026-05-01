@@ -21,6 +21,19 @@ export async function GET() {
     return NextResponse.json({ authenticated: false, login_ready: loginReady })
   }
 
+  cookieStore.set(APP_SESSION_COOKIE, createAppSessionValue({
+    employeeId: session.employeeId,
+    name: session.name,
+    email: session.email,
+    role: session.role,
+  }), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: getAppSessionMaxAge(),
+  })
+
   return NextResponse.json({
     authenticated: true,
     login_ready: loginReady,
