@@ -1099,46 +1099,55 @@ export default function EodPage() {
                   label: string; computed: number; override: string;
                   setOverride: (v: string) => void; isCoin: boolean
                 }) => (
-                  <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-dashed">
-                    <span className="w-9 shrink-0" />
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">{label}</span>
-                    <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      value={override}
-                      onChange={e => {
-                        const nextValue = e.target.value
-                        if (!/^\d*\.?\d{0,2}$/.test(nextValue)) return
+                  <div className={`mt-2 pt-2 border-t border-dashed ${isCoin ? '' : 'rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-3'}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-9 shrink-0" />
+                      <span className={`font-semibold uppercase tracking-wide text-center ${isCoin ? 'text-[11px] text-muted-foreground w-16' : 'text-[12px] text-emerald-800 w-24'}`}>
+                        {isCoin ? label : 'Bill Total'}
+                      </span>
+                      <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={override}
+                        onChange={e => {
+                          const nextValue = e.target.value
+                          if (!/^\d*\.?\d{0,2}$/.test(nextValue)) return
 
-                        setOverride(nextValue)
-                        recomputeCashTotal(denoms, isCoin ? nextValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : nextValue)
-                      }}
-                      onFocus={e => {
-                        if (override === '') {
-                          const initialValue = computed > 0 ? computed.toFixed(2) : ''
-                          setOverride(initialValue)
-                          requestAnimationFrame(() => e.target.select())
-                        }
-                      }}
-                      onBlur={e => {
-                        const trimmed = e.target.value.trim()
-                        if (trimmed === '') {
-                          setOverride('')
-                          recomputeCashTotal(denoms, isCoin ? '' : coinSubtotalOverride, isCoin ? billSubtotalOverride : '')
-                          return
-                        }
+                          setOverride(nextValue)
+                          recomputeCashTotal(denoms, isCoin ? nextValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : nextValue)
+                        }}
+                        onFocus={e => {
+                          if (override === '') {
+                            const initialValue = computed > 0 ? computed.toFixed(2) : ''
+                            setOverride(initialValue)
+                            requestAnimationFrame(() => e.target.select())
+                          }
+                        }}
+                        onBlur={e => {
+                          const trimmed = e.target.value.trim()
+                          if (trimmed === '') {
+                            setOverride('')
+                            recomputeCashTotal(denoms, isCoin ? '' : coinSubtotalOverride, isCoin ? billSubtotalOverride : '')
+                            return
+                          }
 
-                        const numericValue = Number(trimmed)
-                        if (!Number.isFinite(numericValue)) return
+                          const numericValue = Number(trimmed)
+                          if (!Number.isFinite(numericValue)) return
 
-                        const formattedValue = numericValue.toFixed(2)
-                        setOverride(formattedValue)
-                        recomputeCashTotal(denoms, isCoin ? formattedValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : formattedValue)
-                      }}
-                      placeholder="0.00"
-                      className="h-8 w-20 text-center text-xs px-1 font-semibold"
-                    />
+                          const formattedValue = numericValue.toFixed(2)
+                          setOverride(formattedValue)
+                          recomputeCashTotal(denoms, isCoin ? formattedValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : formattedValue)
+                        }}
+                        placeholder="0.00"
+                        className={isCoin ? 'h-8 w-20 text-center text-xs px-1 font-semibold' : 'h-11 w-32 text-center text-base px-3 font-bold border-emerald-300 bg-white'}
+                      />
+                    </div>
+                    {!isCoin && (
+                      <p className="mt-2 pl-[6.5rem] text-xs font-medium text-emerald-800">
+                        Enter the total bills here if you want to skip counting each bill. This updates the <span className="font-bold">Cash Amount</span> below.
+                      </p>
+                    )}
                   </div>
                 )
                 return (
