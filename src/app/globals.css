@@ -163,3 +163,26 @@
     padding-bottom: 12px;
   }
 }
+
+@media (pointer: coarse) and (orientation: portrait) {
+  html {
+    font-size: 15px;
+  }
+
+  body {
+    background: linear-gradient(180deg, #f4f5f7 0%, #eef1f4 100%);
+  }
+
+  main {
+    padding-inline: 8px;
+    padding-bottom: 16px;
+  }
+
+  /* Hide webkit scrollbar in the mobile tab strip */
+  nav [style*="scrollbarWidth"] {
+    -webkit-overflow-scrolling: touch;
+  }
+  nav [style*="scrollbarWidth"]::-webkit-scrollbar {
+    display: none;
+  }
+}

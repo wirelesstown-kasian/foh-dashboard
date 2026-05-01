@@ -139,11 +139,103 @@ export function TabNav() {
     return null
   }
 
+  const adminTabClass = cn(
+    'flex items-center gap-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap shrink-0',
+    isOnAdminPage && adminUnlocked
+      ? 'bg-violet-600 text-white'
+      : adminUnlocked || adminAvailable
+        ? 'text-violet-300 hover:bg-gray-700 hover:text-white'
+        : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+  )
+
   return (
     <>
       <nav className="flex flex-col bg-gray-900 shrink-0">
-        {/* Main row */}
-        <div className="flex items-center min-h-16 px-3 gap-2">
+
+        {/* ── Mobile layout (portrait phone) ── */}
+
+        {/* Row 1: Logo + user controls */}
+        <div className="flex md:hidden items-center h-12 px-3 gap-2 border-b border-gray-800">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="rounded-lg border border-gray-700 bg-gray-800 p-1 shrink-0">
+              <Image
+                src="/new%20logo%20V3.jpg"
+                alt="FOH Dashboard"
+                width={28}
+                height={28}
+                className="h-6 w-6 rounded object-contain"
+                priority
+              />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-white font-semibold text-[13px] leading-tight">New Village</div>
+              <div className="truncate text-amber-400 font-semibold text-[11px] leading-tight">FOH Dashboard</div>
+            </div>
+          </div>
+
+          <div className="ml-auto flex items-center gap-1 shrink-0">
+            {appUserName ? (
+              <>
+                <span className="max-w-25 truncate text-xs text-gray-300 hidden xs:block">{appUserName}</span>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 rounded-md px-2.5 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span className="text-xs">Logout</span>
+                </button>
+              </>
+            ) : loginReady ? (
+              <Link
+                href="/login"
+                className="flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              >
+                <UserRound className="h-4 w-4" />
+                <span className="text-xs">Login</span>
+              </Link>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Row 2: Horizontally scrollable tabs */}
+        <div
+          className="flex md:hidden items-center gap-1 overflow-x-auto px-2 py-1.5"
+          style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
+        >
+          {publicTabs.map(({ label, href, icon: Icon }) => {
+            const active = pathname === href
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap shrink-0',
+                  active ? 'bg-amber-500 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                )}
+              >
+                <Icon className="w-4 h-4" />
+                {label}
+              </Link>
+            )
+          })}
+
+          <div className="w-px h-5 bg-gray-700 mx-0.5 shrink-0" />
+
+          <button
+            onClick={handleAdminClick}
+            className={cn(adminTabClass, 'px-3 py-2')}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            {adminNeedsSetup ? 'Setup' : 'Admin'}
+            {adminUnlocked
+              ? <Lock className="w-3 h-3 ml-0.5 text-green-400" />
+              : <Lock className="w-3 h-3 ml-0.5" />
+            }
+          </button>
+        </div>
+
+        {/* ── Desktop / landscape tablet layout (single row) ── */}
+        <div className="hidden md:flex items-center min-h-16 px-3 gap-2">
           <div className="flex items-center mr-4 px-1 min-w-0">
             <div className="mr-3 rounded-xl border border-gray-700 bg-gray-800 p-1.5 shadow-sm">
               <Image
@@ -186,14 +278,7 @@ export function TabNav() {
 
           <button
             onClick={handleAdminClick}
-            className={cn(
-              'flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap',
-              isOnAdminPage && adminUnlocked
-                ? 'bg-violet-600 text-white'
-                : adminUnlocked || adminAvailable
-                  ? 'text-violet-300 hover:bg-gray-700 hover:text-white'
-                  : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-            )}
+            className={cn(adminTabClass, 'px-4 py-2.5')}
           >
             <ShieldCheck className="w-4 h-4" />
             {adminNeedsSetup ? 'Setup Admin' : 'Admin Board'}
