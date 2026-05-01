@@ -1099,10 +1099,10 @@ export default function EodPage() {
                   label: string; computed: number; override: string;
                   setOverride: (v: string) => void; isCoin: boolean
                 }) => (
-                  <div className={`mt-2 pt-2 border-t border-dashed ${isCoin ? '' : 'rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-3'}`}>
-                    <div className="flex items-center gap-1.5">
+                  <div className={`mt-2 pt-2 border-t border-dashed ${isCoin ? '' : 'rounded-xl border-2 border-emerald-400 bg-emerald-50 px-4 py-4 shadow-sm'}`}>
+                    <div className={`flex items-center gap-1.5 ${isCoin ? '' : 'justify-center'}`}>
                       <span className="w-9 shrink-0" />
-                      <span className={`font-semibold uppercase tracking-wide text-center ${isCoin ? 'text-[11px] text-muted-foreground w-16' : 'text-[12px] text-emerald-800 w-24'}`}>
+                      <span className={`font-semibold uppercase tracking-wide text-center ${isCoin ? 'text-[11px] text-muted-foreground w-16' : 'text-sm font-extrabold text-emerald-900 w-28'}`}>
                         {isCoin ? label : 'Bill Total'}
                       </span>
                       <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
@@ -1140,11 +1140,11 @@ export default function EodPage() {
                           recomputeCashTotal(denoms, isCoin ? formattedValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : formattedValue)
                         }}
                         placeholder="0.00"
-                        className={isCoin ? 'h-8 w-20 text-center text-xs px-1 font-semibold' : 'h-11 w-32 text-center text-base px-3 font-bold border-emerald-300 bg-white'}
+                        className={isCoin ? 'h-8 w-20 text-center text-xs px-1 font-semibold' : 'h-12 w-36 text-center text-lg px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm'}
                       />
                     </div>
                     {!isCoin && (
-                      <p className="mt-2 pl-[6.5rem] text-xs font-medium text-emerald-800">
+                      <p className="mt-3 text-center text-sm font-bold leading-5 text-emerald-900">
                         Enter the total bills here if you want to skip counting each bill. This updates the <span className="font-bold">Cash Amount</span> below.
                       </p>
                     )}
