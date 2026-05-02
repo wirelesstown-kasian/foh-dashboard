@@ -153,8 +153,10 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
               <div className="text-right">
                 <div className="text-base font-bold">{row.monthly?.score ?? '—'}</div>
                 {row.monthly && (
-                  <div className="text-[10px] text-slate-400 leading-tight">
-                    {(row.monthly.taskCompletionRate * 100).toFixed(0)}% · {row.monthly.taskRate.toFixed(1)}/hr · {formatCurrency(row.monthly.tipRate)}/hr
+                  <div className="mt-0.5 space-y-0.5 text-[10px] leading-tight">
+                    <div><span className="text-slate-400">cmpl </span><span className="font-medium text-slate-600">{(row.monthly.taskCompletionRate * 100).toFixed(0)}%</span></div>
+                    <div><span className="text-slate-400">task </span><span className="font-medium text-slate-600">{row.monthly.taskRate.toFixed(1)}/hr</span></div>
+                    <div><span className="text-slate-400">tips </span><span className="font-medium text-slate-600">{formatCurrency(row.monthly.tipRate)}/hr</span></div>
                   </div>
                 )}
               </div>
