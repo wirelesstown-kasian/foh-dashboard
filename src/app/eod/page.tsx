@@ -162,7 +162,7 @@ export default function EodPage() {
   const [tipDistributionSaved, setTipDistributionSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const [adminUnlocked, setAdminUnlocked] = useState<null | boolean>(null)
+  const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [pinGatePin, setPinGatePin] = useState('')
   const [pinGateError, setPinGateError] = useState<string | null>(null)
   const [pinGateLoading, setPinGateLoading] = useState(false)
@@ -308,12 +308,6 @@ export default function EodPage() {
     void load()
   }, [load])
 
-  useEffect(() => {
-    void fetch('/api/admin-session', { cache: 'no-store' })
-      .then(res => res.json())
-      .then((data: { authenticated?: boolean }) => setAdminUnlocked(data.authenticated === true))
-      .catch(() => setAdminUnlocked(false))
-  }, [])
 
   useEffect(() => {
     if (loading) return
@@ -713,7 +707,7 @@ export default function EodPage() {
     }
   }
 
-  if (loading || adminUnlocked === null) return <div className="p-6 text-muted-foreground">Loading…</div>
+  if (loading) return <div className="p-6 text-muted-foreground">Loading…</div>
 
   if (!adminUnlocked) {
     return (
@@ -1158,74 +1152,87 @@ export default function EodPage() {
                     </div>
                   )
                 }
-                const renderSubtotalRow = ({ label, computed, override, setOverride, isCoin }: {
-                  label: string; computed: number; override: string;
+                const renderSubtotalRow = ({ computed, override, setOverride, isCoin }: {
+                  computed: number; override: string;
                   setOverride: (v: string) => void; isCoin: boolean
-                }) => (
-                  <div className={`mt-2 pt-2 border-t border-dashed ${isCoin ? '' : 'rounded-xl border-2 border-emerald-400 bg-emerald-50 px-4 py-4 shadow-sm'}`}>
-                    <div className={`flex items-center gap-1.5 ${isCoin ? '' : 'justify-center'}`}>
-                      <span className="w-9 shrink-0" />
-                      <span className={`font-semibold uppercase tracking-wide text-center ${isCoin ? 'text-[11px] text-muted-foreground w-16' : 'text-sm font-extrabold text-emerald-900 w-28'}`}>
-                        {isCoin ? label : 'Bill Total'}
-                      </span>
-                      <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        value={override}
-                        onChange={e => {
-                          const nextValue = e.target.value
-                          if (!/^\d*\.?\d{0,2}$/.test(nextValue)) return
-
-                          setOverride(nextValue)
-                          recomputeCashTotal(denoms, isCoin ? nextValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : nextValue)
-                        }}
-                        onFocus={e => {
-                          if (override === '') {
-                            const initialValue = computed > 0 ? computed.toFixed(2) : ''
-                            setOverride(initialValue)
-                            requestAnimationFrame(() => e.target.select())
-                          }
-                        }}
-                        onBlur={e => {
-                          const trimmed = e.target.value.trim()
-                          if (trimmed === '') {
-                            setOverride('')
-                            recomputeCashTotal(denoms, isCoin ? '' : coinSubtotalOverride, isCoin ? billSubtotalOverride : '')
-                            return
-                          }
-
-                          const numericValue = Number(trimmed)
-                          if (!Number.isFinite(numericValue)) return
-
-                          const formattedValue = numericValue.toFixed(2)
-                          setOverride(formattedValue)
-                          recomputeCashTotal(denoms, isCoin ? formattedValue : coinSubtotalOverride, isCoin ? billSubtotalOverride : formattedValue)
-                        }}
-                        placeholder="0.00"
-                        className={isCoin ? 'h-8 w-20 text-center text-xs px-1 font-semibold' : 'h-12 w-36 text-center text-lg px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm'}
-                      />
+                }) => {
+                  const handleChange = (val: string) => {
+                    if (!/^\d*\.?\d{0,2}$/.test(val)) return
+                    setOverride(val)
+                    recomputeCashTotal(denoms, isCoin ? val : coinSubtotalOverride, isCoin ? billSubtotalOverride : val)
+                  }
+                  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+                    if (override === '') {
+                      const init = computed > 0 ? computed.toFixed(2) : ''
+                      setOverride(init)
+                      recomputeCashTotal(denoms, isCoin ? init : coinSubtotalOverride, isCoin ? billSubtotalOverride : init)
+                      requestAnimationFrame(() => e.target.select())
+                    }
+                  }
+                  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+                    const trimmed = e.target.value.trim()
+                    if (trimmed === '') {
+                      setOverride('')
+                      recomputeCashTotal(denoms, isCoin ? '' : coinSubtotalOverride, isCoin ? billSubtotalOverride : '')
+                      return
+                    }
+                    const formatted = (Number(trimmed) || 0).toFixed(2)
+                    setOverride(formatted)
+                    recomputeCashTotal(denoms, isCoin ? formatted : coinSubtotalOverride, isCoin ? billSubtotalOverride : formatted)
+                  }
+                  if (!isCoin) {
+                    return (
+                      <div className="mt-4 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
+                        <p className="text-sm font-extrabold text-emerald-900 text-center mb-3">Bill Total</p>
+                        <Input
+                          type="text" inputMode="decimal"
+                          value={override}
+                          onChange={e => handleChange(e.target.value)}
+                          onFocus={handleFocus}
+                          onBlur={handleBlur}
+                          placeholder="0.00"
+                          className="h-14 w-full text-center text-xl px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm"
+                        />
+                        <p className="mt-2 text-center text-xs font-medium text-emerald-800">
+                          Enter total bills here to skip counting each denomination. Updates Cash Amount below.
+                        </p>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className="mt-2 pt-2 border-t border-dashed">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-9 shrink-0" />
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">Coin Total</span>
+                        <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
+                        <Input
+                          type="text" inputMode="decimal"
+                          value={override}
+                          onChange={e => handleChange(e.target.value)}
+                          onFocus={handleFocus}
+                          onBlur={handleBlur}
+                          placeholder="0.00"
+                          className="h-8 w-20 text-center text-xs px-1 font-semibold"
+                        />
+                      </div>
                     </div>
-                    {!isCoin && (
-                      <p className="mt-3 text-center text-sm font-bold leading-5 text-emerald-900">
-                        Enter the total bills here if you want to skip counting each bill. This updates the <span className="font-bold">Cash Amount</span> below.
-                      </p>
-                    )}
-                  </div>
-                )
+                  )
+                }
                 return (
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-4">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
-                      <div className="space-y-1.5">{coins.map(renderRow)}</div>
-                      {renderSubtotalRow({ label: 'Coin Total', computed: computedCoinTotal, override: coinSubtotalOverride, setOverride: setCoinSubtotalOverride, isCoin: true })}
+                  <>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
+                        <div className="space-y-1.5">{coins.map(renderRow)}</div>
+                        {renderSubtotalRow({ computed: computedCoinTotal, override: coinSubtotalOverride, setOverride: setCoinSubtotalOverride, isCoin: true })}
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
+                        <div className="space-y-1.5">{bills.map(renderRow)}</div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
-                      <div className="space-y-1.5">{bills.map(renderRow)}</div>
-                      {renderSubtotalRow({ label: 'Bill Total', computed: computedBillTotal, override: billSubtotalOverride, setOverride: setBillSubtotalOverride, isCoin: false })}
-                    </div>
-                  </div>
+                    {renderSubtotalRow({ computed: computedBillTotal, override: billSubtotalOverride, setOverride: setBillSubtotalOverride, isCoin: false })}
+                  </>
                 )
               })()}
 

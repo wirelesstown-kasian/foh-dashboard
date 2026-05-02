@@ -76,30 +76,40 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
     )
   }
 
-  const SubtotalRow = ({ label, computed, override, setOverride, isCoin }: {
-    label: string; computed: number; override: string
-    setOverride: (v: string) => void; isCoin: boolean
-  }) => (
-    <div className={`mt-2 pt-2 border-t border-dashed ${isCoin ? '' : 'rounded-xl border-2 border-emerald-400 bg-emerald-50 px-4 py-3 shadow-sm'}`}>
-      <div className={`flex items-center gap-1.5 ${isCoin ? '' : 'justify-center'}`}>
-        <span className={isCoin ? 'w-10 shrink-0' : 'w-9 shrink-0'} />
-        <span className={`font-semibold uppercase tracking-wide text-center ${isCoin ? 'text-[11px] text-muted-foreground w-16' : 'text-sm font-extrabold text-emerald-900 w-28'}`}>
-          {label}
-        </span>
+  const CoinTotalRow = ({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) => (
+    <div className="mt-2 pt-2 border-t border-dashed">
+      <div className="flex items-center gap-1.5">
+        <span className="w-10 shrink-0" />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">Coin Total</span>
         <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
         <Input
-          type="number" min="0" step="0.01"
+          type="text" inputMode="decimal"
           value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
-          onChange={e => setOverride(e.target.value)}
+          onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
+          onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
+          onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
           placeholder="0.00"
-          className={isCoin ? 'h-8 w-20 text-center text-xs px-1 font-semibold' : 'h-12 w-36 text-center text-lg px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm'}
+          className="h-8 w-20 text-center text-xs px-1 font-semibold"
         />
       </div>
-      {!isCoin && (
-        <p className="mt-2 text-center text-xs font-medium text-emerald-800">
-          Enter total bills here to skip counting each denomination.
-        </p>
-      )}
+    </div>
+  )
+
+  const BillTotalRow = ({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) => (
+    <div className="mt-4 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
+      <p className="text-sm font-extrabold text-emerald-900 text-center mb-3">Bill Total</p>
+      <Input
+        type="text" inputMode="decimal"
+        value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
+        onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
+        onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
+        onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
+        placeholder="0.00"
+        className="h-14 w-full text-center text-xl px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm"
+      />
+      <p className="mt-2 text-center text-xs font-medium text-emerald-800">
+        Enter total bills here to skip counting each denomination.
+      </p>
     </div>
   )
 
@@ -149,7 +159,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
         {/* Calculator */}
         <div className="rounded-xl border bg-white p-5 shadow-sm">
           <h2 className="font-semibold mb-4">Count Drawer</h2>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-4">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
               <div className="space-y-1.5">
@@ -160,7 +170,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
                   { key: 'c1',  label: '¢1',  value: 0.01 },
                 ].map(({ key, label, value }) => renderRow(key, label, value, true))}
               </div>
-              <SubtotalRow label="Coin Total" computed={computedCoin} override={coinOverride} setOverride={setCoinOverride} isCoin={true} />
+              <CoinTotalRow computed={computedCoin} override={coinOverride} setOverride={setCoinOverride} />
             </div>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
@@ -174,9 +184,9 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
                   { key: 'd1',   label: '$1',   value: 1 },
                 ].map(({ key, label, value }) => renderRow(key, label, value, false))}
               </div>
-              <SubtotalRow label="Bill Total" computed={computedBill} override={billOverride} setOverride={setBillOverride} isCoin={false} />
             </div>
           </div>
+          <BillTotalRow computed={computedBill} override={billOverride} setOverride={setBillOverride} />
 
           {/* Drawer total summary */}
           <div className="flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-sm flex-wrap">
