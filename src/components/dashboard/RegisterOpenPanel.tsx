@@ -30,9 +30,6 @@ interface Props {
 
 export function RegisterOpenPanel({ session, employees, today, businessDate, onComplete }: Props) {
   const [openedBy, setOpenedBy] = useState<string>(session?.register_opened_by ?? '')
-  const [manualCash, setManualCash] = useState<string>(
-    session?.starting_cash != null ? String(session.starting_cash) : ''
-  )
   const [coinOverride, setCoinOverride] = useState<string>('')
   const [billOverride, setBillOverride] = useState<string>('')
   const [denoms, setDenoms] = useState<Record<string, { count: string; amount: string }>>(EMPTY_DENOMS)
@@ -43,20 +40,8 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
   const effCoin = coinOverride !== '' ? (parseFloat(coinOverride) || 0) : computedCoin
   const effBill = billOverride !== '' ? (parseFloat(billOverride) || 0) : computedBill
   const drawerTotal = effCoin + effBill
-
-  const hasDrawerEntry = Object.values(denoms).some(d => d.count !== '') || coinOverride !== '' || billOverride !== ''
-  const startingCash = manualCash !== '' ? (parseFloat(manualCash) || 0) : (hasDrawerEntry ? drawerTotal : 0)
-
-  // When drawer total changes, sync to manual cash if manual hasn't been touched
-  const updateDenoms = (newDenoms: typeof denoms, newCoinOverride: string, newBillOverride: string) => {
-    const cCoins = COIN_KEYS.reduce((s, k) => s + (parseInt(newDenoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
-    const cBills = BILL_KEYS.reduce((s, k) => s + (parseInt(newDenoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
-    const effC = newCoinOverride !== '' ? (parseFloat(newCoinOverride) || 0) : cCoins
-    const effB = newBillOverride !== '' ? (parseFloat(newBillOverride) || 0) : cBills
-    const total = effC + effB
-    // Keep starting cash synced to the register calculator total by default.
-    setManualCash(total > 0 ? total.toFixed(2) : '')
-  }
+  // Starting cash is always the drawer total — locked, not manually editable
+  const startingCash = drawerTotal
 
   const renderRow = (key: string, label: string, value: number, isCoin: boolean) => {
     const { count, amount } = denoms[key]
@@ -68,13 +53,9 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
           onChange={e => {
             const c = e.target.value
             const a = c ? ((parseInt(c) || 0) * value).toFixed(2) : ''
-            const nd = { ...denoms, [key]: { count: c, amount: a } }
-            setDenoms(nd)
-            const nco = isCoin ? '' : coinOverride
-            const nbo = !isCoin ? '' : billOverride
+            setDenoms(nd => ({ ...nd, [key]: { count: c, amount: a } }))
             if (isCoin) setCoinOverride('')
             else setBillOverride('')
-            updateDenoms(nd, nco, nbo)
           }}
           placeholder="개수" className="h-8 w-16 text-center text-xs px-1"
         />
@@ -84,13 +65,9 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
           onChange={e => {
             const a = e.target.value
             const c = a ? String(Math.round((parseFloat(a) || 0) / value)) : ''
-            const nd = { ...denoms, [key]: { count: c, amount: a } }
-            setDenoms(nd)
-            const nco = isCoin ? '' : coinOverride
-            const nbo = !isCoin ? '' : billOverride
+            setDenoms(nd => ({ ...nd, [key]: { count: c, amount: a } }))
             if (isCoin) setCoinOverride('')
             else setBillOverride('')
-            updateDenoms(nd, nco, nbo)
           }}
           placeholder="금액" className="h-8 w-20 text-center text-xs px-1"
         />
@@ -102,21 +79,26 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
     label: string; computed: number; override: string
     setOverride: (v: string) => void; isCoin: boolean
   }) => (
-    <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-dashed">
-      <span className="w-10 shrink-0" />
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">{label}</span>
-      <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
-      <Input
-        type="number" min="0" step="0.01"
-        value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
-        onChange={e => {
-          setOverride(e.target.value)
-          const nco = isCoin ? e.target.value : coinOverride
-          const nbo = isCoin ? billOverride : e.target.value
-          updateDenoms(denoms, nco, nbo)
-        }}
-        placeholder="0.00" className="h-8 w-20 text-center text-xs px-1 font-semibold"
-      />
+    <div className={`mt-2 pt-2 border-t border-dashed ${isCoin ? '' : 'rounded-xl border-2 border-emerald-400 bg-emerald-50 px-4 py-3 shadow-sm'}`}>
+      <div className={`flex items-center gap-1.5 ${isCoin ? '' : 'justify-center'}`}>
+        <span className={isCoin ? 'w-10 shrink-0' : 'w-9 shrink-0'} />
+        <span className={`font-semibold uppercase tracking-wide text-center ${isCoin ? 'text-[11px] text-muted-foreground w-16' : 'text-sm font-extrabold text-emerald-900 w-28'}`}>
+          {label}
+        </span>
+        <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
+        <Input
+          type="number" min="0" step="0.01"
+          value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
+          onChange={e => setOverride(e.target.value)}
+          placeholder="0.00"
+          className={isCoin ? 'h-8 w-20 text-center text-xs px-1 font-semibold' : 'h-12 w-36 text-center text-lg px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm'}
+        />
+      </div>
+      {!isCoin && (
+        <p className="mt-2 text-center text-xs font-medium text-emerald-800">
+          Enter total bills here to skip counting each denomination.
+        </p>
+      )}
     </div>
   )
 
@@ -208,27 +190,23 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
           </div>
         </div>
 
-        {/* Starting Cash */}
-        <div className="rounded-xl border bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-1">
+        {/* Starting Cash — locked, auto-set from drawer calculator */}
+        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold">Starting Cash</h2>
-            <span className="text-xs text-muted-foreground">Auto-filled from drawer count · override if needed</span>
+            <span className="flex items-center gap-1 text-xs text-amber-700 font-medium">
+              <DollarSign className="w-3.5 h-3.5" />
+              Auto from drawer · read only
+            </span>
           </div>
-          <div className="flex items-center gap-3 mt-3">
-            <DollarSign className="w-5 h-5 text-amber-500 shrink-0" />
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              value={manualCash}
-              onChange={e => setManualCash(e.target.value)}
-              placeholder={hasDrawerEntry ? drawerTotal.toFixed(2) : '0.00'}
-              className="w-40 text-xl font-bold h-12 text-center"
-            />
-            <span className="text-2xl font-bold text-amber-700">
+          <div className="flex items-center justify-center gap-3">
+            <span className="text-4xl font-extrabold text-amber-700 tracking-tight">
               ${startingCash.toFixed(2)}
             </span>
           </div>
+          {startingCash === 0 && (
+            <p className="mt-2 text-center text-xs text-amber-600">Count the drawer above to set starting cash.</p>
+          )}
         </div>
 
         {/* Open Register button */}

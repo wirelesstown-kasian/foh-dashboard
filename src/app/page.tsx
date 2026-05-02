@@ -220,7 +220,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 md:overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="hidden md:block shrink-0">
           <StaffSidebar schedules={schedules} employees={employees} clockRecords={clockRecords} />
         </div>

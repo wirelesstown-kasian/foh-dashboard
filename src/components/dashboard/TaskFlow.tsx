@@ -359,29 +359,29 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4">
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-3 flex shrink-0 items-center gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' } as React.CSSProperties}>
         {PHASE_ORDER.map((phase, index) => {
           const phaseIndex = PHASE_ORDER.indexOf(currentPhase)
           const isActive = phase === currentPhase
           const isDone = index < phaseIndex
 
           return (
-            <div key={phase} className="flex items-center gap-2">
+            <div key={phase} className="flex shrink-0 items-center gap-2">
               <div
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
                   isActive ? 'bg-amber-500 text-white' : isDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
                 }`}
               >
                 {isDone && <CheckCircle2 className="h-4 w-4" />}
                 {PHASE_LABELS[phase]}
               </div>
-              {index < PHASE_ORDER.length - 1 && <ChevronRight className="h-4 w-4 text-gray-300" />}
+              {index < PHASE_ORDER.length - 1 && <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />}
             </div>
           )
         })}
       </div>
 
-      <div className="flex flex-col overflow-hidden rounded-xl border bg-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-white">
         <div className="flex items-center justify-between gap-2 border-b bg-gray-50 p-3">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
@@ -504,7 +504,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-3 flex shrink-0 items-center justify-between">
         <div>
           {currentPhase === 'pre_shift' ? (
             <Button variant="outline" onClick={handlePhaseBack}>
