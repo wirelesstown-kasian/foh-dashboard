@@ -20,6 +20,47 @@ const EMPTY_DENOMS = Object.fromEntries(
   [...COIN_KEYS, ...BILL_KEYS].map(k => [k, { count: '', amount: '' }])
 )
 
+function CoinTotalRow({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) {
+  return (
+    <div className="mt-2 pt-2 border-t border-dashed">
+      <div className="flex items-center gap-1.5">
+        <span className="w-10 shrink-0" />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">Coin Total</span>
+        <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
+        <Input
+          type="text" inputMode="decimal"
+          value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
+          onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
+          onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
+          onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
+          placeholder="0.00"
+          className="h-8 w-20 text-center text-xs px-1 font-semibold"
+        />
+      </div>
+    </div>
+  )
+}
+
+function BillTotalRow({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) {
+  return (
+    <div className="mt-4 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
+      <p className="text-sm font-extrabold text-emerald-900 text-center mb-3">Bill Total</p>
+      <Input
+        type="text" inputMode="decimal"
+        value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
+        onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
+        onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
+        onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
+        placeholder="0.00"
+        className="h-14 w-full text-center text-xl px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm"
+      />
+      <p className="mt-2 text-center text-xs font-medium text-emerald-800">
+        Enter total bills here to skip counting each denomination.
+      </p>
+    </div>
+  )
+}
+
 interface Props {
   session: DailySession | null
   employees: Employee[]
@@ -40,7 +81,6 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
   const effCoin = coinOverride !== '' ? (parseFloat(coinOverride) || 0) : computedCoin
   const effBill = billOverride !== '' ? (parseFloat(billOverride) || 0) : computedBill
   const drawerTotal = effCoin + effBill
-  // Starting cash is always the drawer total — locked, not manually editable
   const startingCash = drawerTotal
 
   const renderRow = (key: string, label: string, value: number, isCoin: boolean) => {
@@ -75,43 +115,6 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
       </div>
     )
   }
-
-  const CoinTotalRow = ({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) => (
-    <div className="mt-2 pt-2 border-t border-dashed">
-      <div className="flex items-center gap-1.5">
-        <span className="w-10 shrink-0" />
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">Coin Total</span>
-        <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
-        <Input
-          type="text" inputMode="decimal"
-          value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
-          onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
-          onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
-          onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
-          placeholder="0.00"
-          className="h-8 w-20 text-center text-xs px-1 font-semibold"
-        />
-      </div>
-    </div>
-  )
-
-  const BillTotalRow = ({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) => (
-    <div className="mt-4 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
-      <p className="text-sm font-extrabold text-emerald-900 text-center mb-3">Bill Total</p>
-      <Input
-        type="text" inputMode="decimal"
-        value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
-        onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
-        onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
-        onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
-        placeholder="0.00"
-        className="h-14 w-full text-center text-xl px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm"
-      />
-      <p className="mt-2 text-center text-xs font-medium text-emerald-800">
-        Enter total bills here to skip counting each denomination.
-      </p>
-    </div>
-  )
 
   const handleOpen = async () => {
     setSaving(true)
@@ -189,7 +192,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
           <BillTotalRow computed={computedBill} override={billOverride} setOverride={setBillOverride} />
 
           {/* Drawer total summary */}
-          <div className="flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-sm flex-wrap">
+          <div className="mt-4 flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-sm flex-wrap">
             <span className="text-muted-foreground">Coins</span>
             <span className="font-semibold">${effCoin.toFixed(2)}</span>
             <span className="text-muted-foreground mx-1">+</span>

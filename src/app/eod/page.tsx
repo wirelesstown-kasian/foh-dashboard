@@ -162,10 +162,6 @@ export default function EodPage() {
   const [tipDistributionSaved, setTipDistributionSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const [adminUnlocked, setAdminUnlocked] = useState(false)
-  const [pinGatePin, setPinGatePin] = useState('')
-  const [pinGateError, setPinGateError] = useState<string | null>(null)
-  const [pinGateLoading, setPinGateLoading] = useState(false)
 
   const [startingCash, setStartingCash] = useState<number>(0)
   const [coinSubtotalOverride, setCoinSubtotalOverride] = useState<string>('')
@@ -345,7 +341,7 @@ export default function EodPage() {
   }))
   const pendingApprovalRecords = clockRecords.filter(record => record.approval_status === 'pending_review')
   const hasOpenClockWarnings = openClockRecords.length > 0
-  const hasManagerAccess = managerOverride || appCanManageAdmin
+  const hasManagerAccess = managerOverride
   const hasFinalizedEod = !!existing && (existing.tip_distributions?.length ?? 0) > 0
   const isLocked = !hasManagerAccess && (hasFinalizedEod || !session || session.current_phase !== 'complete')
 
@@ -686,60 +682,7 @@ export default function EodPage() {
     }
   }
 
-  const handlePinGateConfirm = async () => {
-    setPinGateLoading(true)
-    setPinGateError(null)
-    try {
-      const res = await fetch('/api/admin-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: pinGatePin }),
-      })
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string }
-        setPinGateError(data.error ?? 'Incorrect PIN')
-        return
-      }
-      setAdminUnlocked(true)
-      setPinGatePin('')
-    } finally {
-      setPinGateLoading(false)
-    }
-  }
-
   if (loading) return <div className="p-6 text-muted-foreground">Loading…</div>
-
-  if (!adminUnlocked) {
-    return (
-      <div className="flex min-h-full flex-col items-center justify-center gap-6 p-8">
-        <div className="flex flex-col items-center gap-3">
-          <Lock className="w-10 h-10 text-slate-400" />
-          <h1 className="text-xl font-bold">EOD Report</h1>
-          <p className="text-sm text-muted-foreground text-center">Manager PIN required to access End of Day</p>
-        </div>
-        <div className="w-full max-w-xs space-y-3">
-          <Input
-            type="password"
-            inputMode="numeric"
-            placeholder="Enter manager PIN"
-            value={pinGatePin}
-            onChange={e => { setPinGatePin(e.target.value); setPinGateError(null) }}
-            onKeyDown={e => { if (e.key === 'Enter' && pinGatePin.length > 0) void handlePinGateConfirm() }}
-            className="text-center text-lg tracking-widest"
-            autoFocus
-          />
-          {pinGateError && <p className="text-sm text-red-600 text-center">{pinGateError}</p>}
-          <Button
-            className="w-full"
-            onClick={() => void handlePinGateConfirm()}
-            disabled={pinGateLoading || pinGatePin.length === 0}
-          >
-            {pinGateLoading ? 'Verifying…' : 'Unlock'}
-          </Button>
-        </div>
-      </div>
-    )
-  }
 
   const closedByName = employees.find(e => e.id === form.closed_by)?.name ?? 'N/A'
 
