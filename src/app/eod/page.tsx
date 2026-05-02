@@ -162,6 +162,11 @@ export default function EodPage() {
   const [tipDistributionSaved, setTipDistributionSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  const [adminUnlocked, setAdminUnlocked] = useState<null | boolean>(null)
+  const [pinGatePin, setPinGatePin] = useState('')
+  const [pinGateError, setPinGateError] = useState<string | null>(null)
+  const [pinGateLoading, setPinGateLoading] = useState(false)
+
   const [startingCash, setStartingCash] = useState<number>(0)
   const [coinSubtotalOverride, setCoinSubtotalOverride] = useState<string>('')
   const [billSubtotalOverride, setBillSubtotalOverride] = useState<string>('')
@@ -302,6 +307,13 @@ export default function EodPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void fetch('/api/admin-session', { cache: 'no-store' })
+      .then(res => res.json())
+      .then((data: { authenticated?: boolean }) => setAdminUnlocked(data.authenticated === true))
+      .catch(() => setAdminUnlocked(false))
+  }, [])
 
   useEffect(() => {
     if (loading) return
@@ -680,7 +692,60 @@ export default function EodPage() {
     }
   }
 
-  if (loading) return <div className="p-6 text-muted-foreground">Loading…</div>
+  const handlePinGateConfirm = async () => {
+    setPinGateLoading(true)
+    setPinGateError(null)
+    try {
+      const res = await fetch('/api/admin-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pinGatePin }),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        setPinGateError(data.error ?? 'Incorrect PIN')
+        return
+      }
+      setAdminUnlocked(true)
+      setPinGatePin('')
+    } finally {
+      setPinGateLoading(false)
+    }
+  }
+
+  if (loading || adminUnlocked === null) return <div className="p-6 text-muted-foreground">Loading…</div>
+
+  if (!adminUnlocked) {
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-6 p-8">
+        <div className="flex flex-col items-center gap-3">
+          <Lock className="w-10 h-10 text-slate-400" />
+          <h1 className="text-xl font-bold">EOD Report</h1>
+          <p className="text-sm text-muted-foreground text-center">Manager PIN required to access End of Day</p>
+        </div>
+        <div className="w-full max-w-xs space-y-3">
+          <Input
+            type="password"
+            inputMode="numeric"
+            placeholder="Enter manager PIN"
+            value={pinGatePin}
+            onChange={e => { setPinGatePin(e.target.value); setPinGateError(null) }}
+            onKeyDown={e => { if (e.key === 'Enter' && pinGatePin.length > 0) void handlePinGateConfirm() }}
+            className="text-center text-lg tracking-widest"
+            autoFocus
+          />
+          {pinGateError && <p className="text-sm text-red-600 text-center">{pinGateError}</p>}
+          <Button
+            className="w-full"
+            onClick={() => void handlePinGateConfirm()}
+            disabled={pinGateLoading || pinGatePin.length === 0}
+          >
+            {pinGateLoading ? 'Verifying…' : 'Unlock'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   const closedByName = employees.find(e => e.id === form.closed_by)?.name ?? 'N/A'
 
@@ -1053,16 +1118,14 @@ export default function EodPage() {
                     <div key={key} className="flex items-center gap-1.5">
                       <span className="w-9 text-right text-sm font-semibold text-slate-600 shrink-0">{label}</span>
                       <Input
-                        type="number"
-                        min="0"
-                        step="1"
+                        type="text"
+                        inputMode="numeric"
                         value={count}
                         onChange={e => {
-                          const c = e.target.value
+                          const c = e.target.value.replace(/\D/g, '')
                           const a = c ? ((parseInt(c) || 0) * value).toFixed(2) : ''
                           const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
                           setDenoms(newDenoms)
-                          // clear subtotal override for this group when counting individually
                           const newCoinOverride = isCoin ? '' : coinSubtotalOverride
                           const newBillOverride = !isCoin ? '' : billSubtotalOverride
                           if (isCoin) setCoinSubtotalOverride('')
@@ -1074,14 +1137,14 @@ export default function EodPage() {
                       />
                       <span className="text-xs text-muted-foreground shrink-0">×</span>
                       <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={amount}
                         onChange={e => {
-                          const a = e.target.value
-                          const c = a ? String(Math.round((parseFloat(a) || 0) / value)) : ''
-                          const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
+                          const raw = e.target.value
+                          if (!/^\d*\.?\d{0,2}$/.test(raw)) return
+                          const c = raw ? String(Math.round((parseFloat(raw) || 0) / value)) : ''
+                          const newDenoms = { ...denoms, [key]: { count: c, amount: raw } }
                           setDenoms(newDenoms)
                           const newCoinOverride = isCoin ? '' : coinSubtotalOverride
                           const newBillOverride = !isCoin ? '' : billSubtotalOverride

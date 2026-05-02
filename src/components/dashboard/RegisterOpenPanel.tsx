@@ -49,9 +49,9 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
       <div key={key} className="flex items-center gap-1.5">
         <span className="w-10 text-right text-sm font-semibold text-slate-600 shrink-0">{label}</span>
         <Input
-          type="number" min="0" step="1" value={count}
+          type="text" inputMode="numeric" value={count}
           onChange={e => {
-            const c = e.target.value
+            const c = e.target.value.replace(/\D/g, '')
             const a = c ? ((parseInt(c) || 0) * value).toFixed(2) : ''
             setDenoms(nd => ({ ...nd, [key]: { count: c, amount: a } }))
             if (isCoin) setCoinOverride('')
@@ -61,11 +61,12 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
         />
         <span className="text-xs text-muted-foreground shrink-0">×</span>
         <Input
-          type="number" min="0" step="0.01" value={amount}
+          type="text" inputMode="decimal" value={amount}
           onChange={e => {
-            const a = e.target.value
-            const c = a ? String(Math.round((parseFloat(a) || 0) / value)) : ''
-            setDenoms(nd => ({ ...nd, [key]: { count: c, amount: a } }))
+            const raw = e.target.value
+            if (!/^\d*\.?\d{0,2}$/.test(raw)) return
+            const c = raw ? String(Math.round((parseFloat(raw) || 0) / value)) : ''
+            setDenoms(nd => ({ ...nd, [key]: { count: c, amount: raw } }))
             if (isCoin) setCoinOverride('')
             else setBillOverride('')
           }}
