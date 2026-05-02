@@ -1069,7 +1069,7 @@ export default function EodPage() {
                           else setBillSubtotalOverride('')
                           recomputeCashTotal(newDenoms, newCoinOverride, newBillOverride)
                         }}
-                        placeholder="개수"
+                        placeholder="qty"
                         className="h-8 w-16 text-center text-xs px-1"
                       />
                       <span className="text-xs text-muted-foreground shrink-0">×</span>
@@ -1089,7 +1089,7 @@ export default function EodPage() {
                           else setBillSubtotalOverride('')
                           recomputeCashTotal(newDenoms, newCoinOverride, newBillOverride)
                         }}
-                        placeholder="금액"
+                        placeholder="amt"
                         className="h-8 w-20 text-center text-xs px-1"
                       />
                     </div>

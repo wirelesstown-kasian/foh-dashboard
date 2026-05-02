@@ -57,7 +57,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
             if (isCoin) setCoinOverride('')
             else setBillOverride('')
           }}
-          placeholder="개수" className="h-8 w-16 text-center text-xs px-1"
+          placeholder="qty" className="h-8 w-16 text-center text-xs px-1"
         />
         <span className="text-xs text-muted-foreground shrink-0">×</span>
         <Input
@@ -69,7 +69,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
             if (isCoin) setCoinOverride('')
             else setBillOverride('')
           }}
-          placeholder="금액" className="h-8 w-20 text-center text-xs px-1"
+          placeholder="amt" className="h-8 w-20 text-center text-xs px-1"
         />
       </div>
     )
