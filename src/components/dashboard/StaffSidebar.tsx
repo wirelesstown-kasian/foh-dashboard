@@ -1,9 +1,10 @@
 'use client'
 
+import { useState } from 'react'
 import { Employee, Schedule, ShiftClock } from '@/lib/types'
 import { formatTime, calcHours, formatHours, getBusinessDate, isBirthdayToday } from '@/lib/dateUtils'
 import { getDepartmentLabel, getFallbackScheduleDepartment, getRoleLabel } from '@/lib/organization'
-import { Gift, Phone } from 'lucide-react'
+import { ChevronDown, ChevronRight, Gift, Phone } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
 
 interface Props {
@@ -14,6 +15,8 @@ interface Props {
 
 export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
   const { roleDefinitions, departmentDefinitions } = useAppSettings()
+  const [fohOpen, setFohOpen] = useState(true)
+  const [bohOpen, setBohOpen] = useState(false)
 
   const businessDate = getBusinessDate()
   const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
@@ -50,16 +53,24 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
           <p className="text-xs text-muted-foreground text-center py-4">No scheduled or clocked-in staff today</p>
         )}
         {([
-          ['FOH', groupedStaff.foh],
-          ['BOH', groupedStaff.boh],
-        ] as const).map(([label, entries]) => (
+          ['FOH', groupedStaff.foh, fohOpen, setFohOpen],
+          ['BOH', groupedStaff.boh, bohOpen, setBohOpen],
+        ] as const).map(([label, entries, isOpen, setOpen]) => (
           <section key={label} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</h3>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-lg px-1 py-0.5 hover:bg-slate-50"
+              onClick={() => setOpen(v => !v)}
+            >
+              <div className="flex items-center gap-1.5">
+                {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</h3>
+              </div>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                 {entries.length}
               </span>
-            </div>
+            </button>
+            {isOpen && (
             <div className="space-y-2">
               {entries.length === 0 && (
                 <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-400">
@@ -122,6 +133,7 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                 </div>
               ))}
             </div>
+            )}
           </section>
         ))}
       </div>
