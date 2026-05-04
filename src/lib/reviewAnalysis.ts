@@ -225,43 +225,23 @@ export async function analyzeStoredReview(reviewId: string): Promise<ReviewAnaly
     throw new Error(clockError.message)
   }
 
-  const staff = ((clockRows ?? []) as EmployeeClockRow[])
+  let staff = ((clockRows ?? []) as EmployeeClockRow[])
     .map(normalizeEmployeeClockRow)
     .filter(row => row.employee?.is_active !== false && (row.employee?.primary_department ?? 'foh') !== 'boh')
 
   if (staff.length === 0) {
-    const reason = 'No FOH staff clocked in for this review date'
-    const { error: updateError } = await supabaseAdmin
-      .from('google_reviews')
-      .update({
-        matched_employee_id: null,
-        confidence: 0,
-        reason,
-        sentiment: null,
-        categories: [],
-        staff_mentions: [],
-        attribution_status: 'unassigned',
-        assigned_method: 'openai_no_staff',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', reviewId)
+    const { data: allFohEmployees } = await supabaseAdmin
+      .from('employees')
+      .select('id, name, role, primary_department, is_active')
+      .eq('is_active', true)
+      .neq('primary_department', 'boh')
 
-    if (updateError) {
-      throw new Error(updateError.message)
-    }
-
-    return {
-      success: true,
-      review_id: reviewId,
-      matched_employee_id: null,
-      matched_employee_name: null,
-      confidence: 0,
-      attribution_status: 'unassigned',
-      sentiment: null,
-      categories: [],
-      staff_mentions: [],
-      reason,
-    }
+    staff = (allFohEmployees ?? []).map(emp => ({
+      employee_id: emp.id as string,
+      clock_in_at: review.review_date + 'T00:00:00Z',
+      clock_out_at: null,
+      employee: emp as NormalizedEmployeeClockRow['employee'],
+    }))
   }
 
   const analysis = await analyzeWithOpenAI(review as GoogleReviewRow, staff)

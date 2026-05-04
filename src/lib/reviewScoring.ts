@@ -79,8 +79,8 @@ function formatDateInputValue(date: Date) {
 
 export function createDefaultReviewDateRange(today = new Date()): ReviewDateRangeFilter {
   return {
-    mode: 'month',
-    startDate: formatDateInputValue(startOfMonth(today)),
+    mode: 'quarter',
+    startDate: formatDateInputValue(startOfDay(subMonths(today, 3))),
     endDate: formatDateInputValue(endOfDay(today)),
   }
 }
