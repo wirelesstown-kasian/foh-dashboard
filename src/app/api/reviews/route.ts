@@ -20,7 +20,7 @@ type ReviewRouteResponse = {
 
 export async function GET() {
   const { session, managerUnlocked } = await getReviewBoardViewer()
-  if (!requireViewerSession(session)) {
+  if (!session && !managerUnlocked) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -72,9 +72,9 @@ export async function GET() {
         performanceScores: {},
         manager_unlocked: managerUnlocked,
         viewer: {
-          employee_id: session.employeeId,
-          name: session.name,
-          role: session.role,
+          employee_id: session?.employeeId ?? '',
+          name: session?.name ?? 'Manager',
+          role: session?.role ?? 'manager',
         },
         setup_required: true,
       }
@@ -116,9 +116,9 @@ export async function GET() {
     performanceScores,
     manager_unlocked: managerUnlocked,
     viewer: {
-      employee_id: session.employeeId,
-      name: session.name,
-      role: session.role,
+      employee_id: session?.employeeId ?? '',
+      name: session?.name ?? 'Manager',
+      role: session?.role ?? 'manager',
     },
   }
 
