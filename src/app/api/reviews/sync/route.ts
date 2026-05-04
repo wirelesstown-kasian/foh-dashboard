@@ -2,13 +2,9 @@ import { NextResponse } from 'next/server'
 import { fetchAllBusinessProfileReviews, fetchGooglePlaceReviews, hasBusinessProfileCredentials, mapGooglePlaceReviewsToRows } from '@/lib/googleReviews'
 import { analyzeStoredReview } from '@/lib/reviewAnalysis'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { getReviewBoardViewer, isReviewBoardSetupMissingError, requireViewerSession } from '@/lib/reviewBoard'
+import { isReviewBoardSetupMissingError } from '@/lib/reviewBoard'
 
 export async function POST() {
-  const { session, managerUnlocked } = await getReviewBoardViewer()
-  if (!requireViewerSession(session) && !managerUnlocked) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
 
   let googleRows
   try {
