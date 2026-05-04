@@ -5,6 +5,9 @@ export type ScheduleDepartment = 'foh' | 'boh'
 export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
 export type TaskCompletionStatus = 'complete' | 'incomplete'
 export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
+export type ReviewAttributionStatus = 'auto_match' | 'ai_estimate' | 'manual' | 'unassigned'
+export type ReviewSentiment = 'positive' | 'neutral' | 'negative'
+export type ReviewCategory = 'food' | 'service' | 'wait_time' | 'ambiance' | 'price'
 
 export interface Employee {
   id: string
@@ -145,4 +148,44 @@ export interface CashBalanceEntry {
   description: string
   created_at: string
   updated_at: string
+}
+
+export interface GoogleReview {
+  id: string
+  google_review_id: string
+  author_name: string
+  reviewer_photo_url: string | null
+  rating: number
+  review_text: string
+  review_date: string
+  language: string | null
+  source_payload?: Record<string, unknown> | null
+  sentiment: ReviewSentiment | null
+  categories: ReviewCategory[]
+  staff_mentions: string[]
+  matched_employee_id: string | null
+  confidence: number | null
+  reason: string | null
+  attribution_status: ReviewAttributionStatus
+  points: number
+  assigned_method: string | null
+  assigned_by_employee_id: string | null
+  created_at: string
+  updated_at: string
+  matched_employee?: Employee | null
+  assigned_by_employee?: Employee | null
+}
+
+export interface ReviewAssignment {
+  id: string
+  review_id: string
+  previous_employee_id: string | null
+  next_employee_id: string | null
+  assigned_by_employee_id: string | null
+  assignment_method: string
+  note: string | null
+  created_at: string
+  previous_employee?: Employee | null
+  next_employee?: Employee | null
+  assigned_by_employee?: Employee | null
 }
