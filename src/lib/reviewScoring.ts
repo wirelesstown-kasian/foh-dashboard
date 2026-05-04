@@ -1,7 +1,7 @@
 import { endOfDay, endOfMonth, endOfWeek, startOfDay, startOfMonth, startOfWeek, subMonths } from 'date-fns'
 import { Employee, GoogleReview, ReviewAttributionStatus, ReviewCategory } from '@/lib/types'
 
-export type ReviewBoardRange = 'week' | 'month' | 'quarter' | 'custom'
+export type ReviewBoardRange = 'week' | 'month' | 'quarter' | 'all' | 'custom'
 
 export interface ReviewDateRangeFilter {
   mode: ReviewBoardRange
@@ -107,6 +107,14 @@ export function resolveReviewDateRange(filter: ReviewDateRangeFilter, today = ne
       start: startOfDay(subMonths(today, 3)),
       end: endOfDay(today),
       label: '3 Months',
+    }
+  }
+
+  if (filter.mode === 'all') {
+    return {
+      start: new Date('2000-01-01T00:00:00'),
+      end: endOfDay(today),
+      label: 'All-Time',
     }
   }
 
@@ -226,8 +234,8 @@ export function buildReviewBoardSummary({
       }
     })
     .sort((left, right) =>
-      right.combinedScore - left.combinedScore ||
       right.reviewPoints - left.reviewPoints ||
+      right.combinedScore - left.combinedScore ||
       right.reviewCount - left.reviewCount ||
       left.employeeName.localeCompare(right.employeeName)
     )

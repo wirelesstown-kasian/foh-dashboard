@@ -33,6 +33,7 @@ const rangeOptions: Array<{ value: ReviewBoardRange; label: string }> = [
   { value: 'week', label: 'This Week' },
   { value: 'month', label: 'This Month' },
   { value: 'quarter', label: '3 Months' },
+  { value: 'all', label: 'All-Time' },
   { value: 'custom', label: 'Custom Range' },
 ]
 
@@ -117,8 +118,13 @@ export function ReviewBoardSummary({
                           <div className="mt-1 text-xs text-slate-500">{item.reviewCount} reviews</div>
                         </div>
                         <div className="text-right">
-                          <div className="text-lg font-bold text-slate-950">{item.combinedScore}</div>
-                          <div className="text-xs text-slate-500">Perf {item.performanceScore} + Review {item.reviewPoints}</div>
+                          <div className={cn(
+                            'text-lg font-bold',
+                            item.reviewPoints > 0 ? 'text-emerald-600' : item.reviewPoints < 0 ? 'text-red-600' : 'text-slate-950'
+                          )}>
+                            {item.reviewPoints > 0 ? '+' : ''}{item.reviewPoints}
+                          </div>
+                          <div className="text-xs text-slate-500">Perf {item.performanceScore} • Combined {item.combinedScore}</div>
                         </div>
                       </div>
                     </button>
