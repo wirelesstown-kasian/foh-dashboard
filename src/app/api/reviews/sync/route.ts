@@ -5,8 +5,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getReviewBoardViewer, isReviewBoardSetupMissingError, requireViewerSession } from '@/lib/reviewBoard'
 
 export async function POST() {
-  const { session } = await getReviewBoardViewer()
-  if (!requireViewerSession(session)) {
+  const { session, managerUnlocked } = await getReviewBoardViewer()
+  if (!requireViewerSession(session) && !managerUnlocked) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
