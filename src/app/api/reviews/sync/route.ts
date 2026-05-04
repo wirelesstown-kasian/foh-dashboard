@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { fetchGooglePlaceReviews, mapGooglePlaceReviewsToRows } from '@/lib/googleReviews'
+import { fetchAllBusinessProfileReviews, fetchGooglePlaceReviews, hasBusinessProfileCredentials, mapGooglePlaceReviewsToRows } from '@/lib/googleReviews'
 import { analyzeStoredReview } from '@/lib/reviewAnalysis'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getReviewBoardViewer, isReviewBoardSetupMissingError, requireViewerSession } from '@/lib/reviewBoard'
@@ -12,8 +12,12 @@ export async function POST() {
 
   let googleRows
   try {
-    const place = await fetchGooglePlaceReviews()
-    googleRows = mapGooglePlaceReviewsToRows(place)
+    if (hasBusinessProfileCredentials()) {
+      googleRows = await fetchAllBusinessProfileReviews()
+    } else {
+      const place = await fetchGooglePlaceReviews()
+      googleRows = mapGooglePlaceReviewsToRows(place)
+    }
   } catch (error) {
     return NextResponse.json({
       error: error instanceof Error ? error.message : 'Failed to fetch Google reviews',
