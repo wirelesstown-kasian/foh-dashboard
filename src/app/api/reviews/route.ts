@@ -20,9 +20,6 @@ type ReviewRouteResponse = {
 
 export async function GET() {
   const { session, managerUnlocked } = await getReviewBoardViewer()
-  if (!session && !managerUnlocked) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
 
   const today = format(new Date(), 'yyyy-MM-dd')
   const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd')
