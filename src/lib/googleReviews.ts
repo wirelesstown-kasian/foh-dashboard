@@ -60,9 +60,9 @@ function getRequiredGoogleReviewsEnv() {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY?.trim()
   const placeId = process.env.GOOGLE_PLACE_ID?.trim()
 
-  if (!apiKey || !placeId) {
-    throw new Error('Missing GOOGLE_PLACES_API_KEY or GOOGLE_PLACE_ID')
-  }
+  if (!apiKey && !placeId) throw new Error('Missing env vars: GOOGLE_PLACES_API_KEY and GOOGLE_PLACE_ID')
+  if (!apiKey) throw new Error('Missing env var: GOOGLE_PLACES_API_KEY')
+  if (!placeId) throw new Error('Missing env var: GOOGLE_PLACE_ID')
 
   return { apiKey, placeId }
 }
