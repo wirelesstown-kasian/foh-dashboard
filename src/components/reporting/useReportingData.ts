@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, EodReport, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const REPORTING_REFRESH_EVENT = 'reporting-data-refresh'
 
@@ -17,9 +18,12 @@ export function useEmployees() {
   useEffect(() => {
     let mounted = true
     void (async () => {
-      const res = await supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name')
+      const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
+      const res = initial.error && isMissingTipPoolRateColumn(initial.error)
+        ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
+        : initial
       if (!mounted) return
-      setEmployees(res.data ?? [])
+      setEmployees(withTipPoolHourlyRate(res.data ?? []) as Employee[])
     })()
     return () => {
       mounted = false

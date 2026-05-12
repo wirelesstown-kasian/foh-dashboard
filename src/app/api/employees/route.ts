@@ -7,6 +7,7 @@ import { EmployeeRole } from '@/lib/types'
 import { isValidPin } from '@/lib/validation'
 import { hashPassword } from '@/lib/password'
 import { getAppSettings } from '@/lib/appSettings'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn } from '@/lib/employeeSelect'
 
 async function requireAdmin() {
   const cookieStore = await cookies()
@@ -36,11 +37,18 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data, error } = await supabaseAdmin
+  const result = await supabaseAdmin
     .from('employees')
-    .select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at')
+    .select(EMPLOYEE_PUBLIC_SELECT)
     .eq('is_active', true)
     .order('name')
+  const { data, error } = result.error && isMissingTipPoolRateColumn(result.error)
+    ? await supabaseAdmin
+        .from('employees')
+        .select(EMPLOYEE_PUBLIC_SELECT_FALLBACK)
+        .eq('is_active', true)
+        .order('name')
+    : result
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -54,7 +62,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, login_enabled, login_password } = await req.json()
+  const { name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
@@ -76,16 +84,20 @@ export async function POST(req: NextRequest) {
 
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
+  const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
   if (hourlyWage !== null && Number.isNaN(hourlyWage)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
   if (guaranteedHourly !== null && Number.isNaN(guaranteedHourly)) {
     return NextResponse.json({ error: 'Invalid guaranteed hourly amount' }, { status: 400 })
   }
+  if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
+    return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
+  }
 
   const pin_hash = await hashPin(pin)
   const loginPasswordHash = login_enabled === true ? await hashPassword(login_password.trim()) : null
-  const { error } = await supabaseAdmin.from('employees').insert({
+  const insertPayload = {
     name: name.trim(),
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null,
@@ -93,11 +105,19 @@ export async function POST(req: NextRequest) {
     primary_department,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
+    tip_pool_hourly_rate: tipPoolHourlyRate,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     login_enabled: login_enabled === true,
     login_password_hash: loginPasswordHash,
     pin_hash,
-  })
+  }
+
+  let { error } = await supabaseAdmin.from('employees').insert(insertPayload)
+  if (error && isMissingTipPoolRateColumn(error)) {
+    const { tip_pool_hourly_rate: _tipPoolHourlyRate, ...fallbackPayload } = insertPayload
+    const fallback = await supabaseAdmin.from('employees').insert(fallbackPayload)
+    error = fallback.error
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
@@ -111,7 +131,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, login_enabled, login_password } = await req.json()
+  const { id, name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -130,11 +150,15 @@ export async function PATCH(req: NextRequest) {
 
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
+  const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
   if (hourlyWage !== null && Number.isNaN(hourlyWage)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
   if (guaranteedHourly !== null && Number.isNaN(guaranteedHourly)) {
     return NextResponse.json({ error: 'Invalid guaranteed hourly amount' }, { status: 400 })
+  }
+  if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
+    return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
   }
 
   const update: {
@@ -145,6 +169,7 @@ export async function PATCH(req: NextRequest) {
     primary_department: string
     hourly_wage: number | null
     guaranteed_hourly: number | null
+    tip_pool_hourly_rate: number | null
     birth_date: string | null
     login_enabled: boolean
     pin_hash?: string
@@ -157,6 +182,7 @@ export async function PATCH(req: NextRequest) {
     primary_department,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
+    tip_pool_hourly_rate: tipPoolHourlyRate,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     login_enabled: login_enabled === true,
   }
@@ -189,7 +215,12 @@ export async function PATCH(req: NextRequest) {
     update.login_password_hash = null
   }
 
-  const { error } = await supabaseAdmin.from('employees').update(update).eq('id', id)
+  let { error } = await supabaseAdmin.from('employees').update(update).eq('id', id)
+  if (error && isMissingTipPoolRateColumn(error)) {
+    const { tip_pool_hourly_rate: _tipPoolHourlyRate, ...fallbackUpdate } = update
+    const fallback = await supabaseAdmin.from('employees').update(fallbackUpdate).eq('id', id)
+    error = fallback.error
+  }
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

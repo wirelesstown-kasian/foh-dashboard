@@ -7,6 +7,7 @@ import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateU
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -232,9 +233,20 @@ export default function EodPage() {
   }, [])
 
   const load = useCallback(async () => {
+    const loadEmployees = async () => {
+      const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
+      const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+        ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
+        : initial
+      return {
+        ...result,
+        data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+      }
+    }
+
     const [sessRes, empRes, schRes, eodRes, clockRes, appSessionRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
-      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+      loadEmployees(),
       supabase.from('schedules').select('*').eq('date', today),
       supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
@@ -371,8 +383,12 @@ export default function EodPage() {
     tipRows.map(r => ({
       employee_id: r.employee_id,
       hours_worked: r.hours_worked,
+      tip_pool_hourly_rate: employees.find(employee => employee.id === r.employee_id)?.tip_pool_hourly_rate ?? null,
     }))
   )
+  const fixedTipPayoutTotal = tipResults
+    .filter(result => result.is_fixed_tip)
+    .reduce((sum, result) => sum + result.net_tip, 0)
 
   const setField = (field: string, value: string) => {
     setFinancialsSaved(false)
@@ -736,6 +752,9 @@ export default function EodPage() {
                         </div>
                         <div className="text-right">
                           <span className="text-muted-foreground text-xs mr-3">{row ? formatHours(row.hours_worked) : ''}</span>
+                          {r.is_fixed_tip && r.fixed_tip_rate !== null && (
+                            <span className="mr-3 text-xs text-blue-700">${r.fixed_tip_rate.toFixed(2)}/hr cap</span>
+                          )}
                           <span className="font-semibold text-green-700">${r.net_tip.toFixed(2)}</span>
                         </div>
                       </div>
@@ -1316,7 +1335,7 @@ export default function EodPage() {
                     <h2 className="font-semibold">Tip Distribution</h2>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    House takes 15% — distributing ${(tipTotal * 0.85).toFixed(2)} among staff using clock-in / clock-out hours
+                    House takes 15% — fixed tip rates draw ${fixedTipPayoutTotal.toFixed(2)}, then ${(Math.max(0, tipTotal * 0.85 - fixedTipPayoutTotal)).toFixed(2)} is shared by hours
                   </p>
                   {!financialsSaved && (
                     <p className="mt-1 text-xs text-amber-600">Save Revenue & Tips first to activate this section.</p>
@@ -1341,6 +1360,7 @@ export default function EodPage() {
                     <th className="text-left pb-2 font-medium w-20">Share %</th>
                     <th className="text-left pb-2 font-medium w-28">Tip Amount</th>
                     <th className="text-left pb-2 font-medium w-24">Tip / Hr</th>
+                    <th className="text-left pb-2 font-medium w-24">Tip Cap</th>
                     <th className="w-10" />
                   </tr>
                 </thead>
@@ -1371,6 +1391,9 @@ export default function EodPage() {
                         <td className="py-2 pr-3 text-muted-foreground">{result ? (result.tip_share * 100).toFixed(1) + '%' : '—'}</td>
                         <td className="py-2 font-semibold text-green-700">{result ? `$${result.net_tip.toFixed(2)}` : '—'}</td>
                         <td className="py-2 text-sm text-gray-700">{tipPerHour !== null ? `$${tipPerHour.toFixed(2)}` : '—'}</td>
+                        <td className="py-2 text-xs text-muted-foreground">
+                          {result?.is_fixed_tip && result.fixed_tip_rate !== null ? `$${result.fixed_tip_rate.toFixed(2)}/hr` : '—'}
+                        </td>
                         <td className="py-2">
                           <Button size="sm" variant="ghost" className="text-red-400 h-7 w-7 p-0" onClick={() => removeTipRow(idx)}>
                             <Trash2 className="w-3.5 h-3.5" />

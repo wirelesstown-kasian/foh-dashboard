@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { buildPerformanceRows } from '@/lib/performanceReporting'
 import { Employee, EodReport, GoogleReview, ShiftClock, TaskCompletion, TipDistribution } from '@/lib/types'
 import { getReviewBoardEmployees, getReviewBoardViewer, isReviewBoardSetupMissingError, normalizeReviewRow, requireViewerSession } from '@/lib/reviewBoard'
+import { withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 type ReviewRouteResponse = {
   employees: Employee[]
@@ -64,7 +65,7 @@ export async function GET() {
   if (reviewsResult.error) {
     if (isReviewBoardSetupMissingError(reviewsResult.error)) {
       const response: ReviewRouteResponse = {
-        employees: getReviewBoardEmployees(employeesResult.data ?? []),
+        employees: getReviewBoardEmployees(withTipPoolHourlyRate(employeesResult.data ?? [])),
         reviews: [],
         performanceScores: {},
         manager_unlocked: managerUnlocked,
@@ -90,7 +91,7 @@ export async function GET() {
     }, { status: 500 })
   }
 
-  const employees = getReviewBoardEmployees(employeesResult.data ?? [])
+  const employees = getReviewBoardEmployees(withTipPoolHourlyRate(employeesResult.data ?? []))
   const reviews = (reviewsResult.data ?? []).map(row => normalizeReviewRow(row as GoogleReview, employees))
   const { perfRows } = buildPerformanceRows({
     employees,

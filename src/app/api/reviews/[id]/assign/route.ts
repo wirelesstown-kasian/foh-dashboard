@@ -3,6 +3,7 @@ import { reviewPointsFromRating } from '@/lib/reviewScoring'
 import { getReviewBoardViewer, normalizeReviewRow, requireViewerSession } from '@/lib/reviewBoard'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { GoogleReview } from '@/lib/types'
+import { withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 export async function PATCH(
   req: NextRequest,
@@ -93,7 +94,7 @@ export async function PATCH(
     return NextResponse.json({ error: employeesResult.error.message }, { status: 500 })
   }
 
-  const normalized = normalizeReviewRow(updateResult.data as GoogleReview, employeesResult.data ?? [])
+  const normalized = normalizeReviewRow(updateResult.data as GoogleReview, withTipPoolHourlyRate(employeesResult.data ?? []))
 
   return NextResponse.json({
     success: true,

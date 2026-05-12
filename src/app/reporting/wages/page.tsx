@@ -336,6 +336,9 @@ export default function WageReportPage() {
   )
   const detailTarget = displayedRows.find(row => row.emp.id === detailEmployeeId) ?? null
   const detailRows = detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : []
+  const selectedEmployeeName = employeeFilter === 'all'
+    ? 'All Staff'
+    : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -381,7 +384,9 @@ export default function WageReportPage() {
                 </SelectContent>
               </Select>
               <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)}>
-                <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-44">
+                  <span className={employeeFilter === 'all' ? '' : 'truncate'}>{selectedEmployeeName}</span>
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Staff</SelectItem>
                   {filteredEmployees.map(employee => (
@@ -413,6 +418,7 @@ export default function WageReportPage() {
               <TableHead className="text-right">Hours</TableHead>
               <TableHead className="text-right">Tips</TableHead>
               <TableHead className="text-right">Tips / Hr</TableHead>
+              <TableHead className="text-right">Tip Cap</TableHead>
               {view === 'earnings' && (
                 <>
                   <TableHead className="text-right">Base Wages</TableHead>
@@ -443,6 +449,9 @@ export default function WageReportPage() {
                 <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell>
                 <TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
                 <TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {row.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(row.emp.tip_pool_hourly_rate))}/hr` : '—'}
+                </TableCell>
                 {view === 'earnings' && (
                   <>
                     <TableCell className="text-right">{formatCurrency(row.baseWages)}</TableCell>
@@ -454,7 +463,7 @@ export default function WageReportPage() {
             ))}
             {displayedRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={view === 'earnings' ? 9 : 6} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
+                <TableCell colSpan={view === 'earnings' ? 10 : 7} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -473,6 +482,7 @@ export default function WageReportPage() {
                     return totalHours > 0 ? formatCurrency(totalTips / totalHours) : '—'
                   })()}
                 </TableCell>
+                <TableCell />
                 {view === 'earnings' && (
                   <>
                     <TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.baseWages, 0))}</TableCell>
@@ -510,6 +520,11 @@ export default function WageReportPage() {
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips / Hr</div>
                   <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
                   <div className="mt-0.5 text-xs text-slate-400">this period</div>
+                </div>
+                <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tip Cap</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(detailTarget.emp.tip_pool_hourly_rate))}/hr` : '—'}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">fixed tip draw</div>
                 </div>
                 <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>

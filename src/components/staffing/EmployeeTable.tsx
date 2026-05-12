@@ -40,6 +40,7 @@ interface FormState {
   primary_department: string
   hourly_wage: string
   guaranteed_hourly: string
+  tip_pool_hourly_rate: string
   birth_date: string
   pin: string
   login_enabled: 'enabled' | 'disabled'
@@ -48,7 +49,7 @@ interface FormState {
 
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', hourly_wage: '', guaranteed_hourly: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
+const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
 
 export function EmployeeTable() {
   const { roleDefinitions, departmentDefinitions } = useAppSettings()
@@ -93,6 +94,7 @@ export function EmployeeTable() {
       primary_department: emp.primary_department ?? 'foh',
       hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
+      tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
       birth_date: emp.birth_date ?? '',
       pin: '',
       login_enabled: emp.login_enabled ? 'enabled' : 'disabled',
@@ -219,6 +221,7 @@ export function EmployeeTable() {
               <TableHead>Department</TableHead>
               <TableHead>Hourly Wage</TableHead>
               <TableHead>Guaranteed / Hr</TableHead>
+              <TableHead>Tip Cap / Hr</TableHead>
               <TableHead>Birthday</TableHead>
               <TableHead>PIN</TableHead>
               <TableHead>App Login</TableHead>
@@ -246,6 +249,7 @@ export function EmployeeTable() {
                 <TableCell>{getPrimaryDepartmentBadge(emp.primary_department, departmentDefinitions)}</TableCell>
                 <TableCell>{emp.hourly_wage !== null ? `$${emp.hourly_wage.toFixed(2)}` : '—'}</TableCell>
                 <TableCell>{emp.guaranteed_hourly !== null ? `$${emp.guaranteed_hourly.toFixed(2)}` : '—'}</TableCell>
+                <TableCell>{emp.tip_pool_hourly_rate !== null ? `$${emp.tip_pool_hourly_rate.toFixed(2)}` : '—'}</TableCell>
                 <TableCell>
                   {emp.birth_date ? format(new Date(emp.birth_date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
                 </TableCell>
@@ -271,7 +275,7 @@ export function EmployeeTable() {
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
                   No employees found
                 </TableCell>
               </TableRow>
@@ -281,12 +285,12 @@ export function EmployeeTable() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={v => { if (!v) setDialogOpen(false) }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="flex max-h-[90vh] max-w-md flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto pr-1">
             <div>
               <Label>Name *</Label>
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
@@ -376,6 +380,20 @@ export function EmployeeTable() {
             <p className="text-xs text-muted-foreground">
               If wages plus tips do not reach the guaranteed amount per hour, the difference is paid as a guaranteed top-up.
             </p>
+            <div>
+              <Label>Tip Cap / Hr</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.tip_pool_hourly_rate}
+                onChange={e => setForm(f => ({ ...f, tip_pool_hourly_rate: e.target.value }))}
+                placeholder="0.00"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Optional fixed amount paid from the tip pool per worked hour before the remaining tip pool is shared.
+              </p>
+            </div>
             <div>
               <Label>Birth Date</Label>
               <Input type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))} />

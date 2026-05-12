@@ -19,6 +19,7 @@ export interface Employee {
   primary_department?: PrimaryDepartment
   hourly_wage: number | null
   guaranteed_hourly: number | null
+  tip_pool_hourly_rate: number | null
   birth_date: string | null
   login_enabled?: boolean
   is_active: boolean

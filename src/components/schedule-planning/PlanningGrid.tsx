@@ -20,6 +20,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronU
 import { useAppSettings } from '@/components/useAppSettings'
 import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 import type { EmailSettings } from '@/lib/appSettings'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 type ShiftDraft = {
   id?: string
@@ -298,9 +299,19 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const startDate = formatDate(days[0])
     const endDate = formatDate(days[6])
     const key = `${draftKey(days[0])}_${department}`
+    const loadEmployees = async () => {
+      const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
+      const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+        ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
+        : initial
+      return {
+        ...result,
+        data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+      }
+    }
 
     const [empRes, schRes, draftWeekRes, draftRes] = await Promise.all([
-      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+      loadEmployees(),
       supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
       supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('display_order').order('date'),
@@ -334,6 +345,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               email: null,
               hourly_wage: null,
               guaranteed_hourly: null,
+              tip_pool_hourly_rate: null,
               pin_hash: '',
               birth_date: null,
               login_enabled: false,

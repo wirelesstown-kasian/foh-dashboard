@@ -12,6 +12,7 @@ import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format, startOfMonth } from 'date-fns'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
@@ -44,9 +45,19 @@ export default function DashboardPage() {
     try {
       setLoadError(null)
       const monthStart = format(startOfMonth(businessDate), 'yyyy-MM-dd')
+      const loadEmployees = async () => {
+        const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true)
+        const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+          ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true)
+          : initial
+        return {
+          ...result,
+          data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+        }
+      }
 
       const [empRes, schRes, catRes, taskRes, compRes, monthCompRes, sessRes, clockRes] = await Promise.all([
-        supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true),
+        loadEmployees(),
         supabase.from('schedules').select('*').eq('date', today),
         supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
         supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),

@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 type TipDist = {
   employee_id: string
-  employee?: { id: string; name: string; email: string | null } | null
+  employee?: { id: string; name: string; email: string | null; tip_pool_hourly_rate?: number | null } | null
   start_time: string | null
   end_time: string | null
   hours_worked: number
@@ -229,6 +229,7 @@ export async function POST(req: NextRequest) {
           <tr style="background:#f5f5f5"><td><strong>Worked Schedule</strong></td><td>${workedShiftText}</td></tr>
           <tr><td><strong>Total Hours</strong></td><td>${Number(dist.hours_worked).toFixed(2)} hrs</td></tr>
           <tr><td><strong>Tips per Hour</strong></td><td>${Number(dist.hours_worked) > 0 ? `$${(Number(dist.net_tip) / Number(dist.hours_worked)).toFixed(2)}` : '—'}</td></tr>
+          <tr><td><strong>Tip Cap / Hr</strong></td><td>${dist.employee?.tip_pool_hourly_rate ? `$${Number(dist.employee.tip_pool_hourly_rate).toFixed(2)}` : '—'}</td></tr>
           <tr style="background:#e8f5e9"><td><strong>Net Tip</strong></td><td><strong>$${Number(dist.net_tip).toFixed(2)}</strong></td></tr>
         </table>
         <p style="margin:18px 0 8px;font-weight:600">This Week So Far</p>
@@ -297,10 +298,11 @@ export async function POST(req: NextRequest) {
       <td>${escapeHtml(d.employee?.name ?? '')}</td>
       <td>${Number(d.hours_worked).toFixed(2)}</td>
       <td>${(Number(d.tip_share) * 100).toFixed(1)}%</td>
+      <td>${d.employee?.tip_pool_hourly_rate ? `$${Number(d.employee.tip_pool_hourly_rate).toFixed(2)}/hr` : '—'}</td>
       <td>-$${Number(d.house_deduction).toFixed(2)}</td>
       <td><strong>$${Number(d.net_tip).toFixed(2)}</strong></td>
     </tr>`
-  ).join('') || `<tr><td colspan="5" style="text-align:center;color:#6b7280">No tip distribution rows saved.</td></tr>`
+  ).join('') || `<tr><td colspan="6" style="text-align:center;color:#6b7280">No tip distribution rows saved.</td></tr>`
 
     const adminEodHtml = renderEmailShell(logoUrl, `
       ${attendanceWarningHtml}
@@ -346,7 +348,7 @@ export async function POST(req: NextRequest) {
       ${memoHtml}
       <h3 style="margin-top:18px">Tip Distribution</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
-        <tr style="background:#f5f5f5"><th>Name</th><th>Hours</th><th>Tip Share</th><th>Deduction</th><th>Net Tip</th></tr>
+        <tr style="background:#f5f5f5"><th>Name</th><th>Hours</th><th>Tip Share</th><th>Tip Cap</th><th>Deduction</th><th>Net Tip</th></tr>
         ${tipRows}
       </table>
       <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>

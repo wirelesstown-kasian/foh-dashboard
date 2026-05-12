@@ -523,6 +523,7 @@ export default function EodHistoryPage() {
       const tipResults = calculateTips(ccTip + cashTip, eligibleRows.map(row => ({
         employee_id: row.employee_id,
         hours_worked: row.hours_worked,
+        tip_pool_hourly_rate: employees.find(employee => employee.id === row.employee_id)?.tip_pool_hourly_rate ?? null,
       })))
 
       const deleteTips = await supabase.from('tip_distributions').delete().eq('eod_report_id', reportId)
