@@ -126,8 +126,10 @@ async function discoverAccountId(accessToken: string): Promise<string> {
     throw new Error(`No accounts returned — response: ${JSON.stringify(data)}`)
   }
 
-  // "accounts/123456789" → "123456789"
-  return first.replace('accounts/', '')
+  const accountId = first.replace('accounts/', '')
+  // Log so you can save this as GOOGLE_BUSINESS_ACCOUNT_ID in Vercel to skip this API call
+  console.log('[GoogleReviews] Discovered account ID:', accountId)
+  return accountId
 }
 
 export async function fetchAllBusinessProfileReviews(): Promise<GoogleReviewSyncRow[]> {
