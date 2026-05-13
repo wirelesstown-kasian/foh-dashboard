@@ -32,6 +32,12 @@ async function isValidPrimaryDepartment(primaryDepartment: unknown) {
   return typeof primaryDepartment === 'string' && (await getValidPrimaryDepartments()).includes(primaryDepartment)
 }
 
+function withoutTipPoolHourlyRate<T extends { tip_pool_hourly_rate?: unknown }>(payload: T) {
+  const fallbackPayload: Partial<T> = { ...payload }
+  delete fallbackPayload.tip_pool_hourly_rate
+  return fallbackPayload
+}
+
 export async function GET() {
   if (!(await requireAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -85,10 +91,10 @@ export async function POST(req: NextRequest) {
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
   const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
-  if (hourlyWage !== null && Number.isNaN(hourlyWage)) {
+  if (hourlyWage !== null && (Number.isNaN(hourlyWage) || hourlyWage < 0)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
-  if (guaranteedHourly !== null && Number.isNaN(guaranteedHourly)) {
+  if (guaranteedHourly !== null && (Number.isNaN(guaranteedHourly) || guaranteedHourly < 0)) {
     return NextResponse.json({ error: 'Invalid guaranteed hourly amount' }, { status: 400 })
   }
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
@@ -114,8 +120,7 @@ export async function POST(req: NextRequest) {
 
   let { error } = await supabaseAdmin.from('employees').insert(insertPayload)
   if (error && isMissingTipPoolRateColumn(error)) {
-    const { tip_pool_hourly_rate: _tipPoolHourlyRate, ...fallbackPayload } = insertPayload
-    const fallback = await supabaseAdmin.from('employees').insert(fallbackPayload)
+    const fallback = await supabaseAdmin.from('employees').insert(withoutTipPoolHourlyRate(insertPayload))
     error = fallback.error
   }
 
@@ -151,10 +156,10 @@ export async function PATCH(req: NextRequest) {
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
   const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
-  if (hourlyWage !== null && Number.isNaN(hourlyWage)) {
+  if (hourlyWage !== null && (Number.isNaN(hourlyWage) || hourlyWage < 0)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
-  if (guaranteedHourly !== null && Number.isNaN(guaranteedHourly)) {
+  if (guaranteedHourly !== null && (Number.isNaN(guaranteedHourly) || guaranteedHourly < 0)) {
     return NextResponse.json({ error: 'Invalid guaranteed hourly amount' }, { status: 400 })
   }
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
@@ -217,8 +222,7 @@ export async function PATCH(req: NextRequest) {
 
   let { error } = await supabaseAdmin.from('employees').update(update).eq('id', id)
   if (error && isMissingTipPoolRateColumn(error)) {
-    const { tip_pool_hourly_rate: _tipPoolHourlyRate, ...fallbackUpdate } = update
-    const fallback = await supabaseAdmin.from('employees').update(fallbackUpdate).eq('id', id)
+    const fallback = await supabaseAdmin.from('employees').update(withoutTipPoolHourlyRate(update)).eq('id', id)
     error = fallback.error
   }
   if (error) {
