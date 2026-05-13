@@ -112,9 +112,19 @@ async function discoverAccountId(accessToken: string): Promise<string> {
     cache: 'no-store',
   })
 
-  const data = await res.json().catch(() => ({})) as { accounts?: Array<{ name: string; accountName?: string }> }
+  const data = await res.json().catch(() => ({})) as {
+    accounts?: Array<{ name: string; accountName?: string }>
+    error?: { message?: string; status?: string; code?: number }
+  }
+
+  if (!res.ok || data.error) {
+    throw new Error(`Account Management API error (${res.status}): ${data.error?.message ?? JSON.stringify(data)}`)
+  }
+
   const first = data.accounts?.[0]?.name
-  if (!first) throw new Error('No Google Business account found — make sure the authorized account manages this business')
+  if (!first) {
+    throw new Error(`No accounts returned — response: ${JSON.stringify(data)}`)
+  }
 
   // "accounts/123456789" → "123456789"
   return first.replace('accounts/', '')
