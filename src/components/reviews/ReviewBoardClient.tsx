@@ -139,12 +139,14 @@ export function ReviewBoardClient() {
         synced?: number
         analyzed?: number
         analysis_errors?: string[]
+        api_used?: string
       }
       if (!res.ok) {
         throw new Error(payload.error ?? 'Failed to sync Google reviews')
       }
 
       const parts = [
+        payload.api_used === 'business_profile' ? 'Business Profile API' : 'Places API (limited to 5)',
         `${payload.reviews_found ?? 0} reviews fetched`,
         `${payload.synced ?? 0} synced`,
         `${payload.analyzed ?? 0} analyzed`,
