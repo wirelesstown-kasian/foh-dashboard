@@ -171,7 +171,6 @@ export async function POST(req: NextRequest) {
       <tr><td><strong>Hours Worked</strong></td><td>${hours.toFixed(2)} hrs</td></tr>
       <tr><td><strong>Tips Earned</strong></td><td>${formatCurrency(tips)}</td></tr>
       <tr><td><strong>Tips per Hour</strong></td><td>${tipsPerHour !== null ? formatCurrency(tipsPerHour) : '—'}</td></tr>
-      <tr><td><strong>Tip Cap / Hr</strong></td><td>${employee.tip_pool_hourly_rate !== null ? formatCurrency(Number(employee.tip_pool_hourly_rate)) : '—'}</td></tr>
       ${view === 'earnings' ? `
         <tr><td><strong>Hourly Wage</strong></td><td>${employee.hourly_wage !== null ? formatCurrency(Number(employee.hourly_wage)) : '—'}</td></tr>
         <tr><td><strong>Base Wages</strong></td><td>${formatCurrency(baseWages)}</td></tr>

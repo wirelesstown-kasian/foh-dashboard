@@ -863,11 +863,6 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       const scheduledSendDateStr = formatDate(scheduledSendAt)
       const sendImmediately = publishMode === 'immediate'
 
-      // Only reset email_sent_at when queuing a future send.
-      // For immediate mode the client sends and marks it right after.
-      // Resetting it unconditionally causes the cron to re-fire on every re-publish.
-      const isFutureQueuedSend = !sendImmediately && scheduledSendAt > new Date()
-
       const publicationResult = await supabase
         .from('schedule_publications')
         .upsert({
@@ -876,7 +871,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           scheduled_send_date: scheduledSendDateStr,
           scheduled_send_at: scheduledSendAt.toISOString(),
           published_at: new Date().toISOString(),
-          ...(isFutureQueuedSend ? { email_sent_at: null } : {}),
+          email_sent_at: null,
         }, { onConflict: 'week_start' })
       if (publicationResult.error) throw publicationResult.error
 
@@ -889,6 +884,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         const payload = (await response.json().catch(() => ({}))) as { success?: boolean; sent?: number; error?: string; errors?: string[]; message?: string }
         if (!response.ok || payload.success === false) {
           throw new Error(payload.errors?.join(' ') || payload.error || payload.message || 'Failed to send schedule emails')
+        }
+        if ((payload.sent ?? 0) <= 0) {
+          throw new Error(payload.message || 'Schedule published, but no schedule emails were sent. Check Email Settings and employee email addresses.')
         }
 
         const markSentResult = await supabase

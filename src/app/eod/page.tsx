@@ -8,6 +8,7 @@ import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -42,7 +43,7 @@ function aggregateClockTipRows(records: ShiftClock[], employees: Employee[]): Ti
 
   for (const record of records) {
     const employee = employees.find(item => item.id === record.employee_id)
-    if (!employee || !isTipEligibleRole(employee.role)) continue
+    if (!employee || !isTipEligibleEmployee(employee)) continue
 
     const existing = grouped.get(record.employee_id) ?? {
       employee_id: record.employee_id,
@@ -88,10 +89,6 @@ function getTipDraftKey(sessionDate: string) {
 
 function getFinancialDraftKey(sessionDate: string) {
   return `eod-financials:${sessionDate}`
-}
-
-function isTipEligibleRole(role: Employee['role']) {
-  return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
 
 function isEodCloserRole(role: Employee['role']) {
@@ -186,7 +183,7 @@ export default function EodPage() {
   })
   const [tipRows, setTipRows] = useState<TipRow[]>([])
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
-  const tipEligibleEmployees = employees.filter(employee => isTipEligibleRole(employee.role))
+  const tipEligibleEmployees = employees.filter(employee => isTipEligibleEmployee(employee))
   const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
 
   const toFinancialForm = useCallback((value: Partial<{
@@ -270,8 +267,8 @@ export default function EodPage() {
     if (eod) {
       const savedTipRows = (eod.tip_distributions ?? [])
         .filter((d: TipDistribution & { employee?: Employee }) => {
-          const role = d.employee?.role ?? (empRes.data ?? []).find((employee: Employee) => employee.id === d.employee_id)?.role
-          return !!role && isTipEligibleRole(role)
+          const employee = d.employee ?? (empRes.data ?? []).find((item: Employee) => item.id === d.employee_id)
+          return !!employee && isTipEligibleEmployee(employee)
         })
         .map((d: TipDistribution & { employee?: Employee }) => {
           const clockRecord = (clockRes.records ?? []).find((record: ShiftClock) => record.employee_id === d.employee_id)
@@ -294,14 +291,16 @@ export default function EodPage() {
         memo: eod.memo,
         closed_by: eod.closed_by_employee_id,
       }))
+      const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
       if (savedTipRows.length > 0) {
-        setTipRows(savedTipRows)
+        const missingClockRows = clockBasedRows.filter(row => !savedTipRows.some(savedRow => savedRow.employee_id === row.employee_id))
+        setTipRows([...savedTipRows, ...missingClockRows])
+        setTipDistributionSaved(missingClockRows.length === 0)
       } else {
-        const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
         setTipRows(clockBasedRows)
+        setTipDistributionSaved(false)
       }
       setFinancialsSaved(true)
-      setTipDistributionSaved(savedTipRows.length > 0)
     } else {
       const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
 

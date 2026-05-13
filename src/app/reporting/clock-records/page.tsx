@@ -16,6 +16,7 @@ import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment 
 import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
+import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { supabase } from '@/lib/supabase'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 
@@ -139,8 +140,7 @@ export default function ClockRecordsPage() {
 
     for (const record of refreshedClockRecords) {
       const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
-      const isTipEligible = employee?.role === 'manager' || employee?.role === 'server' || employee?.role === 'busser' || employee?.role === 'runner'
-      if (!employee || !isTipEligible) continue
+      if (!employee || !isTipEligibleEmployee(employee)) continue
 
       const existing = grouped.get(record.employee_id) ?? {
         employee_id: record.employee_id,

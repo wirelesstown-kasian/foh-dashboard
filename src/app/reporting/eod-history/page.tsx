@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
+import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import { CashBalanceEntry, Employee, EodReport, ShiftClock } from '@/lib/types'
 import { getCashVariance, getExpectedCashDeposit } from '@/lib/eodVariance'
@@ -38,16 +39,12 @@ function isEodCloserRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
 
-function isTipEligibleRole(role: Employee['role']) {
-  return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
-}
-
 function aggregateClockRowsByEmployee(records: ShiftClock[], employees: Employee[]) {
   const grouped = new Map<string, { employee_id: string; hours_worked: number; start_time: string | null; end_time: string | null }>()
 
   for (const record of records) {
     const employee = employees.find(item => item.id === record.employee_id)
-    if (!employee || !isTipEligibleRole(employee.role)) continue
+    if (!employee || !isTipEligibleEmployee(employee)) continue
 
     const existing = grouped.get(record.employee_id) ?? {
       employee_id: record.employee_id,
