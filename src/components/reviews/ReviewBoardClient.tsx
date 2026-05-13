@@ -140,6 +140,7 @@ export function ReviewBoardClient() {
         analyzed?: number
         analysis_errors?: string[]
         api_used?: string
+        discovered_account_id?: string | null
       }
       if (!res.ok) {
         throw new Error(payload.error ?? 'Failed to sync Google reviews')
@@ -153,6 +154,9 @@ export function ReviewBoardClient() {
       ]
       if ((payload.analysis_errors?.length ?? 0) > 0) {
         parts.push(`${payload.analysis_errors!.length} analysis issue${payload.analysis_errors!.length === 1 ? '' : 's'}`)
+      }
+      if (payload.discovered_account_id) {
+        parts.push(`Account ID: ${payload.discovered_account_id} — save as GOOGLE_BUSINESS_ACCOUNT_ID in Vercel`)
       }
       setSyncMessage(parts.join(' • '))
       await loadBoard()

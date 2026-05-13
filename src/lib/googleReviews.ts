@@ -132,7 +132,7 @@ async function discoverAccountId(accessToken: string): Promise<string> {
   return accountId
 }
 
-export async function fetchAllBusinessProfileReviews(): Promise<GoogleReviewSyncRow[]> {
+export async function fetchAllBusinessProfileReviews(): Promise<{ rows: GoogleReviewSyncRow[]; accountId: string }> {
   const locationId = process.env.GOOGLE_BUSINESS_LOCATION_ID?.trim()
   if (!locationId) throw new Error('Missing env var: GOOGLE_BUSINESS_LOCATION_ID')
 
@@ -141,7 +141,6 @@ export async function fetchAllBusinessProfileReviews(): Promise<GoogleReviewSync
 
   const allRows: GoogleReviewSyncRow[] = []
   let pageToken: string | undefined
-
   do {
     const url = new URL(`https://mybusiness.googleapis.com/v4/accounts/${accountId}/locations/${locationId}/reviews`)
     url.searchParams.set('pageSize', '50')
@@ -194,7 +193,7 @@ export async function fetchAllBusinessProfileReviews(): Promise<GoogleReviewSync
     pageToken = data.nextPageToken
   } while (pageToken)
 
-  return allRows
+  return { rows: allRows, accountId }
 }
 
 // ─── Places API (fallback — 5 most recent) ────────────────────────────────────

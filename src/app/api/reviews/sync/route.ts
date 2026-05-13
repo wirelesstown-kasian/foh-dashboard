@@ -7,10 +7,13 @@ import { isReviewBoardSetupMissingError } from '@/lib/reviewBoard'
 export async function POST() {
 
   const usingBusinessProfile = hasBusinessProfileCredentials()
-  let googleRows
+  let googleRows: ReturnType<typeof mapGooglePlaceReviewsToRows>
+  let discoveredAccountId: string | null = null
   try {
     if (usingBusinessProfile) {
-      googleRows = await fetchAllBusinessProfileReviews()
+      const result = await fetchAllBusinessProfileReviews()
+      googleRows = result.rows
+      discoveredAccountId = result.accountId
     } else {
       const place = await fetchGooglePlaceReviews()
       googleRows = mapGooglePlaceReviewsToRows(place)
@@ -83,5 +86,6 @@ export async function POST() {
     analyzed,
     analysis_errors: analysisErrors,
     api_used: usingBusinessProfile ? 'business_profile' : 'places_api',
+    discovered_account_id: discoveredAccountId,
   })
 }
