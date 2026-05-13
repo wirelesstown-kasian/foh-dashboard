@@ -297,11 +297,12 @@ export async function POST(req: NextRequest) {
       <td>${escapeHtml(d.employee?.name ?? '')}</td>
       <td>${Number(d.hours_worked).toFixed(2)}</td>
       <td>${(Number(d.tip_share) * 100).toFixed(1)}%</td>
+      <td>${Number(d.hours_worked) > 0 ? `$${(Number(d.net_tip) / Number(d.hours_worked)).toFixed(2)}/hr` : '—'}</td>
       <td>${d.employee?.tip_pool_hourly_rate ? `$${Number(d.employee.tip_pool_hourly_rate).toFixed(2)}/hr` : '—'}</td>
       <td>-$${Number(d.house_deduction).toFixed(2)}</td>
       <td><strong>$${Number(d.net_tip).toFixed(2)}</strong></td>
     </tr>`
-  ).join('') || `<tr><td colspan="6" style="text-align:center;color:#6b7280">No tip distribution rows saved.</td></tr>`
+  ).join('') || `<tr><td colspan="7" style="text-align:center;color:#6b7280">No tip distribution rows saved.</td></tr>`
 
     const adminEodHtml = renderEmailShell(logoUrl, `
       ${attendanceWarningHtml}
@@ -347,7 +348,7 @@ export async function POST(req: NextRequest) {
       ${memoHtml}
       <h3 style="margin-top:18px">Tip Distribution</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
-        <tr style="background:#f5f5f5"><th>Name</th><th>Hours</th><th>Tip Share</th><th>Tip Cap</th><th>Deduction</th><th>Net Tip</th></tr>
+        <tr style="background:#f5f5f5"><th>Name</th><th>Hours</th><th>Tip Share</th><th>Tip / Hr</th><th>Tip Cap</th><th>Deduction</th><th>Net Tip</th></tr>
         ${tipRows}
       </table>
       <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>

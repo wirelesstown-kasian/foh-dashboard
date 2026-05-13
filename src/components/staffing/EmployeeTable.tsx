@@ -56,6 +56,7 @@ interface PayFormState {
 }
 
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
+type DepartmentFilter = 'all' | 'foh' | 'boh'
 
 const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
 const EMPTY_PAY_FORM: PayFormState = { hourly_wage: '', guaranteed_enabled: false, guaranteed_hourly: '', tip_cap_enabled: false, tip_pool_hourly_rate: '' }
@@ -121,6 +122,7 @@ export function EmployeeTable() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [paySaveError, setPaySaveError] = useState<string | null>(null)
   const [filterRole, setFilterRole] = useState<string>('all')
+  const [filterDepartment, setFilterDepartment] = useState<DepartmentFilter>('all')
   const [sortBy, setSortBy] = useState<SortOption>('name_asc')
 
   const load = useCallback(async () => {
@@ -256,7 +258,11 @@ export function EmployeeTable() {
     await load()
   }
 
-  const filtered = filterRole === 'all' ? employees : employees.filter(e => e.role === filterRole)
+  const filtered = employees.filter(employee => {
+    const roleMatches = filterRole === 'all' || employee.role === filterRole
+    const departmentMatches = filterDepartment === 'all' || (employee.primary_department ?? 'foh') === filterDepartment
+    return roleMatches && departmentMatches
+  })
   const sorted = [...filtered].sort((a, b) => {
     switch (sortBy) {
       case 'name_desc':
@@ -280,7 +286,27 @@ export function EmployeeTable() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div />
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="inline-flex h-8 overflow-hidden rounded-lg border bg-background">
+            {([
+              ['all', 'All'],
+              ['foh', 'FOH'],
+              ['boh', 'BOH'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setFilterDepartment(value)}
+                className={`px-3 text-sm font-medium transition-colors ${
+                  filterDepartment === value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Select value={filterRole} onValueChange={(v: string | null) => v && setFilterRole(v)}>
             <SelectTrigger className="w-36">
               <span className={filterRole === 'all' ? 'text-muted-foreground' : ''}>
