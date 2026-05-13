@@ -385,10 +385,6 @@ export default function EodPage() {
       tip_pool_hourly_rate: employees.find(employee => employee.id === r.employee_id)?.tip_pool_hourly_rate ?? null,
     }))
   )
-  const fixedTipPayoutTotal = tipResults
-    .filter(result => result.is_fixed_tip)
-    .reduce((sum, result) => sum + result.net_tip, 0)
-
   const setField = (field: string, value: string) => {
     setFinancialsSaved(false)
     setForm(f => ({ ...f, [field]: value }))
@@ -1334,7 +1330,7 @@ export default function EodPage() {
                     <h2 className="font-semibold">Tip Distribution</h2>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    House takes 15% — fixed tip rates draw ${fixedTipPayoutTotal.toFixed(2)}, then ${(Math.max(0, tipTotal * 0.85 - fixedTipPayoutTotal)).toFixed(2)} is shared by hours
+                    House takes 15% — tips are shared by hours, and capped staff receive no more than their Tip Cap / Hr
                   </p>
                   {!financialsSaved && (
                     <p className="mt-1 text-xs text-amber-600">Save Revenue & Tips first to activate this section.</p>

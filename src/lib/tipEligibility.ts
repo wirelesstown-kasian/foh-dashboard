@@ -6,7 +6,8 @@ export function isStandardTipRole(role: Employee['role']) {
   return STANDARD_TIP_ROLES.has(role)
 }
 
-export function isTipEligibleEmployee(employee: Pick<Employee, 'role' | 'primary_department' | 'tip_pool_hourly_rate'>) {
+export function isTipEligibleEmployee(employee: Pick<Employee, 'role' | 'primary_department'>) {
   if (isStandardTipRole(employee.role)) return true
-  return (employee.primary_department ?? 'foh') === 'foh' && Number(employee.tip_pool_hourly_rate ?? 0) > 0
+  const primaryDepartment = employee.primary_department ?? 'foh'
+  return primaryDepartment === 'foh' || primaryDepartment === 'hybrid'
 }

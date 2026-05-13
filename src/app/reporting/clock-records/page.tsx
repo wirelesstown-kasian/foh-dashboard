@@ -265,8 +265,6 @@ export default function ClockRecordsPage() {
               <TableHead className="text-right">Clock In</TableHead>
               <TableHead className="text-right">Clock Out</TableHead>
               <TableHead className="text-right">Worked Hrs</TableHead>
-              <TableHead className="text-right">Tip Cap</TableHead>
-              <TableHead className="text-right">Tip Draw</TableHead>
               <TableHead className="w-36">Note</TableHead>
               <TableHead>Action</TableHead>
             </TableRow>
@@ -283,8 +281,6 @@ export default function ClockRecordsPage() {
               const previewIn = timeInputToIso(record.session_date, currentEdit.clockIn)
               const previewOut = currentEdit.clockOut ? timeInputToIso(record.session_date, currentEdit.clockOut) : null
               const workedHours = previewIn && previewOut ? calculateClockHours(previewIn, previewOut) : 0
-              const tipPoolRate = Number(employee?.tip_pool_hourly_rate ?? 0)
-              const tipDraw = workedHours * tipPoolRate
               return (
                 <TableRow key={record.id}>
                   <TableCell className="font-medium">{format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
@@ -301,8 +297,6 @@ export default function ClockRecordsPage() {
                     {isEditing ? <Input type="time" value={currentEdit.clockOut} onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, clockOut: event.target.value } }))} className="ml-auto h-8 w-28 text-right" /> : record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">{workedHours.toFixed(2)}</TableCell>
-                  <TableCell className="text-right text-muted-foreground">{tipPoolRate > 0 ? `$${tipPoolRate.toFixed(2)}/hr` : '—'}</TableCell>
-                  <TableCell className="text-right font-medium text-green-700">{tipPoolRate > 0 ? `$${tipDraw.toFixed(2)}` : '—'}</TableCell>
                   <TableCell>
                     {isEditing ? (
                       <Input
@@ -376,7 +370,7 @@ export default function ClockRecordsPage() {
             })}
             {filteredClockRecords.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="py-6 text-center text-muted-foreground">No clock records for this range</TableCell>
+                <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">No clock records for this range</TableCell>
               </TableRow>
             )}
           </TableBody>

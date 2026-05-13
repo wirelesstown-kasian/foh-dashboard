@@ -16,6 +16,8 @@ import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmplo
 import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
+import { calculateTips } from '@/lib/tipCalc'
+import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import type { Employee } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
@@ -50,6 +52,130 @@ type WageSummaryRow = {
   effectiveRate: number | null
   hasAutoClockOut: boolean
   hasOpenClock: boolean
+}
+
+type DailyTipPreview = {
+  hours: number
+  tips: number
+}
+
+type SavedDailyTip = {
+  hours: number
+  tips: number
+}
+
+function calculateDailyTipPreview({
+  employees,
+  clockRecords,
+  report,
+}: {
+  employees: Employee[]
+  clockRecords: ReturnType<typeof useClockRecords>['clockRecords']
+  report: ReturnType<typeof useEodReports>['eodReports'][number]
+}) {
+  const employeeById = new Map(employees.map(employee => [employee.id, employee]))
+  const hoursByEmployee = new Map<string, number>()
+
+  for (const record of clockRecords) {
+    if (record.session_date !== report.session_date) continue
+    const employee = employeeById.get(record.employee_id)
+    if (!employee || !isTipEligibleEmployee(employee)) continue
+
+    const hours = getEffectiveClockHours(record)
+    if (hours <= 0) continue
+    hoursByEmployee.set(record.employee_id, (hoursByEmployee.get(record.employee_id) ?? 0) + hours)
+  }
+
+  const tipEntries = [...hoursByEmployee.entries()].map(([employeeId, hours]) => {
+    const employee = employeeById.get(employeeId)
+    return {
+      employee_id: employeeId,
+      hours_worked: hours,
+      tip_pool_hourly_rate: employee?.tip_pool_hourly_rate ?? null,
+    }
+  })
+  const tipResults = calculateTips(Number(report.tip_total ?? 0), tipEntries)
+
+  return new Map(
+    tipResults.map(result => [result.employee_id, {
+      hours: result.hours_worked,
+      tips: result.net_tip,
+    }])
+  )
+}
+
+function getSavedDailyTips(report: ReturnType<typeof useEodReports>['eodReports'][number]) {
+  const savedTips = new Map<string, SavedDailyTip>()
+
+  for (const distribution of report.tip_distributions ?? []) {
+    const current = savedTips.get(distribution.employee_id) ?? { hours: 0, tips: 0 }
+    savedTips.set(distribution.employee_id, {
+      hours: current.hours + Number(distribution.hours_worked ?? 0),
+      tips: current.tips + Number(distribution.net_tip ?? 0),
+    })
+  }
+
+  return savedTips
+}
+
+function shouldRecalculateTips(
+  savedTips: Map<string, SavedDailyTip>,
+  calculatedTips: Map<string, DailyTipPreview>
+) {
+  if (calculatedTips.size === 0) return false
+
+  for (const [employeeId, calculated] of calculatedTips) {
+    const saved = savedTips.get(employeeId)
+    if (!saved) return true
+    if (Math.abs(saved.hours - calculated.hours) > 0.01) return true
+  }
+
+  return false
+}
+
+function getDailyWageDetail({
+  emp,
+  date,
+  clockRecords,
+  report,
+  calculatedTip,
+  savedTip,
+  useCalculatedTips,
+}: {
+  emp: Employee
+  date: string
+  clockRecords: ReturnType<typeof useClockRecords>['clockRecords']
+  report?: ReturnType<typeof useEodReports>['eodReports'][number]
+  calculatedTip?: DailyTipPreview
+  savedTip?: SavedDailyTip
+  useCalculatedTips: boolean
+}): WageDetailRow | null {
+  const clockHours = clockRecords
+    .filter(record => record.employee_id === emp.id && record.session_date === date)
+    .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+  const calculatedHours = calculatedTip?.hours ?? 0
+  const savedHours = savedTip?.hours ?? 0
+  const hours = useCalculatedTips
+    ? (clockHours > 0 ? clockHours : calculatedHours)
+    : (savedHours > 0 ? savedHours : clockHours)
+  const tips = report
+    ? useCalculatedTips ? (calculatedTip?.tips ?? 0) : (savedTip?.tips ?? 0)
+    : 0
+
+  if (hours <= 0 && tips <= 0) return null
+
+  const baseWages = hours * Number(emp.hourly_wage ?? 0)
+  const guaranteedTarget = hours * Number(emp.guaranteed_hourly ?? 0)
+  const guaranteeTopUp = Math.max(0, guaranteedTarget - (baseWages + tips))
+
+  return {
+    date,
+    hours,
+    tips,
+    baseWages,
+    guaranteeTopUp,
+    totalEarnings: baseWages + tips + guaranteeTopUp,
+  }
 }
 
 export default function WageReportPage() {
@@ -106,9 +232,13 @@ export default function WageReportPage() {
     }
     for (const eod of eodReports) {
       if (eod.session_date < monthStart || eod.session_date > monthEnd) continue
-      for (const dist of eod.tip_distributions ?? []) {
-        if (!filteredEmpIds.has(dist.employee_id)) continue
-        monthTipsByEmp.set(dist.employee_id, (monthTipsByEmp.get(dist.employee_id) ?? 0) + Number(dist.net_tip))
+      const calculatedTips = calculateDailyTipPreview({ employees, clockRecords, report: eod })
+      const savedTips = getSavedDailyTips(eod)
+      const useCalculatedTips = shouldRecalculateTips(savedTips, calculatedTips)
+      const dailyTips = useCalculatedTips ? calculatedTips : savedTips
+      for (const [employeeId, tip] of dailyTips) {
+        if (!filteredEmpIds.has(employeeId)) continue
+        monthTipsByEmp.set(employeeId, (monthTipsByEmp.get(employeeId) ?? 0) + tip.tips)
       }
     }
     // Build working dates per employee (for task completion rate)
@@ -161,34 +291,69 @@ export default function WageReportPage() {
     }).sort((a, b) => b.score - a.score || b.tasks - a.tasks)
 
     return new Map(scored.map((item, idx) => [item.empId, { ...item, overallRank: idx + 1, staffCount: scored.length }]))
-  }, [completions, clockRecords, eodReports, filteredEmployees, monthStart, monthEnd])
+  }, [completions, clockRecords, employees, eodReports, filteredEmployees, monthStart, monthEnd])
+
+  const detailRowsByEmployeeId = useMemo(() => {
+    const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
+    const reportByDate = new Map(rangeReports.map(report => [report.session_date, report]))
+    const savedTipsByDate = new Map(rangeReports.map(report => [report.session_date, getSavedDailyTips(report)]))
+    const calculatedTipsByDate = new Map(
+      rangeReports.map(report => [report.session_date, calculateDailyTipPreview({
+        employees,
+        clockRecords,
+        report,
+      })])
+    )
+    const datesUsingCalculatedTips = new Set(
+      rangeReports
+        .filter(report => shouldRecalculateTips(
+          savedTipsByDate.get(report.session_date) ?? new Map(),
+          calculatedTipsByDate.get(report.session_date) ?? new Map()
+        ))
+        .map(report => report.session_date)
+    )
+
+    return new Map(
+      filteredEmployees.map(emp => {
+        const employeeDates = Array.from(new Set([
+          ...rangeReports
+            .filter(report => savedTipsByDate.get(report.session_date)?.has(emp.id))
+            .map(report => report.session_date),
+          ...rangeReports
+            .filter(report => calculatedTipsByDate.get(report.session_date)?.has(emp.id))
+            .map(report => report.session_date),
+          ...clockRecords
+            .filter(record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate)
+            .map(record => record.session_date),
+        ]))
+
+        const detailRows = employeeDates
+          .map(date => getDailyWageDetail({
+            emp,
+            date,
+            clockRecords,
+            report: reportByDate.get(date),
+            calculatedTip: calculatedTipsByDate.get(date)?.get(emp.id),
+            savedTip: savedTipsByDate.get(date)?.get(emp.id),
+            useCalculatedTips: datesUsingCalculatedTips.has(date),
+          }))
+          .filter((row): row is WageDetailRow => row !== null)
+
+        detailRows.sort((a, b) => b.date.localeCompare(a.date))
+        return [emp.id, detailRows] as const
+      })
+    )
+  }, [clockRecords, employees, eodReports, filteredEmployees, endDate, startDate])
 
   const rows = useMemo(() => {
-    const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
     return filteredEmployees
       .map(emp => {
-        let hours = 0
-        let tips = 0
-        let baseWages = 0
-        let guaranteeTopUp = 0
-
-        for (const report of rangeReports) {
-          const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
-          const dailyTips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
-          const clockHours = clockRecords
-            .filter(record => record.employee_id === emp.id && record.session_date === report.session_date)
-            .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
-          const distributionHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked ?? 0), 0)
-          const dailyHours = clockHours > 0 ? clockHours : distributionHours
-          const dailyBaseWages = dailyHours * (emp.hourly_wage ?? 0)
-          const dailyGuaranteedTarget = dailyHours * (emp.guaranteed_hourly ?? 0)
-
-          hours += dailyHours
-          tips += dailyTips
-          baseWages += dailyBaseWages
-          guaranteeTopUp += Math.max(0, dailyGuaranteedTarget - (dailyBaseWages + dailyTips))
-        }
-
+        const detailRows = detailRowsByEmployeeId.get(emp.id) ?? []
+        const hours = detailRows.reduce((sum, row) => sum + row.hours, 0)
+        const tips = detailRows.reduce((sum, row) => sum + row.tips, 0)
+        const baseWages = detailRows.reduce((sum, row) => sum + row.baseWages, 0)
+        const guaranteeTopUp = detailRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0)
+        const totalEarnings = detailRows.reduce((sum, row) => sum + row.totalEarnings, 0)
         const matchingClocks = clockRecords.filter(
           record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate
         )
@@ -199,71 +364,15 @@ export default function WageReportPage() {
           tips,
           baseWages,
           guaranteeTopUp,
-          totalEarnings: baseWages + tips + guaranteeTopUp,
+          totalEarnings,
           tipRate: hours > 0 ? tips / hours : null,
-          effectiveRate: hours > 0 ? (baseWages + tips + guaranteeTopUp) / hours : null,
+          effectiveRate: hours > 0 ? totalEarnings / hours : null,
           hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
           hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
         }
       })
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
-  }, [clockRecords, eodReports, filteredEmployees, endDate, startDate])
-
-  const detailRowsByEmployeeId = useMemo(() => {
-    const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
-    return new Map(
-      filteredEmployees.map(emp => {
-        const detailRows: WageDetailRow[] = rangeReports.flatMap(report => {
-          const distributions = (report.tip_distributions ?? []).filter(dist => dist.employee_id === emp.id)
-          const tips = distributions.reduce((sum, dist) => sum + Number(dist.net_tip), 0)
-          const clockHours = clockRecords
-            .filter(record => record.employee_id === emp.id && record.session_date === report.session_date)
-            .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
-          const distributionHours = distributions.reduce((sum, dist) => sum + Number(dist.hours_worked ?? 0), 0)
-          const hours = clockHours > 0 ? clockHours : distributionHours
-          if (hours <= 0 && tips <= 0) return []
-          const baseWages = hours * Number(emp.hourly_wage ?? 0)
-          const guaranteedTarget = hours * Number(emp.guaranteed_hourly ?? 0)
-          const guaranteeTopUp = Math.max(0, guaranteedTarget - (baseWages + tips))
-          return [{
-            date: report.session_date,
-            hours,
-            tips,
-            baseWages,
-            guaranteeTopUp,
-            totalEarnings: baseWages + tips + guaranteeTopUp,
-          }]
-        })
-
-        const extraClockDates = Array.from(new Set(
-          clockRecords
-            .filter(record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate)
-            .map(record => record.session_date)
-        )).filter(date => !detailRows.some(row => row.date === date))
-
-        for (const date of extraClockDates) {
-          const hours = clockRecords
-            .filter(record => record.employee_id === emp.id && record.session_date === date)
-            .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
-          if (hours <= 0) continue
-          const baseWages = hours * Number(emp.hourly_wage ?? 0)
-          const guaranteedTarget = hours * Number(emp.guaranteed_hourly ?? 0)
-          const guaranteeTopUp = Math.max(0, guaranteedTarget - baseWages)
-          detailRows.push({
-            date,
-            hours,
-            tips: 0,
-            baseWages,
-            guaranteeTopUp,
-            totalEarnings: baseWages + guaranteeTopUp,
-          })
-        }
-
-        detailRows.sort((a, b) => b.date.localeCompare(a.date))
-        return [emp.id, detailRows] as const
-      })
-    )
-  }, [clockRecords, eodReports, filteredEmployees, endDate, startDate])
+  }, [clockRecords, detailRowsByEmployeeId, filteredEmployees, endDate, startDate])
 
   const buildWageReportHtml = (row: WageSummaryRow) => {
     const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
@@ -524,7 +633,7 @@ export default function WageReportPage() {
                 <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tip Cap</div>
                   <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(detailTarget.emp.tip_pool_hourly_rate))}/hr` : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">fixed tip draw</div>
+                  <div className="mt-0.5 text-xs text-slate-400">maximum tips / hr</div>
                 </div>
                 <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>
