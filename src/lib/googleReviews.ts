@@ -142,7 +142,7 @@ export async function fetchAllBusinessProfileReviews(): Promise<{ rows: GoogleRe
   const allRows: GoogleReviewSyncRow[] = []
   let pageToken: string | undefined
   do {
-    const url = new URL(`https://mybusinessreviews.googleapis.com/v1/accounts/${accountId}/locations/${locationId}/reviews`)
+    const url = new URL(`https://mybusiness.googleapis.com/v4/accounts/${accountId}/locations/${locationId}/reviews`)
     url.searchParams.set('pageSize', '50')
     if (pageToken) url.searchParams.set('pageToken', pageToken)
 
