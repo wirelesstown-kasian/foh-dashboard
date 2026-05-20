@@ -19,6 +19,18 @@ async function analyzeReviewsInBatches(reviews: Array<{ id: string }>) {
   return results
 }
 
+function buildAnalysisSummary(
+  analysisResults: PromiseSettledResult<Awaited<ReturnType<typeof analyzeStoredReview>>>[]
+) {
+  const analyzed = analysisResults.filter(result => result.status === 'fulfilled').length
+  const analysisErrors = analysisResults
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map(result => result.reason instanceof Error ? result.reason.message : 'Review analysis failed')
+  const analysisErrorSamples = Array.from(new Set(analysisErrors)).slice(0, 5)
+
+  return { analyzed, analysisErrors, analysisErrorSamples }
+}
+
 function normalizeSetupError(error: { message?: string }) {
   if (isReviewBoardSetupMissingError(error)) {
     return { message: 'Run the review board migration locally first.', status: 400 }
@@ -82,11 +94,7 @@ export async function syncGoogleReviews() {
   )
 
   const analysisResults = await analyzeReviewsInBatches(analysisCandidates)
-  const analyzed = analysisResults.filter(result => result.status === 'fulfilled').length
-  const analysisErrors = analysisResults
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-    .map(result => result.reason instanceof Error ? result.reason.message : 'Review analysis failed')
-  const analysisErrorSamples = Array.from(new Set(analysisErrors)).slice(0, 5)
+  const { analyzed, analysisErrors, analysisErrorSamples } = buildAnalysisSummary(analysisResults)
 
   return {
     success: true,
@@ -97,5 +105,36 @@ export async function syncGoogleReviews() {
     analysis_errors: analysisErrors,
     analysis_error_samples: analysisErrorSamples,
     api_used: usingBusinessProfile ? 'business_profile' : 'places_api',
+  }
+}
+
+export async function analyzeSavedGoogleReviews(limit = 75) {
+  const safeLimit = Math.max(1, Math.min(limit, 250))
+  const { data, error, count } = await supabaseAdmin
+    .from('google_reviews')
+    .select('id', { count: 'exact' })
+    .neq('attribution_status', 'manual')
+    .is('matched_employee_id', null)
+    .or('assigned_method.is.null,assigned_method.in.(business_profile_sync,google_places_sync,manager_clear)')
+    .order('review_date', { ascending: false })
+    .limit(safeLimit)
+
+  if (error) {
+    throw Object.assign(new Error(normalizeSetupError(error).message), {
+      status: normalizeSetupError(error).status,
+    })
+  }
+
+  const analysisCandidates = data ?? []
+  const analysisResults = await analyzeReviewsInBatches(analysisCandidates)
+  const { analyzed, analysisErrors, analysisErrorSamples } = buildAnalysisSummary(analysisResults)
+
+  return {
+    success: true,
+    pending_found: count ?? analysisCandidates.length,
+    processed: analysisCandidates.length,
+    analyzed,
+    analysis_errors: analysisErrors,
+    analysis_error_samples: analysisErrorSamples,
   }
 }

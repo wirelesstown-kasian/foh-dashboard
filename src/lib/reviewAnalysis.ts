@@ -37,6 +37,13 @@ type OpenAiAnalysisResult = {
   staff_mentions: string[]
 }
 
+type DirectMention = {
+  employee: RosterEmployee
+  mention: string
+  index: number
+  confidence: number
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -49,21 +56,22 @@ function getEmployeeNameParts(name: string) {
 }
 
 function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): OpenAiAnalysisResult | null {
-  const normalizedText = reviewText.toLowerCase()
+  const mentions: DirectMention[] = []
+  const mentionedEmployeeIds = new Set<string>()
 
   for (const employee of roster) {
     const fullName = employee.name.trim()
     if (!fullName) continue
-    const fullNamePattern = new RegExp(`\\b${escapeRegExp(fullName.toLowerCase())}\\b`, 'i')
-    if (fullNamePattern.test(normalizedText)) {
-      return {
-        matched_employee_id: employee.id,
+    const fullNamePattern = new RegExp(`\\b${escapeRegExp(fullName)}\\b`, 'i')
+    const fullNameMatch = reviewText.match(fullNamePattern)
+    if (fullNameMatch?.index != null) {
+      mentions.push({
+        employee,
+        mention: employee.name,
+        index: fullNameMatch.index,
         confidence: 98,
-        reason: `Review directly mentions ${employee.name}.`,
-        sentiment: 'positive',
-        categories: ['service'],
-        staff_mentions: [employee.name],
-      }
+      })
+      mentionedEmployeeIds.add(employee.id)
     }
   }
 
@@ -75,22 +83,36 @@ function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): O
   }
 
   for (const employee of roster) {
+    if (mentionedEmployeeIds.has(employee.id)) continue
     const firstName = getEmployeeNameParts(employee.name)[0]
     if (!firstName || firstName.length < 3 || firstNameCounts.get(firstName.toLowerCase()) !== 1) continue
     const firstNamePattern = new RegExp(`\\b${escapeRegExp(firstName)}\\b`, 'i')
-    if (firstNamePattern.test(reviewText)) {
-      return {
-        matched_employee_id: employee.id,
+    const firstNameMatch = reviewText.match(firstNamePattern)
+    if (firstNameMatch?.index != null) {
+      mentions.push({
+        employee,
+        mention: firstName,
+        index: firstNameMatch.index,
         confidence: 94,
-        reason: `Review directly mentions unique staff first name ${firstName}.`,
-        sentiment: 'positive',
-        categories: ['service'],
-        staff_mentions: [firstName],
-      }
+      })
+      mentionedEmployeeIds.add(employee.id)
     }
   }
 
-  return null
+  if (mentions.length === 0) return null
+
+  const orderedMentions = mentions.sort((left, right) => left.index - right.index)
+  const primaryMention = orderedMentions[0]
+  const staffMentions = orderedMentions.map(item => item.mention)
+
+  return {
+    matched_employee_id: primaryMention.employee.id,
+    confidence: primaryMention.confidence,
+    reason: `Review directly mentions ${staffMentions.join(', ')}.`,
+    sentiment: 'positive',
+    categories: ['service'],
+    staff_mentions: staffMentions,
+  }
 }
 
 const openAiSchema = {

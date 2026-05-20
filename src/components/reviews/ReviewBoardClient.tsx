@@ -15,7 +15,7 @@ import {
   ReviewDateRangeFilter,
 } from '@/lib/reviewScoring'
 import { Employee, GoogleReview } from '@/lib/types'
-import { ShieldCheck, UserRound } from 'lucide-react'
+import { ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 
 interface ReviewBoardResponse {
   employees: Employee[]
@@ -39,6 +39,7 @@ interface ActiveEmployeeFilter {
 export function ReviewBoardClient() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [analyzingSaved, setAnalyzingSaved] = useState(false)
   const [assigning, setAssigning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
@@ -137,6 +138,7 @@ export function ReviewBoardClient() {
         error?: string
         reviews_found?: number
         synced?: number
+        new_reviews?: number
         analyzed?: number
         analysis_errors?: string[]
         api_used?: string
@@ -149,6 +151,7 @@ export function ReviewBoardClient() {
         payload.api_used === 'business_profile' ? 'Business Profile API' : 'Places API (limited to 5)',
         `${payload.reviews_found ?? 0} reviews fetched`,
         `${payload.synced ?? 0} synced`,
+        `${payload.new_reviews ?? 0} new`,
         `${payload.analyzed ?? 0} analyzed`,
       ]
       if ((payload.analysis_errors?.length ?? 0) > 0) {
@@ -160,6 +163,45 @@ export function ReviewBoardClient() {
       setError(syncError instanceof Error ? syncError.message : 'Failed to sync Google reviews')
     } finally {
       setSyncing(false)
+    }
+  }
+
+  const handleAnalyzeSavedReviews = async () => {
+    setAnalyzingSaved(true)
+    setError(null)
+    setSyncMessage(null)
+
+    try {
+      const res = await fetch('/api/reviews/analyze-saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 100 }),
+      })
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string
+        pending_found?: number
+        processed?: number
+        analyzed?: number
+        analysis_errors?: string[]
+      }
+      if (!res.ok) {
+        throw new Error(payload.error ?? 'Failed to analyze saved reviews')
+      }
+
+      const parts = [
+        `${payload.pending_found ?? 0} saved pending`,
+        `${payload.processed ?? 0} processed`,
+        `${payload.analyzed ?? 0} analyzed`,
+      ]
+      if ((payload.analysis_errors?.length ?? 0) > 0) {
+        parts.push(`${payload.analysis_errors!.length} analysis issue${payload.analysis_errors!.length === 1 ? '' : 's'}`)
+      }
+      setSyncMessage(parts.join(' • '))
+      await loadBoard()
+    } catch (analyzeError) {
+      setError(analyzeError instanceof Error ? analyzeError.message : 'Failed to analyze saved reviews')
+    } finally {
+      setAnalyzingSaved(false)
     }
   }
 
@@ -325,9 +367,19 @@ export function ReviewBoardClient() {
               variant="outline"
               className="h-11 min-w-32 text-sm font-semibold"
               onClick={handleGoogleSync}
-              disabled={syncing}
+              disabled={syncing || analyzingSaved}
             >
               {syncing ? 'Syncing...' : 'Sync Google Reviews'}
+            </Button>
+
+            <Button
+              variant="outline"
+              className="h-11 min-w-32 text-sm font-semibold"
+              onClick={handleAnalyzeSavedReviews}
+              disabled={syncing || analyzingSaved || !managerUnlocked}
+            >
+              <Sparkles className="h-4 w-4" />
+              {analyzingSaved ? 'Analyzing...' : 'Analyze Saved Reviews'}
             </Button>
 
             <Button
