@@ -4,6 +4,22 @@ import { analyzeStoredReview } from '@/lib/reviewAnalysis'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isReviewBoardSetupMissingError } from '@/lib/reviewBoard'
 
+const ANALYSIS_CONCURRENCY = 4
+
+async function analyzeReviewsInBatches(reviews: Array<{ id: string }>) {
+  const results: PromiseSettledResult<Awaited<ReturnType<typeof analyzeStoredReview>>>[] = []
+
+  for (let index = 0; index < reviews.length; index += ANALYSIS_CONCURRENCY) {
+    const batch = reviews.slice(index, index + ANALYSIS_CONCURRENCY)
+    const batchResults = await Promise.allSettled(
+      batch.map(review => analyzeStoredReview(review.id))
+    )
+    results.push(...batchResults)
+  }
+
+  return results
+}
+
 export async function POST() {
 
   const usingBusinessProfile = hasBusinessProfileCredentials()
@@ -68,14 +84,13 @@ export async function POST() {
     review.matched_employee_id == null
   )
 
-  const analysisResults = await Promise.allSettled(
-    analysisCandidates.map(review => analyzeStoredReview(review.id))
-  )
+  const analysisResults = await analyzeReviewsInBatches(analysisCandidates)
 
   const analyzed = analysisResults.filter(result => result.status === 'fulfilled').length
   const analysisErrors = analysisResults
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map(result => result.reason instanceof Error ? result.reason.message : 'Review analysis failed')
+  const analysisErrorSamples = Array.from(new Set(analysisErrors)).slice(0, 5)
 
   return NextResponse.json({
     success: true,
@@ -83,6 +98,7 @@ export async function POST() {
     reviews_found: googleRows.length,
     analyzed,
     analysis_errors: analysisErrors,
+    analysis_error_samples: analysisErrorSamples,
     api_used: usingBusinessProfile ? 'business_profile' : 'places_api',
   })
 }

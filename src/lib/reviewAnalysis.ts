@@ -37,6 +37,62 @@ type OpenAiAnalysisResult = {
   staff_mentions: string[]
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getEmployeeNameParts(name: string) {
+  return name
+    .split(/\s+/)
+    .map(part => part.trim())
+    .filter(part => part.length >= 2)
+}
+
+function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): OpenAiAnalysisResult | null {
+  const normalizedText = reviewText.toLowerCase()
+
+  for (const employee of roster) {
+    const fullName = employee.name.trim()
+    if (!fullName) continue
+    const fullNamePattern = new RegExp(`\\b${escapeRegExp(fullName.toLowerCase())}\\b`, 'i')
+    if (fullNamePattern.test(normalizedText)) {
+      return {
+        matched_employee_id: employee.id,
+        confidence: 98,
+        reason: `Review directly mentions ${employee.name}.`,
+        sentiment: 'positive',
+        categories: ['service'],
+        staff_mentions: [employee.name],
+      }
+    }
+  }
+
+  const firstNameCounts = new Map<string, number>()
+  for (const employee of roster) {
+    const firstName = getEmployeeNameParts(employee.name)[0]?.toLowerCase()
+    if (!firstName || firstName.length < 3) continue
+    firstNameCounts.set(firstName, (firstNameCounts.get(firstName) ?? 0) + 1)
+  }
+
+  for (const employee of roster) {
+    const firstName = getEmployeeNameParts(employee.name)[0]
+    if (!firstName || firstName.length < 3 || firstNameCounts.get(firstName.toLowerCase()) !== 1) continue
+    const firstNamePattern = new RegExp(`\\b${escapeRegExp(firstName)}\\b`, 'i')
+    if (firstNamePattern.test(reviewText)) {
+      return {
+        matched_employee_id: employee.id,
+        confidence: 94,
+        reason: `Review directly mentions unique staff first name ${firstName}.`,
+        sentiment: 'positive',
+        categories: ['service'],
+        staff_mentions: [firstName],
+      }
+    }
+  }
+
+  return null
+}
+
 const openAiSchema = {
   name: 'review_staff_match',
   strict: true,
@@ -184,7 +240,7 @@ export async function analyzeStoredReview(reviewId: string): Promise<ReviewAnaly
 
   const roster = (rosterResult.data ?? []) as RosterEmployee[]
 
-  const analysis = await analyzeWithOpenAI(review, roster)
+  const analysis = findDirectStaffMention(review.review_text, roster) ?? await analyzeWithOpenAI(review, roster)
   const attributionStatus = getAttributionStatus(analysis)
   const assignedMethod = getAssignedMethod(analysis)
 
