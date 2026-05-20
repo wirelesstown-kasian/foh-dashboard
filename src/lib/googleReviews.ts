@@ -43,6 +43,13 @@ const STAR_RATING_MAP: Record<string, number> = {
   ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5,
 }
 
+function normalizeBusinessProfileId(value: string, resource: 'accounts' | 'locations') {
+  const trimmed = value.trim()
+  const pattern = new RegExp(`${resource}/([^/]+)`)
+  const match = trimmed.match(pattern)
+  return match?.[1] ?? trimmed.replace(/^\/+|\/+$/g, '')
+}
+
 // ─── Shared sync row type ──────────────────────────────────────────────────────
 
 export interface GoogleReviewSyncRow {
@@ -133,11 +140,13 @@ async function discoverAccountId(accessToken: string): Promise<string> {
 }
 
 export async function fetchAllBusinessProfileReviews(): Promise<{ rows: GoogleReviewSyncRow[]; accountId: string }> {
-  const locationId = process.env.GOOGLE_BUSINESS_LOCATION_ID?.trim()
-  if (!locationId) throw new Error('Missing env var: GOOGLE_BUSINESS_LOCATION_ID')
+  const locationIdValue = process.env.GOOGLE_BUSINESS_LOCATION_ID?.trim()
+  if (!locationIdValue) throw new Error('Missing env var: GOOGLE_BUSINESS_LOCATION_ID')
+  const locationId = normalizeBusinessProfileId(locationIdValue, 'locations')
 
   const accessToken = await getGoogleAccessToken()
-  const accountId = process.env.GOOGLE_BUSINESS_ACCOUNT_ID?.trim() || await discoverAccountId(accessToken)
+  const accountIdValue = process.env.GOOGLE_BUSINESS_ACCOUNT_ID?.trim() || await discoverAccountId(accessToken)
+  const accountId = normalizeBusinessProfileId(accountIdValue, 'accounts')
 
   const allRows: GoogleReviewSyncRow[] = []
   let pageToken: string | undefined
@@ -152,7 +161,17 @@ export async function fetchAllBusinessProfileReviews(): Promise<{ rows: GoogleRe
     })
 
     const data = await res.json().catch(() => ({})) as BusinessProfileReviewsResponse
-    if (!res.ok) throw new Error(data.error?.message ?? 'Failed to fetch Business Profile reviews')
+    if (!res.ok) {
+      const message = data.error?.message ?? 'Failed to fetch Business Profile reviews'
+      if (res.status === 404 || message.toLowerCase().includes('requested entity was not found')) {
+        throw new Error(
+          `Business Profile location not found for account ${accountId} and location ${locationId}. ` +
+          'Check GOOGLE_BUSINESS_ACCOUNT_ID and GOOGLE_BUSINESS_LOCATION_ID in Vercel. ' +
+          'Use the numeric IDs only, or paste full names like accounts/123 and locations/456.'
+        )
+      }
+      throw new Error(message)
+    }
 
     for (const review of data.reviews ?? []) {
       const reviewText = review.comment?.trim()
