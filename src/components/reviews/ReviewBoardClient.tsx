@@ -141,6 +141,7 @@ export function ReviewBoardClient() {
         new_reviews?: number
         analyzed?: number
         analysis_errors?: string[]
+        analysis_error_samples?: string[]
         api_used?: string
       }
       if (!res.ok) {
@@ -156,6 +157,9 @@ export function ReviewBoardClient() {
       ]
       if ((payload.analysis_errors?.length ?? 0) > 0) {
         parts.push(`${payload.analysis_errors!.length} analysis issue${payload.analysis_errors!.length === 1 ? '' : 's'}`)
+      }
+      if ((payload.analysis_error_samples?.length ?? 0) > 0) {
+        parts.push(payload.analysis_error_samples!.join(' / '))
       }
       setSyncMessage(parts.join(' • '))
       await loadBoard()
@@ -181,8 +185,11 @@ export function ReviewBoardClient() {
         error?: string
         pending_found?: number
         processed?: number
+        direct_matched?: number
+        ai_analyzed?: number
         analyzed?: number
         analysis_errors?: string[]
+        analysis_error_samples?: string[]
       }
       if (!res.ok) {
         throw new Error(payload.error ?? 'Failed to analyze saved reviews')
@@ -191,10 +198,15 @@ export function ReviewBoardClient() {
       const parts = [
         `${payload.pending_found ?? 0} saved pending`,
         `${payload.processed ?? 0} processed`,
+        `${payload.direct_matched ?? 0} direct matched`,
+        `${payload.ai_analyzed ?? 0} AI analyzed`,
         `${payload.analyzed ?? 0} analyzed`,
       ]
       if ((payload.analysis_errors?.length ?? 0) > 0) {
         parts.push(`${payload.analysis_errors!.length} analysis issue${payload.analysis_errors!.length === 1 ? '' : 's'}`)
+      }
+      if ((payload.analysis_error_samples?.length ?? 0) > 0) {
+        parts.push(payload.analysis_error_samples!.join(' / '))
       }
       setSyncMessage(parts.join(' • '))
       await loadBoard()

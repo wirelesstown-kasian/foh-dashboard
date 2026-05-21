@@ -28,6 +28,11 @@ export interface ReviewAnalysisResult {
   reason: string
 }
 
+type ReviewAnalysisInput = {
+  review: GoogleReviewRow
+  roster: RosterEmployee[]
+}
+
 type OpenAiAnalysisResult = {
   matched_employee_id: string | null
   confidence: number
@@ -166,6 +171,80 @@ function getAssignedMethod(result: OpenAiAnalysisResult) {
   return 'openai_unassigned'
 }
 
+async function getReviewAnalysisInput(reviewId: string): Promise<ReviewAnalysisInput> {
+  const [reviewResult, rosterResult] = await Promise.all([
+    supabaseAdmin
+      .from('google_reviews')
+      .select('id, review_text, review_date, rating, matched_employee_id, attribution_status')
+      .eq('id', reviewId)
+      .single(),
+    supabaseAdmin
+      .from('employees')
+      .select('id, name, role')
+      .eq('is_active', true)
+      .neq('primary_department', 'boh')
+      .order('name'),
+  ])
+
+  if (reviewResult.error || !reviewResult.data) {
+    throw new Error(reviewResult.error?.message ?? 'Review not found')
+  }
+
+  const review = reviewResult.data as GoogleReviewRow
+
+  if (review.attribution_status === 'manual') {
+    throw new Error('Manual assignment preserved')
+  }
+
+  return {
+    review,
+    roster: (rosterResult.data ?? []) as RosterEmployee[],
+  }
+}
+
+async function saveReviewAnalysis(
+  reviewId: string,
+  roster: RosterEmployee[],
+  analysis: OpenAiAnalysisResult
+): Promise<ReviewAnalysisResult> {
+  const attributionStatus = getAttributionStatus(analysis)
+  const assignedMethod = getAssignedMethod(analysis)
+
+  const { error: updateError } = await supabaseAdmin
+    .from('google_reviews')
+    .update({
+      matched_employee_id: attributionStatus === 'unassigned' ? null : analysis.matched_employee_id,
+      confidence: analysis.confidence,
+      reason: analysis.reason,
+      sentiment: analysis.sentiment,
+      categories: analysis.categories,
+      staff_mentions: analysis.staff_mentions,
+      attribution_status: attributionStatus,
+      assigned_method: assignedMethod,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', reviewId)
+
+  if (updateError) {
+    throw new Error(updateError.message)
+  }
+
+  return {
+    success: true,
+    review_id: reviewId,
+    matched_employee_id: attributionStatus === 'unassigned' ? null : analysis.matched_employee_id,
+    matched_employee_name: analysis.matched_employee_id
+      ? roster.find(emp => emp.id === analysis.matched_employee_id)?.name ?? null
+      : null,
+    confidence: analysis.confidence,
+    attribution_status: attributionStatus,
+    sentiment: analysis.sentiment,
+    categories: analysis.categories,
+    staff_mentions: analysis.staff_mentions,
+    reason: analysis.reason,
+  }
+}
+
 async function analyzeWithOpenAI(review: GoogleReviewRow, roster: RosterEmployee[]) {
   const apiKey = process.env.OPENAI_API_KEY?.trim()
   if (!apiKey) {
@@ -236,67 +315,14 @@ async function analyzeWithOpenAI(review: GoogleReviewRow, roster: RosterEmployee
 }
 
 export async function analyzeStoredReview(reviewId: string): Promise<ReviewAnalysisResult> {
-  const [reviewResult, rosterResult] = await Promise.all([
-    supabaseAdmin
-      .from('google_reviews')
-      .select('id, review_text, review_date, rating, matched_employee_id, attribution_status')
-      .eq('id', reviewId)
-      .single(),
-    supabaseAdmin
-      .from('employees')
-      .select('id, name, role')
-      .eq('is_active', true)
-      .neq('primary_department', 'boh')
-      .order('name'),
-  ])
-
-  if (reviewResult.error || !reviewResult.data) {
-    throw new Error(reviewResult.error?.message ?? 'Review not found')
-  }
-
-  const review = reviewResult.data as GoogleReviewRow
-
-  if (review.attribution_status === 'manual') {
-    throw new Error('Manual assignment preserved')
-  }
-
-  const roster = (rosterResult.data ?? []) as RosterEmployee[]
-
+  const { review, roster } = await getReviewAnalysisInput(reviewId)
   const analysis = findDirectStaffMention(review.review_text, roster) ?? await analyzeWithOpenAI(review, roster)
-  const attributionStatus = getAttributionStatus(analysis)
-  const assignedMethod = getAssignedMethod(analysis)
+  return saveReviewAnalysis(reviewId, roster, analysis)
+}
 
-  const { error: updateError } = await supabaseAdmin
-    .from('google_reviews')
-    .update({
-      matched_employee_id: attributionStatus === 'unassigned' ? null : analysis.matched_employee_id,
-      confidence: analysis.confidence,
-      reason: analysis.reason,
-      sentiment: analysis.sentiment,
-      categories: analysis.categories,
-      staff_mentions: analysis.staff_mentions,
-      attribution_status: attributionStatus,
-      assigned_method: assignedMethod,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', reviewId)
-
-  if (updateError) {
-    throw new Error(updateError.message)
-  }
-
-  return {
-    success: true,
-    review_id: reviewId,
-    matched_employee_id: attributionStatus === 'unassigned' ? null : analysis.matched_employee_id,
-    matched_employee_name: analysis.matched_employee_id
-      ? roster.find(emp => emp.id === analysis.matched_employee_id)?.name ?? null
-      : null,
-    confidence: analysis.confidence,
-    attribution_status: attributionStatus,
-    sentiment: analysis.sentiment,
-    categories: analysis.categories,
-    staff_mentions: analysis.staff_mentions,
-    reason: analysis.reason,
-  }
+export async function analyzeStoredReviewDirectMention(reviewId: string): Promise<ReviewAnalysisResult | null> {
+  const { review, roster } = await getReviewAnalysisInput(reviewId)
+  const analysis = findDirectStaffMention(review.review_text, roster)
+  if (!analysis) return null
+  return saveReviewAnalysis(reviewId, roster, analysis)
 }

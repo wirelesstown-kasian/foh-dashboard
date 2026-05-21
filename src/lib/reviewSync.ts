@@ -1,17 +1,19 @@
 import { fetchAllBusinessProfileReviews, fetchGooglePlaceReviews, hasBusinessProfileCredentials, mapGooglePlaceReviewsToRows } from '@/lib/googleReviews'
-import { analyzeStoredReview } from '@/lib/reviewAnalysis'
+import { analyzeStoredReview, analyzeStoredReviewDirectMention, ReviewAnalysisResult } from '@/lib/reviewAnalysis'
 import { isReviewBoardSetupMissingError } from '@/lib/reviewBoard'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 const ANALYSIS_CONCURRENCY = 4
 
-async function analyzeReviewsInBatches(reviews: Array<{ id: string }>) {
-  const results: PromiseSettledResult<Awaited<ReturnType<typeof analyzeStoredReview>>>[] = []
+type AnalysisRunner = (reviewId: string) => Promise<ReviewAnalysisResult | null>
+
+async function analyzeReviewsInBatches(reviews: Array<{ id: string }>, runner: AnalysisRunner = analyzeStoredReview) {
+  const results: PromiseSettledResult<ReviewAnalysisResult | null>[] = []
 
   for (let index = 0; index < reviews.length; index += ANALYSIS_CONCURRENCY) {
     const batch = reviews.slice(index, index + ANALYSIS_CONCURRENCY)
     const batchResults = await Promise.allSettled(
-      batch.map(review => analyzeStoredReview(review.id))
+      batch.map(review => runner(review.id))
     )
     results.push(...batchResults)
   }
@@ -20,9 +22,9 @@ async function analyzeReviewsInBatches(reviews: Array<{ id: string }>) {
 }
 
 function buildAnalysisSummary(
-  analysisResults: PromiseSettledResult<Awaited<ReturnType<typeof analyzeStoredReview>>>[]
+  analysisResults: PromiseSettledResult<ReviewAnalysisResult | null>[]
 ) {
-  const analyzed = analysisResults.filter(result => result.status === 'fulfilled').length
+  const analyzed = analysisResults.filter(result => result.status === 'fulfilled' && result.value !== null).length
   const analysisErrors = analysisResults
     .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     .map(result => result.reason instanceof Error ? result.reason.message : 'Review analysis failed')
@@ -110,7 +112,25 @@ export async function syncGoogleReviews() {
 
 export async function analyzeSavedGoogleReviews(limit = 75) {
   const safeLimit = Math.max(1, Math.min(limit, 250))
-  const { data, error, count } = await supabaseAdmin
+  const directCandidatesResult = await supabaseAdmin
+    .from('google_reviews')
+    .select('id', { count: 'exact' })
+    .neq('attribution_status', 'manual')
+    .is('matched_employee_id', null)
+    .order('review_date', { ascending: false })
+    .limit(Math.max(safeLimit, 250))
+
+  if (directCandidatesResult.error) {
+    throw Object.assign(new Error(normalizeSetupError(directCandidatesResult.error).message), {
+      status: normalizeSetupError(directCandidatesResult.error).status,
+    })
+  }
+
+  const directCandidates = directCandidatesResult.data ?? []
+  const directResults = await analyzeReviewsInBatches(directCandidates, analyzeStoredReviewDirectMention)
+  const directSummary = buildAnalysisSummary(directResults)
+
+  const openAiCandidatesResult = await supabaseAdmin
     .from('google_reviews')
     .select('id', { count: 'exact' })
     .neq('attribution_status', 'manual')
@@ -119,21 +139,28 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
     .order('review_date', { ascending: false })
     .limit(safeLimit)
 
-  if (error) {
-    throw Object.assign(new Error(normalizeSetupError(error).message), {
-      status: normalizeSetupError(error).status,
+  if (openAiCandidatesResult.error) {
+    throw Object.assign(new Error(normalizeSetupError(openAiCandidatesResult.error).message), {
+      status: normalizeSetupError(openAiCandidatesResult.error).status,
     })
   }
 
-  const analysisCandidates = data ?? []
-  const analysisResults = await analyzeReviewsInBatches(analysisCandidates)
-  const { analyzed, analysisErrors, analysisErrorSamples } = buildAnalysisSummary(analysisResults)
+  const openAiCandidates = openAiCandidatesResult.data ?? []
+  const openAiResults = await analyzeReviewsInBatches(openAiCandidates)
+  const openAiSummary = buildAnalysisSummary(openAiResults)
+  const analysisErrors = [...directSummary.analysisErrors, ...openAiSummary.analysisErrors]
+  const analysisErrorSamples = Array.from(new Set([
+    ...directSummary.analysisErrorSamples,
+    ...openAiSummary.analysisErrorSamples,
+  ])).slice(0, 5)
 
   return {
     success: true,
-    pending_found: count ?? analysisCandidates.length,
-    processed: analysisCandidates.length,
-    analyzed,
+    pending_found: directCandidatesResult.count ?? directCandidates.length,
+    processed: directCandidates.length + openAiCandidates.length,
+    direct_matched: directSummary.analyzed,
+    ai_analyzed: openAiSummary.analyzed,
+    analyzed: directSummary.analyzed + openAiSummary.analyzed,
     analysis_errors: analysisErrors,
     analysis_error_samples: analysisErrorSamples,
   }
