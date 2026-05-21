@@ -188,21 +188,29 @@ export function buildReviewBoardSummary({
       mentionCounts.set(employee.id, (mentionCounts.get(employee.id) ?? 0) + 1)
     }
 
-    if (!review.matched_employee_id) continue
-    const employee = employees.find(item => item.id === review.matched_employee_id)
-    if (!employee) continue
+    const matchedEmployeeIds = review.matched_employee_ids ?? []
+    const assignedEmployeeIds = matchedEmployeeIds.length > 0
+      ? matchedEmployeeIds
+      : review.matched_employee_id
+        ? [review.matched_employee_id]
+        : []
 
-    const existing = leaderboard.get(employee.id) ?? {
-      employee,
-      reviewCount: 0,
-      reviewPoints: 0,
-      ratingTotal: 0,
+    for (const employeeId of Array.from(new Set(assignedEmployeeIds))) {
+      const employee = employees.find(item => item.id === employeeId)
+      if (!employee) continue
+
+      const existing = leaderboard.get(employee.id) ?? {
+        employee,
+        reviewCount: 0,
+        reviewPoints: 0,
+        ratingTotal: 0,
+      }
+
+      existing.reviewCount += 1
+      existing.reviewPoints += review.points
+      existing.ratingTotal += review.rating
+      leaderboard.set(employee.id, existing)
     }
-
-    existing.reviewCount += 1
-    existing.reviewPoints += review.points
-    existing.ratingTotal += review.rating
-    leaderboard.set(employee.id, existing)
   }
 
   const categorySummary: ReviewCategorySummaryItem[] = (Object.keys(REVIEW_CATEGORY_LABELS) as ReviewCategory[])

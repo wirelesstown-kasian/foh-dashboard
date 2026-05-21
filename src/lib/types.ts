@@ -165,6 +165,7 @@ export interface GoogleReview {
   categories: ReviewCategory[]
   staff_mentions: string[]
   matched_employee_id: string | null
+  matched_employee_ids: string[]
   confidence: number | null
   reason: string | null
   attribution_status: ReviewAttributionStatus
@@ -174,6 +175,7 @@ export interface GoogleReview {
   created_at: string
   updated_at: string
   matched_employee?: Employee | null
+  matched_employees?: Employee[]
   assigned_by_employee?: Employee | null
 }
 
@@ -182,6 +184,8 @@ export interface ReviewAssignment {
   review_id: string
   previous_employee_id: string | null
   next_employee_id: string | null
+  previous_employee_ids: string[]
+  next_employee_ids: string[]
   assigned_by_employee_id: string | null
   assignment_method: string
   note: string | null

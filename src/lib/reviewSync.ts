@@ -48,7 +48,7 @@ export async function syncGoogleReviews() {
 
   const existingResult = await supabaseAdmin
     .from('google_reviews')
-    .select('google_review_id, matched_employee_id, confidence, reason, attribution_status, assigned_method, assigned_by_employee_id, categories, staff_mentions')
+    .select('google_review_id, matched_employee_id, matched_employee_ids, confidence, reason, attribution_status, assigned_method, assigned_by_employee_id, categories, staff_mentions')
 
   if (existingResult.error) {
     throw Object.assign(new Error(normalizeSetupError(existingResult.error).message), {
@@ -68,6 +68,11 @@ export async function syncGoogleReviews() {
     return {
       ...row,
       matched_employee_id: existing.matched_employee_id ?? null,
+      matched_employee_ids: Array.isArray(existing.matched_employee_ids)
+        ? existing.matched_employee_ids
+        : existing.matched_employee_id
+          ? [existing.matched_employee_id]
+          : row.matched_employee_ids,
       confidence: existing.confidence ?? null,
       reason: existing.reason ?? null,
       attribution_status: existing.attribution_status ?? 'unassigned',
@@ -81,7 +86,7 @@ export async function syncGoogleReviews() {
   const { error, data } = await supabaseAdmin
     .from('google_reviews')
     .upsert(rowsToUpsert, { onConflict: 'google_review_id' })
-    .select('id, google_review_id, matched_employee_id, attribution_status, assigned_method')
+    .select('id, google_review_id, matched_employee_id, matched_employee_ids, attribution_status, assigned_method')
 
   if (error) {
     throw Object.assign(new Error(normalizeSetupError(error).message), {
@@ -92,7 +97,8 @@ export async function syncGoogleReviews() {
   const analysisCandidates = (data ?? []).filter(review =>
     newGoogleReviewIds.has(review.google_review_id) &&
     review.attribution_status !== 'manual' &&
-    review.matched_employee_id == null
+    review.matched_employee_id == null &&
+    (!Array.isArray(review.matched_employee_ids) || review.matched_employee_ids.length === 0)
   )
 
   const analysisResults = await analyzeReviewsInBatches(analysisCandidates)
@@ -117,6 +123,7 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
     .select('id', { count: 'exact' })
     .neq('attribution_status', 'manual')
     .is('matched_employee_id', null)
+    .eq('matched_employee_ids', '{}')
     .order('review_date', { ascending: false })
     .limit(Math.max(safeLimit, 250))
 
@@ -135,6 +142,7 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
     .select('id', { count: 'exact' })
     .neq('attribution_status', 'manual')
     .is('matched_employee_id', null)
+    .eq('matched_employee_ids', '{}')
     .or('assigned_method.is.null,assigned_method.in.(business_profile_sync,google_places_sync,manager_clear)')
     .order('review_date', { ascending: false })
     .limit(safeLimit)

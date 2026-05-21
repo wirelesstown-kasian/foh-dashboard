@@ -40,9 +40,14 @@ function normalizeStringArray(value: unknown) {
 }
 
 export function normalizeReviewRow(row: ReviewRow, employees: Employee[]): GoogleReview {
-  const matchedEmployee = row.matched_employee_id
-    ? employees.find(employee => employee.id === row.matched_employee_id) ?? null
-    : null
+  const matchedEmployeeIds = normalizeStringArray(row.matched_employee_ids)
+  if (row.matched_employee_id && !matchedEmployeeIds.includes(row.matched_employee_id)) {
+    matchedEmployeeIds.unshift(row.matched_employee_id)
+  }
+  const matchedEmployees = matchedEmployeeIds
+    .map(employeeId => employees.find(employee => employee.id === employeeId) ?? null)
+    .filter((employee): employee is Employee => employee !== null)
+  const matchedEmployee = matchedEmployees[0] ?? null
   const assignedByEmployee = row.assigned_by_employee_id
     ? employees.find(employee => employee.id === row.assigned_by_employee_id) ?? null
     : null
@@ -52,7 +57,9 @@ export function normalizeReviewRow(row: ReviewRow, employees: Employee[]): Googl
     sentiment: row.sentiment as ReviewSentiment | null,
     categories: normalizeCategories(row.categories),
     staff_mentions: normalizeStringArray(row.staff_mentions),
+    matched_employee_ids: matchedEmployeeIds,
     matched_employee: matchedEmployee,
+    matched_employees: matchedEmployees,
     assigned_by_employee: assignedByEmployee,
   }
 }

@@ -11,13 +11,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Employee, GoogleReview } from '@/lib/types'
 
 interface AssignReviewDialogProps {
@@ -26,7 +19,7 @@ interface AssignReviewDialogProps {
   employees: Employee[]
   submitting: boolean
   onClose: () => void
-  onSubmit: (employeeId: string | null, note: string) => Promise<void> | void
+  onSubmit: (employeeIds: string[], note: string) => Promise<void> | void
 }
 
 export function AssignReviewDialog({
@@ -37,11 +30,22 @@ export function AssignReviewDialog({
   onClose,
   onSubmit,
 }: AssignReviewDialogProps) {
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(review?.matched_employee_id ?? 'unassigned')
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>(() => {
+    if ((review?.matched_employee_ids ?? []).length > 0) return review!.matched_employee_ids
+    return review?.matched_employee_id ? [review.matched_employee_id] : []
+  })
   const [note, setNote] = useState(review?.reason ?? '')
-  const selectedEmployeeName = selectedEmployeeId === 'unassigned'
-    ? 'Unassigned'
-    : employees.find(employee => employee.id === selectedEmployeeId)?.name ?? 'Select staff member'
+  const selectedEmployeeNames = selectedEmployeeIds
+    .map(employeeId => employees.find(employee => employee.id === employeeId)?.name ?? null)
+    .filter((name): name is string => name !== null)
+
+  const toggleEmployee = (employeeId: string) => {
+    setSelectedEmployeeIds(current => (
+      current.includes(employeeId)
+        ? current.filter(id => id !== employeeId)
+        : [...current, employeeId]
+    ))
+  }
 
   return (
     <Dialog open={open} onOpenChange={nextOpen => { if (!nextOpen) onClose() }}>
@@ -61,19 +65,37 @@ export function AssignReviewDialog({
 
           <div className="space-y-2">
             <label className="text-sm font-semibold text-slate-700">Assigned Staff</label>
-            <Select value={selectedEmployeeId} onValueChange={value => setSelectedEmployeeId(value ?? 'unassigned')}>
-              <SelectTrigger className="h-11 w-full text-sm">
-                <SelectValue>{selectedEmployeeName}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
+            <div className="rounded-xl border border-slate-200 p-2">
+              <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                {selectedEmployeeNames.length > 0 ? selectedEmployeeNames.join(', ') : 'Unassigned'}
+              </div>
+              <div className="max-h-64 space-y-1 overflow-y-auto">
                 {employees.map(employee => (
-                  <SelectItem key={employee.id} value={employee.id}>
-                    {employee.name}
-                  </SelectItem>
+                  <label
+                    key={employee.id}
+                    className="flex min-h-10 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedEmployeeIds.includes(employee.id)}
+                      onChange={() => toggleEmployee(employee.id)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    <span>{employee.name}</span>
+                  </label>
                 ))}
-              </SelectContent>
-            </Select>
+              </div>
+              {selectedEmployeeIds.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 h-9 text-sm"
+                  onClick={() => setSelectedEmployeeIds([])}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -93,7 +115,7 @@ export function AssignReviewDialog({
           </Button>
           <Button
             className="h-11 min-w-28"
-            onClick={() => onSubmit(selectedEmployeeId === 'unassigned' ? null : selectedEmployeeId, note)}
+            onClick={() => onSubmit(selectedEmployeeIds, note)}
             disabled={submitting}
           >
             {submitting ? 'Saving...' : 'Save Assignment'}

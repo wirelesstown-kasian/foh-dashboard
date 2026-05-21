@@ -18,7 +18,15 @@ export async function PATCH(
   }
 
   const { id } = await params
-  const { employee_id, note } = await req.json() as { employee_id?: string | null; note?: string }
+  const { employee_id, employee_ids, note } = await req.json() as {
+    employee_id?: string | null
+    employee_ids?: string[]
+    note?: string
+  }
+  const requestedEmployeeIds = Array.from(new Set(
+    (Array.isArray(employee_ids) ? employee_ids : employee_id ? [employee_id] : [])
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+  ))
 
   const reviewResult = await supabaseAdmin
     .from('google_reviews')
@@ -30,31 +38,38 @@ export async function PATCH(
     return NextResponse.json({ error: reviewResult.error?.message ?? 'Review not found' }, { status: 404 })
   }
 
-  let employeeName: string | null = null
-  if (employee_id) {
+  let employeeNames: string[] = []
+  if (requestedEmployeeIds.length > 0) {
     const employeeResult = await supabaseAdmin
       .from('employees')
       .select('id, name')
-      .eq('id', employee_id)
+      .in('id', requestedEmployeeIds)
       .eq('is_active', true)
-      .single()
 
-    if (employeeResult.error || !employeeResult.data) {
-      return NextResponse.json({ error: employeeResult.error?.message ?? 'Employee not found' }, { status: 404 })
+    if (employeeResult.error) {
+      return NextResponse.json({ error: employeeResult.error.message }, { status: 404 })
     }
-    employeeName = employeeResult.data.name
+
+    const employeesById = new Map((employeeResult.data ?? []).map(employee => [employee.id, employee.name]))
+    const missingEmployeeId = requestedEmployeeIds.find(employeeId => !employeesById.has(employeeId))
+    if (missingEmployeeId) {
+      return NextResponse.json({ error: `Employee not found: ${missingEmployeeId}` }, { status: 404 })
+    }
+    employeeNames = requestedEmployeeIds.map(employeeId => employeesById.get(employeeId)!)
   }
 
+  const primaryEmployeeId = requestedEmployeeIds[0] ?? null
   const updatePayload = {
-    matched_employee_id: employee_id ?? null,
-    confidence: employee_id ? 100 : null,
+    matched_employee_id: primaryEmployeeId,
+    matched_employee_ids: requestedEmployeeIds,
+    confidence: requestedEmployeeIds.length > 0 ? 100 : null,
     reason: typeof note === 'string' && note.trim()
       ? note.trim()
-      : employee_id
+      : requestedEmployeeIds.length > 0
         ? 'Manager assignment override'
         : 'Manager cleared assignment',
-    attribution_status: employee_id ? 'manual' : 'unassigned',
-    assigned_method: employee_id ? 'manager_override' : 'manager_clear',
+    attribution_status: requestedEmployeeIds.length > 0 ? 'manual' : 'unassigned',
+    assigned_method: requestedEmployeeIds.length > 0 ? 'manager_override' : 'manager_clear',
     assigned_by_employee_id: session.employeeId,
     points: reviewPointsFromRating(reviewResult.data.rating),
     updated_at: new Date().toISOString(),
@@ -74,9 +89,15 @@ export async function PATCH(
   const auditResult = await supabaseAdmin.from('review_assignments').insert({
     review_id: id,
     previous_employee_id: reviewResult.data.matched_employee_id,
-    next_employee_id: employee_id ?? null,
+    previous_employee_ids: Array.isArray(reviewResult.data.matched_employee_ids)
+      ? reviewResult.data.matched_employee_ids
+      : reviewResult.data.matched_employee_id
+        ? [reviewResult.data.matched_employee_id]
+        : [],
+    next_employee_id: primaryEmployeeId,
+    next_employee_ids: requestedEmployeeIds,
     assigned_by_employee_id: session.employeeId,
-    assignment_method: employee_id ? 'manual_override' : 'clear_assignment',
+    assignment_method: requestedEmployeeIds.length > 0 ? 'manual_override' : 'clear_assignment',
     note: typeof note === 'string' && note.trim() ? note.trim() : null,
   })
 
@@ -99,6 +120,7 @@ export async function PATCH(
   return NextResponse.json({
     success: true,
     review: normalized,
-    assigned_employee_name: employeeName,
+    assigned_employee_name: employeeNames[0] ?? null,
+    assigned_employee_names: employeeNames,
   })
 }

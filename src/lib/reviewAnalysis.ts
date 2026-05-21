@@ -6,6 +6,7 @@ type GoogleReviewRow = {
   review_date: string
   rating: number
   matched_employee_id: string | null
+  matched_employee_ids?: string[] | null
   attribution_status: string
 }
 
@@ -19,7 +20,9 @@ export interface ReviewAnalysisResult {
   success: true
   review_id: string
   matched_employee_id: string | null
+  matched_employee_ids: string[]
   matched_employee_name: string | null
+  matched_employee_names: string[]
   confidence: number
   attribution_status: 'auto_match' | 'ai_estimate' | 'unassigned'
   sentiment: 'positive' | 'neutral' | 'negative' | null
@@ -35,6 +38,7 @@ type ReviewAnalysisInput = {
 
 type OpenAiAnalysisResult = {
   matched_employee_id: string | null
+  matched_employee_ids: string[]
   confidence: number
   reason: string
   sentiment: 'positive' | 'neutral' | 'negative'
@@ -112,6 +116,7 @@ function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): O
 
   return {
     matched_employee_id: primaryMention.employee.id,
+    matched_employee_ids: orderedMentions.map(item => item.employee.id),
     confidence: primaryMention.confidence,
     reason: `Review directly mentions ${staffMentions.join(', ')}.`,
     sentiment: 'positive',
@@ -132,6 +137,10 @@ const openAiSchema = {
           { type: 'string' },
           { type: 'null' },
         ],
+      },
+      matched_employee_ids: {
+        type: 'array',
+        items: { type: 'string' },
       },
       confidence: {
         type: 'integer',
@@ -155,27 +164,39 @@ const openAiSchema = {
         items: { type: 'string' },
       },
     },
-    required: ['matched_employee_id', 'confidence', 'reason', 'sentiment', 'categories', 'staff_mentions'],
+    required: ['matched_employee_id', 'matched_employee_ids', 'confidence', 'reason', 'sentiment', 'categories', 'staff_mentions'],
   },
 } as const
 
 function getAttributionStatus(result: OpenAiAnalysisResult): 'auto_match' | 'ai_estimate' | 'unassigned' {
-  if (result.matched_employee_id && result.confidence >= 90) return 'auto_match'
-  if (result.matched_employee_id && result.confidence >= 70) return 'ai_estimate'
+  if (result.matched_employee_ids.length > 0 && result.confidence >= 90) return 'auto_match'
+  if (result.matched_employee_ids.length > 0 && result.confidence >= 70) return 'ai_estimate'
   return 'unassigned'
 }
 
 function getAssignedMethod(result: OpenAiAnalysisResult) {
-  if (result.matched_employee_id && result.confidence >= 90) return 'openai_auto_match'
-  if (result.matched_employee_id && result.confidence >= 70) return 'openai_estimate'
+  if (result.matched_employee_ids.length > 0 && result.confidence >= 90) return 'openai_auto_match'
+  if (result.matched_employee_ids.length > 0 && result.confidence >= 70) return 'openai_estimate'
   return 'openai_unassigned'
+}
+
+function normalizeMatchedEmployeeIds(analysis: OpenAiAnalysisResult, roster: RosterEmployee[]) {
+  const rosterIds = new Set(roster.map(employee => employee.id))
+  const ids = [
+    ...(Array.isArray(analysis.matched_employee_ids) ? analysis.matched_employee_ids : []),
+    analysis.matched_employee_id,
+  ]
+
+  return Array.from(new Set(
+    ids.filter((employeeId): employeeId is string => typeof employeeId === 'string' && rosterIds.has(employeeId))
+  ))
 }
 
 async function getReviewAnalysisInput(reviewId: string): Promise<ReviewAnalysisInput> {
   const [reviewResult, rosterResult] = await Promise.all([
     supabaseAdmin
       .from('google_reviews')
-      .select('id, review_text, review_date, rating, matched_employee_id, attribution_status')
+      .select('id, review_text, review_date, rating, matched_employee_id, matched_employee_ids, attribution_status')
       .eq('id', reviewId)
       .single(),
     supabaseAdmin
@@ -207,13 +228,22 @@ async function saveReviewAnalysis(
   roster: RosterEmployee[],
   analysis: OpenAiAnalysisResult
 ): Promise<ReviewAnalysisResult> {
-  const attributionStatus = getAttributionStatus(analysis)
-  const assignedMethod = getAssignedMethod(analysis)
+  const matchedEmployeeIds = normalizeMatchedEmployeeIds(analysis, roster)
+  const primaryEmployeeId = matchedEmployeeIds[0] ?? null
+  const normalizedAnalysis = {
+    ...analysis,
+    matched_employee_id: primaryEmployeeId,
+    matched_employee_ids: matchedEmployeeIds,
+  }
+  const attributionStatus = getAttributionStatus(normalizedAnalysis)
+  const assignedMethod = getAssignedMethod(normalizedAnalysis)
+  const assignedEmployeeIds = attributionStatus === 'unassigned' ? [] : matchedEmployeeIds
 
   const { error: updateError } = await supabaseAdmin
     .from('google_reviews')
     .update({
-      matched_employee_id: attributionStatus === 'unassigned' ? null : analysis.matched_employee_id,
+      matched_employee_id: assignedEmployeeIds[0] ?? null,
+      matched_employee_ids: assignedEmployeeIds,
       confidence: analysis.confidence,
       reason: analysis.reason,
       sentiment: analysis.sentiment,
@@ -232,10 +262,14 @@ async function saveReviewAnalysis(
   return {
     success: true,
     review_id: reviewId,
-    matched_employee_id: attributionStatus === 'unassigned' ? null : analysis.matched_employee_id,
-    matched_employee_name: analysis.matched_employee_id
-      ? roster.find(emp => emp.id === analysis.matched_employee_id)?.name ?? null
+    matched_employee_id: assignedEmployeeIds[0] ?? null,
+    matched_employee_ids: assignedEmployeeIds,
+    matched_employee_name: assignedEmployeeIds[0]
+      ? roster.find(emp => emp.id === assignedEmployeeIds[0])?.name ?? null
       : null,
+    matched_employee_names: assignedEmployeeIds
+      .map(employeeId => roster.find(emp => emp.id === employeeId)?.name ?? null)
+      .filter((name): name is string => name !== null),
     confidence: analysis.confidence,
     attribution_status: attributionStatus,
     sentiment: analysis.sentiment,
@@ -276,7 +310,8 @@ async function analyzeWithOpenAI(review: GoogleReviewRow, roster: RosterEmployee
           content: [
             'You analyze restaurant reviews and attribute them to the most likely front-of-house employee.',
             'Use only the review text, star rating, and the provided staff roster.',
-            'If there is no reliable match, return matched_employee_id as null.',
+            'If multiple staff members are clearly mentioned, return every matching employee_id in matched_employee_ids and put the first/primary one in matched_employee_id.',
+            'If there is no reliable match, return matched_employee_id as null and matched_employee_ids as an empty array.',
             'Confidence >= 90 means very strong direct evidence such as a clear name mention.',
             'Confidence 70-89 means plausible but still needs manager confirmation.',
             'Below 70 should not auto-assign.',

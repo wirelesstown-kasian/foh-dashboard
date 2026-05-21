@@ -65,6 +65,7 @@ export interface GoogleReviewSyncRow {
   categories: string[]
   staff_mentions: string[]
   matched_employee_id: null
+  matched_employee_ids: string[]
   confidence: null
   reason: null
   attribution_status: 'unassigned'
@@ -200,6 +201,7 @@ export async function fetchAllBusinessProfileReviews(): Promise<{ rows: GoogleRe
         categories: [],
         staff_mentions: [],
         matched_employee_id: null,
+        matched_employee_ids: [],
         confidence: null,
         reason: null,
         attribution_status: 'unassigned',
@@ -285,6 +287,7 @@ export function mapGooglePlaceReviewsToRows(place: GooglePlaceReviewResponse): G
       categories: [],
       staff_mentions: [],
       matched_employee_id: null,
+      matched_employee_ids: [],
       confidence: null,
       reason: null,
       attribution_status: 'unassigned',

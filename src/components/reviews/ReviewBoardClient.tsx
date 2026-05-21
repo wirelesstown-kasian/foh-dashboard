@@ -92,7 +92,10 @@ export function ReviewBoardClient() {
 
   const filteredByRange = filterReviewsByRange(reviews, dateFilter)
   const visibleReviews = activeEmployeeFilter
-    ? filteredByRange.filter(review => review.matched_employee_id === activeEmployeeFilter.employeeId)
+    ? filteredByRange.filter(review => (
+      (review.matched_employee_ids ?? []).includes(activeEmployeeFilter.employeeId) ||
+      review.matched_employee_id === activeEmployeeFilter.employeeId
+    ))
     : filteredByRange
   const activeRangeLabel = resolveReviewDateRange(dateFilter).label
 
@@ -314,7 +317,7 @@ export function ReviewBoardClient() {
     setShowManagerPin(true)
   }
 
-  const handleAssignSubmit = async (employeeId: string | null, note: string) => {
+  const handleAssignSubmit = async (employeeIds: string[], note: string) => {
     if (!assignmentTarget) return
     setAssigning(true)
 
@@ -322,7 +325,7 @@ export function ReviewBoardClient() {
       const res = await fetch(`/api/reviews/${assignmentTarget.id}/assign`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employee_id: employeeId, note }),
+        body: JSON.stringify({ employee_ids: employeeIds, note }),
       })
 
       const payload = (await res.json().catch(() => ({}))) as { error?: string; review?: GoogleReview }

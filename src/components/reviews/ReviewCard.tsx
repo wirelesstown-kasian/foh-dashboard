@@ -47,6 +47,11 @@ interface ReviewCardProps {
 }
 
 export function ReviewCard({ review, onAssign, onSelectEmployee }: ReviewCardProps) {
+  const matchedEmployees = (review.matched_employees ?? []).length > 0
+    ? review.matched_employees ?? []
+    : review.matched_employee
+      ? [review.matched_employee]
+      : []
   const pointsClassName = review.points > 0
     ? 'text-emerald-600'
     : review.points < 0
@@ -83,14 +88,17 @@ export function ReviewCard({ review, onAssign, onSelectEmployee }: ReviewCardPro
         <div className="flex flex-col gap-2 text-sm text-slate-600 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-slate-700">Assigned Staff:</span>
-            {review.matched_employee ? (
-              <button
-                type="button"
-                onClick={() => onSelectEmployee(review.matched_employee!.id)}
-                className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700 transition-colors hover:bg-amber-100"
-              >
-                {review.matched_employee.name}
-              </button>
+            {matchedEmployees.length > 0 ? (
+              matchedEmployees.map(employee => (
+                <button
+                  key={employee.id}
+                  type="button"
+                  onClick={() => onSelectEmployee(employee.id)}
+                  className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700 transition-colors hover:bg-amber-100"
+                >
+                  {employee.name}
+                </button>
+              ))
             ) : (
               <span className="rounded-full bg-orange-50 px-3 py-1 font-semibold text-orange-700">Unassigned</span>
             )}
