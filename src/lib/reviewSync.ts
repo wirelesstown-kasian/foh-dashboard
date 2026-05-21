@@ -122,10 +122,8 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
     .from('google_reviews')
     .select('id', { count: 'exact' })
     .neq('attribution_status', 'manual')
-    .is('matched_employee_id', null)
-    .eq('matched_employee_ids', '{}')
     .order('review_date', { ascending: false })
-    .limit(Math.max(safeLimit, 250))
+    .limit(1000)
 
   if (directCandidatesResult.error) {
     throw Object.assign(new Error(normalizeSetupError(directCandidatesResult.error).message), {

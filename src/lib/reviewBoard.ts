@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { AppSessionPayload, APP_SESSION_COOKIE, parseAppSessionValue } from '@/lib/appAuth'
 import { Employee, GoogleReview, ReviewCategory, ReviewSentiment } from '@/lib/types'
-import { employeeMatchesScheduleDepartment } from '@/lib/organization'
+import { getReviewAssignableEmployees } from '@/lib/reviewEmployees'
 
 type ReviewRow = Omit<GoogleReview, 'matched_employee' | 'assigned_by_employee'>
 
@@ -65,7 +65,7 @@ export function normalizeReviewRow(row: ReviewRow, employees: Employee[]): Googl
 }
 
 export function getReviewBoardEmployees(employees: Employee[]) {
-  return employees.filter(employee => employee.is_active && employeeMatchesScheduleDepartment(employee, 'foh'))
+  return getReviewAssignableEmployees(employees)
 }
 
 export function isReviewBoardSetupMissingError(error: { code?: string | null; message?: string | null; details?: string | null; hint?: string | null } | null | undefined) {

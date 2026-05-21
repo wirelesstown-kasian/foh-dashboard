@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getReviewAssignableEmployees } from '@/lib/reviewEmployees'
 
 type GoogleReviewRow = {
   id: string
@@ -14,6 +15,9 @@ type RosterEmployee = {
   id: string
   name: string
   role: string
+  primary_department?: string
+  email?: string | null
+  is_active: boolean
 }
 
 export interface ReviewAnalysisResult {
@@ -201,7 +205,7 @@ async function getReviewAnalysisInput(reviewId: string): Promise<ReviewAnalysisI
       .single(),
     supabaseAdmin
       .from('employees')
-      .select('id, name, role')
+      .select('id, name, role, primary_department, email, is_active')
       .eq('is_active', true)
       .neq('primary_department', 'boh')
       .order('name'),
@@ -219,7 +223,7 @@ async function getReviewAnalysisInput(reviewId: string): Promise<ReviewAnalysisI
 
   return {
     review,
-    roster: (rosterResult.data ?? []) as RosterEmployee[],
+    roster: getReviewAssignableEmployees((rosterResult.data ?? []) as RosterEmployee[]),
   }
 }
 
