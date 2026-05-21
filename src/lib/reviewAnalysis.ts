@@ -50,12 +50,73 @@ type OpenAiAnalysisResult = {
   staff_mentions: string[]
 }
 
+type ReviewAnalysisCategory = OpenAiAnalysisResult['categories'][number]
+
 type DirectMention = {
   employee: RosterEmployee
   mention: string
   index: number
   confidence: number
 }
+
+const CATEGORY_PATTERNS: Array<[ReviewAnalysisCategory, RegExp[]]> = [
+  ['food', [
+    /\bfood\b/i,
+    /\bdelicious\b/i,
+    /\btasty\b/i,
+    /\bflavou?r\b/i,
+    /\bmeal\b/i,
+    /\bdish(?:es)?\b/i,
+    /\bmenu\b/i,
+    /\bkorean\b/i,
+    /\bkimchi\b/i,
+    /\bspicy\b/i,
+    /\beat(?:ing)?\b/i,
+  ]],
+  ['service', [
+    /\bservice\b/i,
+    /\bstaff\b/i,
+    /\bserver\b/i,
+    /\bserving\b/i,
+    /\bserved\b/i,
+    /\bwaiter\b/i,
+    /\bwaitress\b/i,
+    /\bbartender\b/i,
+    /\bfriendly\b/i,
+    /\battentive\b/i,
+    /\bhelpful\b/i,
+    /\bkind\b/i,
+    /\bwater\b/i,
+  ]],
+  ['wait_time', [
+    /\bwait(?:ed|ing)?\b/i,
+    /\bslow\b/i,
+    /\bquick\b/i,
+    /\bfast\b/i,
+    /\bdelay(?:ed)?\b/i,
+    /\blong time\b/i,
+  ]],
+  ['ambiance', [
+    /\bvibe(?:s)?\b/i,
+    /\batmosphere\b/i,
+    /\bambi[ae]nce\b/i,
+    /\bmusic\b/i,
+    /\bdecor\b/i,
+    /\bclean\b/i,
+    /\bplace\b/i,
+    /\bspot\b/i,
+    /\benvironment\b/i,
+  ]],
+  ['price', [
+    /\bprice(?:d|s)?\b/i,
+    /\bexpensive\b/i,
+    /\bcheap\b/i,
+    /\bvalue\b/i,
+    /\bcost\b/i,
+    /\boverpriced\b/i,
+    /\bworth\b/i,
+  ]],
+]
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -66,6 +127,16 @@ function getEmployeeNameParts(name: string) {
     .split(/\s+/)
     .map(part => part.trim())
     .filter(part => part.length >= 2)
+}
+
+function detectReviewCategories(reviewText: string): ReviewAnalysisCategory[] {
+  return CATEGORY_PATTERNS
+    .filter(([, patterns]) => patterns.some(pattern => pattern.test(reviewText)))
+    .map(([category]) => category)
+}
+
+function uniqueCategories(categories: ReviewAnalysisCategory[]) {
+  return Array.from(new Set(categories))
 }
 
 function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): OpenAiAnalysisResult | null {
@@ -117,6 +188,7 @@ function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): O
   const orderedMentions = mentions.sort((left, right) => left.index - right.index)
   const primaryMention = orderedMentions[0]
   const staffMentions = orderedMentions.map(item => item.mention)
+  const categories = uniqueCategories([...detectReviewCategories(reviewText), 'service'])
 
   return {
     matched_employee_id: primaryMention.employee.id,
@@ -124,7 +196,7 @@ function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): O
     confidence: primaryMention.confidence,
     reason: `Review directly mentions ${staffMentions.join(', ')}.`,
     sentiment: 'positive',
-    categories: ['service'],
+    categories,
     staff_mentions: staffMentions,
   }
 }
@@ -228,10 +300,12 @@ async function getReviewAnalysisInput(reviewId: string): Promise<ReviewAnalysisI
 }
 
 async function saveReviewAnalysis(
+  reviewText: string,
   reviewId: string,
   roster: RosterEmployee[],
   analysis: OpenAiAnalysisResult
 ): Promise<ReviewAnalysisResult> {
+  const categories = uniqueCategories([...analysis.categories, ...detectReviewCategories(reviewText)])
   const matchedEmployeeIds = normalizeMatchedEmployeeIds(analysis, roster)
   const primaryEmployeeId = matchedEmployeeIds[0] ?? null
   const normalizedAnalysis = {
@@ -251,7 +325,7 @@ async function saveReviewAnalysis(
       confidence: analysis.confidence,
       reason: analysis.reason,
       sentiment: analysis.sentiment,
-      categories: analysis.categories,
+      categories,
       staff_mentions: analysis.staff_mentions,
       attribution_status: attributionStatus,
       assigned_method: assignedMethod,
@@ -277,7 +351,7 @@ async function saveReviewAnalysis(
     confidence: analysis.confidence,
     attribution_status: attributionStatus,
     sentiment: analysis.sentiment,
-    categories: analysis.categories,
+    categories,
     staff_mentions: analysis.staff_mentions,
     reason: analysis.reason,
   }
@@ -356,12 +430,12 @@ async function analyzeWithOpenAI(review: GoogleReviewRow, roster: RosterEmployee
 export async function analyzeStoredReview(reviewId: string): Promise<ReviewAnalysisResult> {
   const { review, roster } = await getReviewAnalysisInput(reviewId)
   const analysis = findDirectStaffMention(review.review_text, roster) ?? await analyzeWithOpenAI(review, roster)
-  return saveReviewAnalysis(reviewId, roster, analysis)
+  return saveReviewAnalysis(review.review_text, reviewId, roster, analysis)
 }
 
 export async function analyzeStoredReviewDirectMention(reviewId: string): Promise<ReviewAnalysisResult | null> {
   const { review, roster } = await getReviewAnalysisInput(reviewId)
   const analysis = findDirectStaffMention(review.review_text, roster)
   if (!analysis) return null
-  return saveReviewAnalysis(reviewId, roster, analysis)
+  return saveReviewAnalysis(review.review_text, reviewId, roster, analysis)
 }
