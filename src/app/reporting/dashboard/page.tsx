@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
+import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
@@ -159,15 +159,13 @@ function loadClosedDays() {
 }
 
 function getBucketKey(date: string, period: DashboardPeriod, rangeLength: number) {
-  const parsedDate = toDate(date)
-  if (period === 'yearly' || rangeLength > 90) return format(parsedDate, 'yyyy-MM')
-  if (rangeLength > 21) return toDateKey(startOfWeek(parsedDate, { weekStartsOn: 1 }))
+  if (period === 'yearly' || rangeLength > 90) return format(toDate(date), 'yyyy-MM')
   return date
 }
 
 function getBucketLabel(bucketKey: string, period: DashboardPeriod, rangeLength: number) {
   if (period === 'yearly' || rangeLength > 90) return format(toDate(`${bucketKey}-01`), 'MMM')
-  if (rangeLength > 21) return format(toDate(bucketKey), 'MMM d')
+  if (rangeLength > 14) return format(toDate(bucketKey), 'MMM d')
   return format(toDate(bucketKey), 'EEE d')
 }
 
