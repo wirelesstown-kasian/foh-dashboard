@@ -879,7 +879,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         const response = await fetch('/api/send-schedule-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ week_start: startDate, week_end: endDate }),
+          body: JSON.stringify({ week_start: startDate, week_end: endDate, department }),
         })
         const payload = (await response.json().catch(() => ({}))) as { success?: boolean; sent?: number; error?: string; errors?: string[]; message?: string }
         if (!response.ok || payload.success === false) {

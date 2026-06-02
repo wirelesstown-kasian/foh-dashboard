@@ -11,11 +11,11 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
-import { ShiftClock } from '@/lib/types'
+import { Employee, ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { supabase } from '@/lib/supabase'
@@ -58,6 +58,18 @@ function getErrorMessage(error: unknown, fallback: string) {
     return error.message
   }
   return fallback
+}
+
+function getEmployeeNameById(employees: Employee[], employeeId: string) {
+  return employees.find(employee => employee.id === employeeId)?.name ?? null
+}
+
+function getClockRecordEmployeeName(record: ShiftClock, employees: Employee[]) {
+  const relatedEmployee = record.employee as Employee | Employee[] | undefined
+  if (Array.isArray(relatedEmployee)) {
+    return relatedEmployee[0]?.name ?? getEmployeeNameById(employees, record.employee_id) ?? 'Unknown Staff'
+  }
+  return relatedEmployee?.name ?? getEmployeeNameById(employees, record.employee_id) ?? 'Unknown Staff'
 }
 
 export default function ClockRecordsPage() {
@@ -336,7 +348,9 @@ export default function ClockRecordsPage() {
           onCustomEndChange={setCustomEnd}
           leftSlot={
             <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)}>
-              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-44">
+                <span>{employeeFilter === 'all' ? 'All Staff' : getEmployeeNameById(employees, employeeFilter) ?? 'Unknown Staff'}</span>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Staff</SelectItem>
                 {filteredEmployees.map(employee => (
@@ -372,7 +386,7 @@ export default function ClockRecordsPage() {
           </TableHeader>
           <TableBody>
             {filteredClockRecords.map(record => {
-              const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
+              const employeeName = getClockRecordEmployeeName(record, employees)
               const currentEdit = clockEdits[record.id] ?? {
                 sessionDate: record.session_date,
                 clockIn: isoToTimeInput(record.clock_in_at),
@@ -397,7 +411,7 @@ export default function ClockRecordsPage() {
                       format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')
                     )}
                   </TableCell>
-                  <TableCell>{employee?.name ?? 'Unknown Staff'}</TableCell>
+                  <TableCell>{employeeName}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={record.auto_clock_out ? 'border-orange-300 bg-orange-50 text-orange-800' : record.clock_out_at ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>
                       {record.auto_clock_out ? 'Auto Clock-Out' : record.clock_out_at ? 'Closed' : 'Open'}
@@ -503,7 +517,7 @@ export default function ClockRecordsPage() {
               <Label>Employee</Label>
               <Select value={addHourForm.employeeId} onValueChange={(value: string | null) => value && setAddHourForm(prev => ({ ...prev, employeeId: value }))}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select employee" />
+                  <span>{getEmployeeNameById(filteredEmployees, addHourForm.employeeId) ?? 'Select employee'}</span>
                 </SelectTrigger>
                 <SelectContent>
                   {filteredEmployees.map(employee => (
@@ -566,7 +580,7 @@ export default function ClockRecordsPage() {
           </DialogHeader>
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {deleteTarget
-              ? `${deleteTarget.employee?.name ?? employees.find(item => item.id === deleteTarget.employee_id)?.name ?? 'This employee'} • ${format(new Date(`${deleteTarget.session_date}T12:00:00`), 'MMM d, yyyy')} • ${format(new Date(deleteTarget.clock_in_at), 'p')}`
+              ? `${getClockRecordEmployeeName(deleteTarget, employees)} • ${format(new Date(`${deleteTarget.session_date}T12:00:00`), 'MMM d, yyyy')} • ${format(new Date(deleteTarget.clock_in_at), 'p')}`
               : 'Delete this clock record?'}
           </div>
           <DialogFooter>

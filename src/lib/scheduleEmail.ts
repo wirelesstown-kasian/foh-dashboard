@@ -9,15 +9,34 @@ import {
   sendEmail,
 } from '@/lib/emailUtils'
 import { getEmailSettings } from '@/lib/appSettings'
+import type { ScheduleDepartment } from '@/lib/types'
+
+type ScheduleEmailRow = {
+  date: string
+  start_time: string
+  end_time: string
+  department: ScheduleDepartment | null
+  employee: { id: string; name: string; email: string | null; role: string } | null
+}
+
+function normalizeScheduleDepartment(department: string | null | undefined): ScheduleDepartment {
+  return department === 'boh' ? 'boh' : 'foh'
+}
+
+function formatDepartmentLabel(department: ScheduleDepartment) {
+  return department.toUpperCase()
+}
 
 export async function sendWeeklyScheduleEmails({
   weekStart,
   weekEnd,
   appUrl,
+  department,
 }: {
   weekStart: string
   weekEnd: string
   appUrl: string
+  department?: ScheduleDepartment
 }) {
   const resendKey = process.env.RESEND_API_KEY
   if (!resendKey) throw new Error('RESEND_API_KEY not configured')
@@ -28,39 +47,44 @@ export async function sendWeeklyScheduleEmails({
 
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
-  const { data: schedules, error: schedulesError } = await supabaseAdmin
+  let schedulesQuery = supabaseAdmin
     .from('schedules')
     .select('*, employee:employees(id, name, email, role)')
     .gte('date', weekStart)
     .lte('date', weekEnd)
     .order('date')
 
+  if (department) {
+    schedulesQuery = schedulesQuery.eq('department', department)
+  }
+
+  const { data: schedules, error: schedulesError } = await schedulesQuery
+
   if (schedulesError) {
     throw new Error(`Failed to load schedules: ${schedulesError.message}`)
   }
 
   if (!schedules || schedules.length === 0) {
-    return { success: true, sent: 0, message: 'No schedules to send' }
+    return { success: true, sent: 0, message: `No ${department ? `${formatDepartmentLabel(department)} ` : ''}schedules to send` }
   }
 
   type EmpSchedule = {
+    department: ScheduleDepartment
     employee: { id: string; name: string; email: string | null; role: string }
     shifts: Array<{ date: string; start_time: string; end_time: string }>
   }
   const empMap = new Map<string, EmpSchedule>()
+  const scheduleRows = schedules as ScheduleEmailRow[]
 
-  for (const schedule of schedules as Array<{
-    date: string
-    start_time: string
-    end_time: string
-    employee: { id: string; name: string; email: string | null; role: string } | null
-  }>) {
+  for (const schedule of scheduleRows) {
     if (!schedule.employee) continue
+    const scheduleDepartment = normalizeScheduleDepartment(schedule.department)
     const employeeId = schedule.employee.id
-    if (!empMap.has(employeeId)) {
-      empMap.set(employeeId, { employee: schedule.employee, shifts: [] })
+    const key = `${scheduleDepartment}:${employeeId}`
+    if (!empMap.has(key)) {
+      empMap.set(key, { department: scheduleDepartment, employee: schedule.employee, shifts: [] })
     }
-    empMap.get(employeeId)!.shifts.push({
+    empMap.get(key)!.shifts.push({
       date: schedule.date,
       start_time: schedule.start_time,
       end_time: schedule.end_time,
@@ -68,14 +92,8 @@ export async function sendWeeklyScheduleEmails({
   }
 
   const emailQueue: Array<Parameters<typeof sendEmail>[0]> = []
-  const fohSchedules = (schedules as Array<{
-    date: string
-    start_time: string
-    end_time: string
-    employee: { id: string; name: string; email: string | null; role: string } | null
-  }>).filter(schedule => schedule.employee && schedule.employee.role !== 'kitchen_staff')
 
-  for (const { employee, shifts } of empMap.values()) {
+  for (const { department: scheduleDepartment, employee, shifts } of empMap.values()) {
     if (!employee.email) continue
 
     const totalHours = shifts.reduce((sum, shift) => sum + calcHours(shift.start_time, shift.end_time), 0)
@@ -105,8 +123,12 @@ export async function sendWeeklyScheduleEmails({
       `
     }).join('')
 
-    const fohTeamRows = Array.from(
-      fohSchedules.reduce((map, schedule) => {
+    const departmentSchedules = scheduleRows.filter(schedule =>
+      schedule.employee && normalizeScheduleDepartment(schedule.department) === scheduleDepartment
+    )
+
+    const teamRows = Array.from(
+      departmentSchedules.reduce((map, schedule) => {
         const name = schedule.employee?.name ?? 'Unknown Staff'
         const existing = map.get(name) ?? []
         existing.push(schedule)
@@ -140,7 +162,7 @@ export async function sendWeeklyScheduleEmails({
       }).join('')
 
     const html = renderEmailShell(logoUrl, `
-        <h2 style="color:#1a1a1a;margin-bottom:4px">Your Schedule</h2>
+        <h2 style="color:#1a1a1a;margin-bottom:4px">Your ${formatDepartmentLabel(scheduleDepartment)} Schedule</h2>
         <p style="color:#666;margin-top:0">${weekLabel}</p>
         <p>Hi ${employee.name},</p>
         <p>Here is your weekly calendar:</p>
@@ -155,7 +177,7 @@ export async function sendWeeklyScheduleEmails({
           </tbody>
         </table>
         <div style="margin-top:22px">
-          <h3 style="color:#1a1a1a;margin:0 0 8px">FOH Team Calendar</h3>
+          <h3 style="color:#1a1a1a;margin:0 0 8px">${formatDepartmentLabel(scheduleDepartment)} Team Calendar</h3>
           <table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px">
             <thead>
               <tr>
@@ -169,7 +191,7 @@ export async function sendWeeklyScheduleEmails({
               </tr>
             </thead>
             <tbody>
-              ${fohTeamRows}
+              ${teamRows}
             </tbody>
           </table>
         </div>
@@ -180,7 +202,7 @@ export async function sendWeeklyScheduleEmails({
     emailQueue.push({
       resendKey,
       to: employee.email,
-      subject: `Your Schedule — Week of ${weekStartShort}`,
+      subject: `Your ${formatDepartmentLabel(scheduleDepartment)} Schedule — Week of ${weekStartShort}`,
       html,
       fromName: emailSettings.from_name,
       fromEmail: emailSettings.from_email,
