@@ -201,37 +201,56 @@ function buildSeries(
 function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color?: string }) {
   const values = points.map(point => point.value)
   const max = Math.max(...values, 1)
-  const min = Math.min(...values, 0)
-  const range = max - min || 1
-  const width = 180
-  const height = 48
-  const coords = values.map((value, index) => {
-    const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * width
-    const y = height - ((value - min) / range) * height
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  })
+  const svgWidth = 220
+  const svgHeight = 76
+  const padLeft = 36
+  const padRight = 4
+  const padTop = 4
+  const padBottom = 14
+  const innerWidth = svgWidth - padLeft - padRight
+  const innerHeight = svgHeight - padTop - padBottom
+
+  const toX = (index: number) => padLeft + (values.length <= 1 ? innerWidth / 2 : (index / (values.length - 1)) * innerWidth)
+  const toY = (value: number) => padTop + innerHeight - (value / max) * innerHeight
+  const coords = values.map((value, index) => `${toX(index).toFixed(1)},${toY(value).toFixed(1)}`)
+  const fmtY = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${Math.round(v)}`
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-12 w-full overflow-visible" aria-hidden="true">
-      <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+    <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="h-20 w-full overflow-visible" aria-hidden="true">
+      {([0, 0.5, 1] as const).map((tick, i) => {
+        const y = padTop + innerHeight * tick
+        return (
+          <g key={i}>
+            <line x1={padLeft} x2={svgWidth - padRight} y1={y} y2={y} stroke="#f1f5f9" strokeWidth="1" />
+            <text x={padLeft - 3} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">{fmtY(max * (1 - tick))}</text>
+          </g>
+        )
+      })}
+      <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      {points.length > 0 && (
+        <>
+          <text x={toX(0)} y={svgHeight} textAnchor="start" fontSize="9" fill="#94a3b8">{points[0].label}</text>
+          {points.length > 1 && (
+            <text x={toX(points.length - 1)} y={svgHeight} textAnchor="end" fontSize="9" fill="#94a3b8">{points[points.length - 1].label}</text>
+          )}
+        </>
+      )}
     </svg>
   )
 }
 
-function MainTrendChart({ points, projectedValue }: { points: SeriesPoint[]; projectedValue: number }) {
-  const actualValues = points.reduce<number[]>((values, point) => {
-    const previous = values[values.length - 1] ?? 0
-    return [...values, previous + point.value]
-  }, [])
-  const max = Math.max(...actualValues, projectedValue, 1)
+function MainTrendChart({ points, dailyAverage }: { points: SeriesPoint[]; dailyAverage: number }) {
+  const values = points.map(point => point.value)
+  const max = Math.max(...values, dailyAverage, 1)
   const width = 720
   const height = 260
-  const padX = 26
+  const padLeft = 54
+  const padRight = 12
   const padY = 24
-  const innerWidth = width - padX * 2
+  const innerWidth = width - padLeft - padRight
   const innerHeight = height - padY * 2
-  const coords = actualValues.map((value, index) => {
-    const x = padX + (actualValues.length <= 1 ? 0 : (index / (actualValues.length - 1)) * innerWidth)
+  const coords = values.map((value, index) => {
+    const x = padLeft + (values.length <= 1 ? 0 : (index / (values.length - 1)) * innerWidth)
     const y = padY + innerHeight - (value / max) * innerHeight
     return { x, y }
   })
@@ -239,11 +258,12 @@ function MainTrendChart({ points, projectedValue }: { points: SeriesPoint[]; pro
   const areaPath = coords.length > 0
     ? `${path} L ${coords[coords.length - 1].x.toFixed(1)} ${height - padY} L ${coords[0].x.toFixed(1)} ${height - padY} Z`
     : ''
-  const projectedY = padY + innerHeight - (projectedValue / max) * innerHeight
+  const avgY = padY + innerHeight - (dailyAverage / max) * innerHeight
+  const fmtK = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`
 
   return (
     <div className="rounded-xl border bg-white p-4">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-72 w-full" role="img" aria-label="Net revenue trend chart">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-72 w-full" role="img" aria-label="Daily net revenue chart">
         <defs>
           <linearGradient id="netTrendFill" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#2563eb" stopOpacity="0.22" />
@@ -252,17 +272,22 @@ function MainTrendChart({ points, projectedValue }: { points: SeriesPoint[]; pro
         </defs>
         {[0, 0.25, 0.5, 0.75, 1].map(tick => {
           const y = padY + innerHeight * tick
-          return <line key={tick} x1={padX} x2={width - padX} y1={y} y2={y} stroke="#e5e7eb" strokeWidth="1" />
+          return (
+            <g key={tick}>
+              <line x1={padLeft} x2={width - padRight} y1={y} y2={y} stroke="#e5e7eb" strokeWidth="1" />
+              <text x={padLeft - 6} y={y + 4} textAnchor="end" fontSize="11" fill="#94a3b8">{fmtK(max * (1 - tick))}</text>
+            </g>
+          )
         })}
         {areaPath && <path d={areaPath} fill="url(#netTrendFill)" />}
         {path && <path d={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
-        <line x1={padX} x2={width - padX} y1={projectedY} y2={projectedY} stroke="#f59e0b" strokeDasharray="8 8" strokeWidth="3" />
+        <line x1={padLeft} x2={width - padRight} y1={avgY} y2={avgY} stroke="#f59e0b" strokeDasharray="8 8" strokeWidth="3" />
         {coords.map((point, index) => (
           <circle key={`${points[index]?.date}-${index}`} cx={point.x} cy={point.y} r="4" fill="#2563eb" />
         ))}
         {points.map((point, index) => {
           if (points.length > 14 && index % Math.ceil(points.length / 8) !== 0) return null
-          const x = padX + (points.length <= 1 ? 0 : (index / (points.length - 1)) * innerWidth)
+          const x = padLeft + (points.length <= 1 ? 0 : (index / (points.length - 1)) * innerWidth)
           return (
             <text key={point.date} x={x} y={height - 4} textAnchor="middle" fontSize="11" fill="#64748b">
               {point.label}
@@ -271,8 +296,8 @@ function MainTrendChart({ points, projectedValue }: { points: SeriesPoint[]; pro
         })}
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-2"><span className="h-2 w-8 rounded-full bg-blue-600" />Actual net revenue</span>
-        <span className="inline-flex items-center gap-2"><span className="h-0.5 w-8 border-t-2 border-dashed border-amber-500" />Projected period close</span>
+        <span className="inline-flex items-center gap-2"><span className="h-2 w-8 rounded-full bg-blue-600" />Daily net revenue</span>
+        <span className="inline-flex items-center gap-2"><span className="h-0.5 w-8 border-t-2 border-dashed border-amber-500" />Daily average</span>
       </div>
     </div>
   )
@@ -618,7 +643,7 @@ export default function ReportingDashboardPage() {
               <p className="mt-2 text-xs text-muted-foreground">{reportedOpenDates.length} reported / {openDates.length} open days</p>
             </div>
           </div>
-          <MainTrendChart points={netSeries} projectedValue={projectedNetRevenue} />
+          <MainTrendChart points={netSeries} dailyAverage={dailyAverage} />
         </div>
 
         <div className="rounded-xl border bg-white p-4">
