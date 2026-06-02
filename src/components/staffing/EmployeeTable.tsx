@@ -158,7 +158,7 @@ export function EmployeeTable() {
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
       birth_date: emp.birth_date ?? '',
-      pin: '',
+      pin: emp.pin_code ?? '',
       login_enabled: emp.login_enabled ? 'enabled' : 'disabled',
       login_password: '',
     })
@@ -181,6 +181,10 @@ export function EmployeeTable() {
   const handleSave = async () => {
     if (!form.name.trim()) return
     if (!editTarget && !/^\d{4}$/.test(form.pin)) return
+    if (editTarget && form.pin && !/^\d{4}$/.test(form.pin)) {
+      setSaveError('PIN must be 4 digits')
+      return
+    }
     setSaving(true)
     setSaveError(null)
     try {
@@ -281,6 +285,11 @@ export function EmployeeTable() {
         return a.name.localeCompare(b.name)
     }
   })
+  const canSaveEmployee = Boolean(form.name.trim()) && (
+    editTarget
+      ? form.pin === '' || /^\d{4}$/.test(form.pin)
+      : /^\d{4}$/.test(form.pin)
+  )
 
   return (
     <div>
@@ -499,7 +508,7 @@ export function EmployeeTable() {
               <Input type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))} />
             </div>
             <div>
-              <Label>{editTarget ? 'New PIN (4 digits, leave blank to keep current)' : 'PIN * (4 digits)'}</Label>
+              <Label>{editTarget ? 'PIN (4 digits)' : 'PIN * (4 digits)'}</Label>
               <Input
                 type="text"
                 inputMode="numeric"
@@ -511,7 +520,9 @@ export function EmployeeTable() {
               />
               {editTarget && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Current PIN is stored securely and can&apos;t be viewed. Enter a new 4-digit PIN here to replace it.
+                  {editTarget.pin_code
+                    ? 'This PIN is used for clock-in and must be unique.'
+                    : 'This employee was saved before visible PINs. Enter a 4-digit PIN to keep it visible going forward.'}
                 </p>
               )}
             </div>
@@ -525,7 +536,7 @@ export function EmployeeTable() {
               <Button
                 className="flex-1"
                 onClick={handleSave}
-                disabled={saving || !form.name.trim() || (!editTarget && !/^\d{4}$/.test(form.pin))}
+                disabled={saving || !canSaveEmployee}
               >
                 {saving ? 'Saving…' : editTarget ? 'Save Changes' : 'Add Employee'}
               </Button>

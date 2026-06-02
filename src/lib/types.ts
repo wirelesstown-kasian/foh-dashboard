@@ -15,6 +15,7 @@ export interface Employee {
   phone: string | null
   email: string | null
   pin_hash?: string
+  pin_code?: string | null
   role: EmployeeRole
   primary_department?: PrimaryDepartment
   hourly_wage: number | null
