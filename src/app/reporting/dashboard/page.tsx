@@ -293,11 +293,14 @@ function MainTrendChart({ points, dailyAverage }: { points: SeriesPoint[]; daily
           <circle key={`${visible[index]?.date}-${index}`} cx={point.x} cy={point.y} r="4" fill="#2563eb" />
         ))}
         {visible.map((point, index) => {
-          if (visible.length > 14 && index % Math.ceil(visible.length / 8) !== 0) return null
+          if (visible.length > 18 && index % Math.ceil(visible.length / 18) !== 0) return null
           const x = padLeft + (visible.length <= 1 ? 0 : (index / (visible.length - 1)) * innerWidth)
+          const label = point.date.length === 10 && visible.length > 14
+            ? format(toDate(point.date), 'd')
+            : point.label
           return (
             <text key={point.date} x={x} y={height - 4} textAnchor="middle" fontSize="11" fill="#64748b">
-              {point.label}
+              {label}
             </text>
           )
         })}
