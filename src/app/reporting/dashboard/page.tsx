@@ -197,8 +197,11 @@ function buildSeries(
 }
 
 function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color?: string }) {
-  const values = points.map(point => point.value)
+  const visible = points.filter(p => !(p.closed && p.value === 0))
+  const values = visible.map(p => p.value)
   const max = Math.max(...values, 1)
+  const min = Math.min(...values, 0)
+  const range = max - min || 1
   const svgWidth = 220
   const svgHeight = 76
   const padLeft = 36
@@ -209,27 +212,32 @@ function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color
   const innerHeight = svgHeight - padTop - padBottom
 
   const toX = (index: number) => padLeft + (values.length <= 1 ? innerWidth / 2 : (index / (values.length - 1)) * innerWidth)
-  const toY = (value: number) => padTop + innerHeight - (value / max) * innerHeight
+  const toY = (value: number) => padTop + innerHeight - ((value - min) / range) * innerHeight
   const coords = values.map((value, index) => `${toX(index).toFixed(1)},${toY(value).toFixed(1)}`)
-  const fmtY = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${Math.round(v)}`
+  const fmtY = (v: number) => {
+    if (Math.abs(v) >= 1000) return `${v < 0 ? '-' : ''}$${(Math.abs(v) / 1000).toFixed(Math.abs(v) >= 10000 ? 0 : 1)}k`
+    return `${v < 0 ? '-' : ''}$${Math.abs(Math.round(v))}`
+  }
 
   return (
     <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="h-20 w-full overflow-visible" aria-hidden="true">
-      {([0, 0.5, 1] as const).map((tick, i) => {
-        const y = padTop + innerHeight * tick
+      {[max, (max + min) / 2, min].map((gv, i) => {
+        const y = toY(gv)
         return (
           <g key={i}>
             <line x1={padLeft} x2={svgWidth - padRight} y1={y} y2={y} stroke="#f1f5f9" strokeWidth="1" />
-            <text x={padLeft - 3} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">{fmtY(max * (1 - tick))}</text>
+            <text x={padLeft - 3} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">{fmtY(gv)}</text>
           </g>
         )
       })}
-      <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      {points.length > 0 && (
+      {values.length > 1 && (
+        <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+      {visible.length > 0 && (
         <>
-          <text x={toX(0)} y={svgHeight} textAnchor="start" fontSize="9" fill="#94a3b8">{points[0].label}</text>
-          {points.length > 1 && (
-            <text x={toX(points.length - 1)} y={svgHeight} textAnchor="end" fontSize="9" fill="#94a3b8">{points[points.length - 1].label}</text>
+          <text x={toX(0)} y={svgHeight} textAnchor="start" fontSize="9" fill="#94a3b8">{visible[0].label}</text>
+          {visible.length > 1 && (
+            <text x={toX(visible.length - 1)} y={svgHeight} textAnchor="end" fontSize="9" fill="#94a3b8">{visible[visible.length - 1].label}</text>
           )}
         </>
       )}
@@ -238,7 +246,8 @@ function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color
 }
 
 function MainTrendChart({ points, dailyAverage }: { points: SeriesPoint[]; dailyAverage: number }) {
-  const values = points.map(point => point.value)
+  const visible = points.filter(p => !(p.closed && p.value === 0))
+  const values = visible.map(point => point.value)
   const max = Math.max(...values, dailyAverage, 1)
   const width = 720
   const height = 260
@@ -281,11 +290,11 @@ function MainTrendChart({ points, dailyAverage }: { points: SeriesPoint[]; daily
         {path && <path d={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
         <line x1={padLeft} x2={width - padRight} y1={avgY} y2={avgY} stroke="#f59e0b" strokeDasharray="8 8" strokeWidth="3" />
         {coords.map((point, index) => (
-          <circle key={`${points[index]?.date}-${index}`} cx={point.x} cy={point.y} r="4" fill="#2563eb" />
+          <circle key={`${visible[index]?.date}-${index}`} cx={point.x} cy={point.y} r="4" fill="#2563eb" />
         ))}
-        {points.map((point, index) => {
-          if (points.length > 14 && index % Math.ceil(points.length / 8) !== 0) return null
-          const x = padLeft + (points.length <= 1 ? 0 : (index / (points.length - 1)) * innerWidth)
+        {visible.map((point, index) => {
+          if (visible.length > 14 && index % Math.ceil(visible.length / 8) !== 0) return null
+          const x = padLeft + (visible.length <= 1 ? 0 : (index / (visible.length - 1)) * innerWidth)
           return (
             <text key={point.date} x={x} y={height - 4} textAnchor="middle" fontSize="11" fill="#64748b">
               {point.label}
