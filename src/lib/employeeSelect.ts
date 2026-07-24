@@ -22,7 +22,8 @@ const LEGACY_SCHEDULE_DEPARTMENTS = new Set(['foh', 'boh', 'hybrid'])
 function getScheduleDepartmentFromRole(role: unknown) {
   if (typeof role !== 'string') return null
   if (role === 'kitchen_staff') return 'cook'
-  if (role === 'runner') return 'food_runner'
+  if (role === 'prep' || role === 'dishwasher') return 'kitchen'
+  if (role === 'food_runner' || role === 'runner') return 'server'
   if (role === 'busser') return 'server'
   return role.trim() || null
 }

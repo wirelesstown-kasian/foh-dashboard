@@ -13,7 +13,7 @@ export default function SchedulePage() {
   const scheduleDepartments = useMemo(() => (
     departmentDefinitions.length > 0
       ? departmentDefinitions
-      : [{ key: 'server', label: 'Server' }, { key: 'cook', label: 'Cook' }]
+      : [{ key: 'manager', label: 'Manager' }, { key: 'server', label: 'Server' }, { key: 'cook', label: 'Cook' }, { key: 'kitchen', label: 'Kitchen' }]
   ), [departmentDefinitions])
 
   const selectedDepartment = scheduleDepartments.some(definition => definition.key === department)
