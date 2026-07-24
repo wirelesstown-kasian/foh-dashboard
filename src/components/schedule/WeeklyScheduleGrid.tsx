@@ -77,8 +77,9 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             schedule.employee ?? {
               id: schedule.employee_id,
               name: namesById.get(schedule.employee_id) ?? `Staff ${schedule.employee_id.slice(0, 6)}`,
-              role: department === 'boh' ? 'kitchen_staff' : 'server',
+              role: department,
               primary_department: department,
+              schedule_departments: [department],
               phone: null,
               email: null,
               hourly_wage: null,
