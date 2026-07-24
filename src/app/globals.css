@@ -191,7 +191,8 @@
   }
 
   .schedule-toolbar [data-slot="tabs-trigger"],
-  .schedule-toolbar [data-slot="button"] {
+  .schedule-toolbar [data-slot="button"],
+  .schedule-toolbar [data-slot="select-trigger"] {
     height: 28px;
     padding-inline: 7px;
     font-size: 11px;
