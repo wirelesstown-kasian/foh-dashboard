@@ -60,7 +60,7 @@ interface PayFormState {
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 type DepartmentFilter = string
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', schedule_departments: ['foh'], hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
+const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'server', schedule_departments: ['server'], hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
 const EMPTY_PAY_FORM: PayFormState = { hourly_wage: '', guaranteed_enabled: false, guaranteed_hourly: '', tip_cap_enabled: false, tip_pool_hourly_rate: '' }
 
 function formatPay(value: number | null) {
@@ -143,7 +143,7 @@ export function EmployeeTable() {
   useEffect(() => { load() }, [load])
 
   const openAdd = () => {
-    const firstDepartment = departmentDefinitions[0]?.key ?? 'foh'
+    const firstDepartment = departmentDefinitions.find(department => department.key === 'server')?.key ?? departmentDefinitions[0]?.key ?? 'server'
     setEditTarget(null)
     setForm({ ...EMPTY_FORM, primary_department: firstDepartment, schedule_departments: [firstDepartment] })
     setDialogOpen(true)
