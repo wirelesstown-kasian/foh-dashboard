@@ -29,8 +29,9 @@ import {
 import { Plus, Pencil, Trash2, Gift, CircleDollarSign } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
-import { getDepartmentLabel, getPrimaryDepartmentBadge, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import { getRoleColorTheme, getRoleLabel, getScheduleDepartmentBadges } from '@/lib/organization'
 import { useAppSettings } from '@/components/useAppSettings'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 
 interface FormState {
   name: string
@@ -38,6 +39,7 @@ interface FormState {
   email: string
   role: EmployeeRole
   primary_department: string
+  schedule_departments: string[]
   hourly_wage: string
   guaranteed_hourly: string
   tip_pool_hourly_rate: string
@@ -56,9 +58,9 @@ interface PayFormState {
 }
 
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
-type DepartmentFilter = 'all' | 'foh' | 'boh'
+type DepartmentFilter = string
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
+const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'foh', schedule_departments: ['foh'], hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
 const EMPTY_PAY_FORM: PayFormState = { hourly_wage: '', guaranteed_enabled: false, guaranteed_hourly: '', tip_cap_enabled: false, tip_pool_hourly_rate: '' }
 
 function formatPay(value: number | null) {
@@ -141,19 +143,22 @@ export function EmployeeTable() {
   useEffect(() => { load() }, [load])
 
   const openAdd = () => {
+    const firstDepartment = departmentDefinitions[0]?.key ?? 'foh'
     setEditTarget(null)
-    setForm({ ...EMPTY_FORM })
+    setForm({ ...EMPTY_FORM, primary_department: firstDepartment, schedule_departments: [firstDepartment] })
     setDialogOpen(true)
   }
 
   const openEdit = (emp: Employee) => {
+    const scheduleDepartments = getEmployeeScheduleDepartments(emp)
     setEditTarget(emp)
     setForm({
       name: emp.name,
       phone: emp.phone ?? '',
       email: emp.email ?? '',
       role: emp.role,
-      primary_department: emp.primary_department ?? 'foh',
+      primary_department: scheduleDepartments[0] ?? emp.primary_department ?? 'foh',
+      schedule_departments: scheduleDepartments,
       hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
@@ -180,6 +185,10 @@ export function EmployeeTable() {
 
   const handleSave = async () => {
     if (!form.name.trim()) return
+    if (form.schedule_departments.length === 0) {
+      setSaveError('Select at least one schedule department')
+      return
+    }
     if (!editTarget && !/^\d{4}$/.test(form.pin)) return
     if (editTarget && form.pin && !/^\d{4}$/.test(form.pin)) {
       setSaveError('PIN must be 4 digits')
@@ -195,6 +204,7 @@ export function EmployeeTable() {
           body: JSON.stringify({
             id: editTarget.id,
             ...form,
+            primary_department: form.schedule_departments[0] ?? form.primary_department,
             login_enabled: form.login_enabled === 'enabled',
           }),
         })
@@ -206,6 +216,7 @@ export function EmployeeTable() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...form,
+            primary_department: form.schedule_departments[0] ?? form.primary_department,
             login_enabled: form.login_enabled === 'enabled',
           }),
         })
@@ -233,7 +244,8 @@ export function EmployeeTable() {
           phone: payTarget.phone ?? '',
           email: payTarget.email ?? '',
           role: payTarget.role,
-          primary_department: payTarget.primary_department ?? 'foh',
+          primary_department: getEmployeeScheduleDepartments(payTarget)[0] ?? payTarget.primary_department ?? 'foh',
+          schedule_departments: getEmployeeScheduleDepartments(payTarget),
           birth_date: payTarget.birth_date ?? '',
           pin: '',
           login_enabled: payTarget.login_enabled === true,
@@ -264,7 +276,7 @@ export function EmployeeTable() {
 
   const filtered = employees.filter(employee => {
     const roleMatches = filterRole === 'all' || employee.role === filterRole
-    const departmentMatches = filterDepartment === 'all' || (employee.primary_department ?? 'foh') === filterDepartment
+    const departmentMatches = filterDepartment === 'all' || getEmployeeScheduleDepartments(employee).includes(filterDepartment)
     return roleMatches && departmentMatches
   })
   const sorted = [...filtered].sort((a, b) => {
@@ -291,23 +303,37 @@ export function EmployeeTable() {
       : /^\d{4}$/.test(form.pin)
   )
 
+  const toggleScheduleDepartment = (department: string) => {
+    setForm(currentForm => {
+      const hasDepartment = currentForm.schedule_departments.includes(department)
+      const nextDepartments = hasDepartment
+        ? currentForm.schedule_departments.filter(item => item !== department)
+        : [...currentForm.schedule_departments, department]
+      const normalizedDepartments = nextDepartments.length > 0 ? nextDepartments : currentForm.schedule_departments
+      return {
+        ...currentForm,
+        schedule_departments: normalizedDepartments,
+        primary_department: normalizedDepartments[0] ?? currentForm.primary_department,
+      }
+    })
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div />
         <div className="flex flex-wrap items-center justify-end gap-3">
           <div className="inline-flex h-8 overflow-hidden rounded-lg border bg-background">
-            {([
-              ['all', 'All'],
-              ['foh', 'FOH'],
-              ['boh', 'BOH'],
-            ] as const).map(([value, label]) => (
+            {[
+              { key: 'all', label: 'All' },
+              ...departmentDefinitions.map(department => ({ key: department.key, label: department.label })),
+            ].map(({ key, label }) => (
               <button
-                key={value}
+                key={key}
                 type="button"
-                onClick={() => setFilterDepartment(value)}
+                onClick={() => setFilterDepartment(key)}
                 className={`px-3 text-sm font-medium transition-colors ${
-                  filterDepartment === value
+                  filterDepartment === key
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
@@ -391,7 +417,7 @@ export function EmployeeTable() {
                 </TableCell>
                 <TableCell>{emp.phone ?? '—'}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{emp.email ?? '—'}</TableCell>
-                <TableCell>{getPrimaryDepartmentBadge(emp.primary_department, departmentDefinitions)}</TableCell>
+                <TableCell>{getScheduleDepartmentBadges(emp, departmentDefinitions)}</TableCell>
                 <TableCell>{formatPay(emp.hourly_wage)}</TableCell>
                 <TableCell>{emp.guaranteed_hourly !== null ? `${formatPay(emp.guaranteed_hourly)} on` : 'Off'}</TableCell>
                 <TableCell>{emp.tip_pool_hourly_rate !== null ? `${formatPay(emp.tip_pool_hourly_rate)} on` : 'Off'}</TableCell>
@@ -452,17 +478,31 @@ export function EmployeeTable() {
               <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@email.com" />
             </div>
             <div>
-              <Label>Primary Department</Label>
-              <Select value={form.primary_department} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, primary_department: v }))}>
-                <SelectTrigger>
-                  <span>{getDepartmentLabel(form.primary_department, departmentDefinitions)}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  {departmentDefinitions.map(definition => (
-                    <SelectItem key={definition.key} value={definition.key}>{definition.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Schedule Departments</Label>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {departmentDefinitions.map(definition => {
+                  const checked = form.schedule_departments.includes(definition.key)
+                  return (
+                    <button
+                      key={definition.key}
+                      type="button"
+                      onClick={() => toggleScheduleDepartment(definition.key)}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                        checked
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+                      }`}
+                    >
+                      <span className={`flex h-4 w-4 items-center justify-center rounded border text-[10px] ${
+                        checked ? 'border-white bg-white text-slate-900' : 'border-slate-300 bg-white text-transparent'
+                      }`}>
+                        x
+                      </span>
+                      <span className="font-medium">{definition.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

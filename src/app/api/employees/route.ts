@@ -7,7 +7,15 @@ import { EmployeeRole } from '@/lib/types'
 import { isValidPin } from '@/lib/validation'
 import { hashPassword } from '@/lib/password'
 import { getAppSettings } from '@/lib/appSettings'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn } from '@/lib/employeeSelect'
+import {
+  EMPLOYEE_PUBLIC_SELECT,
+  EMPLOYEE_PUBLIC_SELECT_FALLBACK,
+  EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS,
+  isMissingScheduleDepartmentsColumn,
+  isMissingTipPoolRateColumn,
+  withScheduleDepartments,
+  withTipPoolHourlyRate,
+} from '@/lib/employeeSelect'
 
 const EMPLOYEE_ADMIN_SELECT = `${EMPLOYEE_PUBLIC_SELECT}, pin_code`
 
@@ -34,9 +42,32 @@ async function isValidPrimaryDepartment(primaryDepartment: unknown) {
   return typeof primaryDepartment === 'string' && (await getValidPrimaryDepartments()).includes(primaryDepartment)
 }
 
+async function getValidScheduleDepartments(scheduleDepartments: unknown) {
+  const validDepartments = await getValidPrimaryDepartments()
+  if (Array.isArray(scheduleDepartments)) {
+    const normalized = Array.from(new Set(
+      scheduleDepartments
+        .filter((department): department is string => typeof department === 'string')
+        .map(department => department.trim())
+        .filter(Boolean)
+    ))
+    return normalized.length > 0 && normalized.every(department => validDepartments.includes(department))
+      ? normalized
+      : null
+  }
+
+  return null
+}
+
 function withoutTipPoolHourlyRate<T extends { tip_pool_hourly_rate?: unknown }>(payload: T) {
   const fallbackPayload: Partial<T> = { ...payload }
   delete fallbackPayload.tip_pool_hourly_rate
+  return fallbackPayload
+}
+
+function withoutScheduleDepartments<T extends { schedule_departments?: unknown }>(payload: T) {
+  const fallbackPayload: Partial<T> = { ...payload }
+  delete fallbackPayload.schedule_departments
   return fallbackPayload
 }
 
@@ -113,6 +144,11 @@ async function writeEmployeeWithOptionalFallback(
       continue
     }
 
+    if (isMissingScheduleDepartmentsColumn(result.error) && 'schedule_departments' in nextPayload) {
+      nextPayload = withoutScheduleDepartments(nextPayload)
+      continue
+    }
+
     if (isMissingTipPoolRateColumn(result.error) && 'tip_pool_hourly_rate' in nextPayload) {
       nextPayload = withoutTipPoolHourlyRate(nextPayload)
       continue
@@ -140,7 +176,17 @@ export async function GET() {
   if (error && isMissingPinCodeColumn(error)) {
     const fallbackResult = await supabaseAdmin
       .from('employees')
-      .select(EMPLOYEE_PUBLIC_SELECT)
+      .select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS)
+      .eq('is_active', true)
+      .order('name')
+    data = fallbackResult.data as unknown[] | null
+    error = fallbackResult.error
+  }
+
+  if (error && isMissingScheduleDepartmentsColumn(error)) {
+    const fallbackResult = await supabaseAdmin
+      .from('employees')
+      .select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS)
       .eq('is_active', true)
       .order('name')
     data = fallbackResult.data as unknown[] | null
@@ -161,7 +207,7 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ employees: data ?? [] })
+  return NextResponse.json({ employees: withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[])) })
 }
 
 export async function POST(req: NextRequest) {
@@ -169,14 +215,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
+  const { name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
   if (!(await isValidRole(role))) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   }
-  if (!(await isValidPrimaryDepartment(primary_department))) {
+  const normalizedScheduleDepartments = await getValidScheduleDepartments(schedule_departments)
+  if (!normalizedScheduleDepartments) {
+    return NextResponse.json({ error: 'Select at least one valid schedule department' }, { status: 400 })
+  }
+  const primaryDepartment = typeof primary_department === 'string' && primary_department.trim()
+    ? primary_department.trim()
+    : normalizedScheduleDepartments[0]
+  if (!(await isValidPrimaryDepartment(primaryDepartment))) {
     return NextResponse.json({ error: 'Invalid primary department' }, { status: 400 })
   }
   if (!isValidPin(pin)) {
@@ -218,7 +271,8 @@ export async function POST(req: NextRequest) {
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null,
     role,
-    primary_department,
+    primary_department: primaryDepartment,
+    schedule_departments: normalizedScheduleDepartments,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
@@ -243,7 +297,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, role, primary_department, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
+  const { id, name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -253,7 +307,14 @@ export async function PATCH(req: NextRequest) {
   if (!(await isValidRole(role))) {
     return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   }
-  if (!(await isValidPrimaryDepartment(primary_department))) {
+  const normalizedScheduleDepartments = await getValidScheduleDepartments(schedule_departments)
+  if (!normalizedScheduleDepartments) {
+    return NextResponse.json({ error: 'Select at least one valid schedule department' }, { status: 400 })
+  }
+  const primaryDepartment = typeof primary_department === 'string' && primary_department.trim()
+    ? primary_department.trim()
+    : normalizedScheduleDepartments[0]
+  if (!(await isValidPrimaryDepartment(primaryDepartment))) {
     return NextResponse.json({ error: 'Invalid primary department' }, { status: 400 })
   }
   if (login_enabled === true && !(typeof email === 'string' && email.trim())) {
@@ -283,6 +344,7 @@ export async function PATCH(req: NextRequest) {
     email: string | null
     role: EmployeeRole
     primary_department: string
+    schedule_departments: string[]
     hourly_wage: number | null
     guaranteed_hourly: number | null
     tip_pool_hourly_rate: number | null
@@ -296,7 +358,8 @@ export async function PATCH(req: NextRequest) {
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null,
     role,
-    primary_department,
+    primary_department: primaryDepartment,
+    schedule_departments: normalizedScheduleDepartments,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,

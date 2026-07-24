@@ -1,7 +1,7 @@
 export type EmployeeRole = string
 export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
 export type SessionPhase = 'register_open' | 'pre_shift' | 'operation' | 'closing' | 'complete'
-export type ScheduleDepartment = 'foh' | 'boh'
+export type ScheduleDepartment = string
 export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
 export type TaskCompletionStatus = 'complete' | 'incomplete'
 export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
@@ -18,6 +18,7 @@ export interface Employee {
   pin_code?: string | null
   role: EmployeeRole
   primary_department?: PrimaryDepartment
+  schedule_departments?: string[]
   hourly_wage: number | null
   guaranteed_hourly: number | null
   tip_pool_hourly_rate: number | null

@@ -182,7 +182,7 @@ export default function RolesDepartmentsPage() {
     <div className="p-6">
       <AdminSubpageHeader
         title="Roles & Departments"
-        subtitle="Manage role labels and the primary department choices used across Staffing, Reporting, Schedule, and Today’s Staff."
+        subtitle="Manage role labels and schedule department choices used across Staffing, Reporting, Schedule, and Today’s Staff."
       />
 
       {loading ? (
@@ -269,8 +269,8 @@ export default function RolesDepartmentsPage() {
                 <Building2 className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold">Primary Departments</h2>
-                <p className="text-sm text-muted-foreground">Change the department name and description used throughout staffing and scheduling.</p>
+                <h2 className="text-lg font-semibold">Schedule Departments</h2>
+                <p className="text-sm text-muted-foreground">Change the department tabs used to group staff on the planner and published schedule.</p>
               </div>
             </div>
             <div className="space-y-3">
@@ -307,7 +307,7 @@ export default function RolesDepartmentsPage() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                `foh` and `boh` keep the operational tabs consistent. `hybrid` lets a person appear as a fallback in both schedule filters while still being grouped cleanly on the dashboard.
+                Staff can be assigned to more than one department from Staffing. They appear in each selected department schedule.
               </p>
             </div>
           </div>

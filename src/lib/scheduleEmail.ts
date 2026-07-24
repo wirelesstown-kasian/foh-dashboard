@@ -20,7 +20,7 @@ type ScheduleEmailRow = {
 }
 
 function normalizeScheduleDepartment(department: string | null | undefined): ScheduleDepartment {
-  return department === 'boh' ? 'boh' : 'foh'
+  return department?.trim() || 'foh'
 }
 
 function formatDepartmentLabel(department: ScheduleDepartment) {

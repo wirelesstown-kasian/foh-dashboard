@@ -11,8 +11,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 interface WeeklyScheduleGridProps {
   department: ScheduleDepartment
@@ -20,7 +20,7 @@ interface WeeklyScheduleGridProps {
 }
 
 export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGridProps) {
-  const { roleDefinitions } = useAppSettings()
+  const { roleDefinitions, departmentDefinitions } = useAppSettings()
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -44,7 +44,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
         : initial
       return {
         ...result,
-        data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+        data: withScheduleDepartments(withTipPoolHourlyRate(result.data ?? [])) as Employee[],
       }
     }
 
@@ -130,11 +130,12 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
   const renderedDays = visibleDays.length > 0 ? visibleDays : days
   const totalWeekHours = days.reduce((sum, day) => sum + getDayTotal(formatDate(day)), 0)
   const totalShifts = schedules.length
+  const departmentLabel = getDepartmentLabel(department, departmentDefinitions)
 
   const exportDepartmentPdf = () => {
     if (days.length === 0) return
 
-    const title = `${department.toUpperCase()} Schedule`
+    const title = `${departmentLabel} Schedule`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = employees.map(employee => {
       const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
@@ -227,10 +228,10 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
   }
 
   return (
-    <div className="space-y-2">
+    <div className="schedule-view space-y-2">
       <div className="overflow-x-auto rounded-[18px] border border-slate-300 bg-white px-3.5 py-2 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
-        <div className="flex min-w-max items-center gap-3 whitespace-nowrap">
-          {/* 1. FOH / BOH */}
+        <div className="schedule-toolbar flex min-w-max items-center gap-3 whitespace-nowrap">
+          {/* 1. Department tabs */}
           {rightSlot}
           {/* 2. Today's Week */}
           <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
@@ -241,7 +242,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <h1 className="min-w-48 text-center pt-0.5 text-base font-semibold tracking-tight text-slate-900">
+            <h1 className="schedule-week-label min-w-48 text-center pt-0.5 text-base font-semibold tracking-tight text-slate-900">
               {formatWeekRange(weekRef)}
             </h1>
             <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
@@ -271,8 +272,8 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
       {loading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-[24px] border border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
-          <table className="w-full min-w-[980px] text-[16px]">
+        <div className="schedule-table-wrap overflow-x-auto rounded-[24px] border border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
+          <table className="schedule-table w-full min-w-[980px] text-[16px]">
             <thead className="bg-slate-800 text-white">
               <tr>
                 <th className="sticky left-0 z-10 text-left p-3.5 font-semibold text-[15px] w-40 border-b border-slate-700 bg-slate-900">Employee</th>

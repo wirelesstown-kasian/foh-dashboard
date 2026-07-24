@@ -8,7 +8,7 @@ const adminCards = [
   { label: 'Task Admin', href: '/task-admin', icon: ClipboardList, description: 'Manage task categories and daily assignments' },
   { label: 'Staffing', href: '/staffing', icon: Users, description: 'Manage employees, roles, PINs, and app logins' },
   { label: 'Schedule Planner', href: '/schedule-planning', icon: CalendarDays, description: 'Build and publish weekly schedules' },
-  { label: 'Roles & Departments', href: '/roles-departments', icon: BriefcaseBusiness, description: 'Manage employee role labels and primary departments' },
+  { label: 'Roles & Departments', href: '/roles-departments', icon: BriefcaseBusiness, description: 'Manage employee role labels and schedule departments' },
   { label: 'Reporting', href: '/reporting', icon: BarChart3, description: 'View EOD reports and analytics' },
   { label: 'Email Settings', href: '/email-settings', icon: MailCheck, description: 'Control sender details and email triggers' },
 ]
