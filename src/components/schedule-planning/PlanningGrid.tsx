@@ -381,9 +381,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       end_time: s.end_time,
     }))
 
-    const hasServerDraftWeek = !!draftWeekRes.data && !draftWeekRes.error
-    const hasServerDrafts = (draftRes.data?.length ?? 0) > 0
-    const canUseServerDrafts = (hasServerDraftWeek || hasServerDrafts) && !draftRes.error
+    const serverDraftRows = (draftRes.data ?? []) as Array<ShiftDraft & { id?: string }>
+    const hasDepartmentServerDrafts = serverDraftRows.length > 0
 
     if (draftWeekRes.error || draftRes.error) {
       setServerDraftsReady(false)
@@ -392,13 +391,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     }
 
     let nextDrafts: ShiftDraft[] = published
-    if (published.length > 0) {
-      nextDrafts = published
-      setDrafts(published)
-      setIsDirty(false)
-      localStorage.setItem(key, JSON.stringify(published))
-    } else if (canUseServerDrafts && isEditableWeek) {
-      const serverDrafts = ((draftRes.data ?? []) as Array<ShiftDraft & { id?: string }>).map(draft => ({
+    if (hasDepartmentServerDrafts && isEditableWeek) {
+      const serverDrafts = serverDraftRows.map(draft => ({
         id: draft.id,
         employee_id: draft.employee_id,
         date: draft.date,
@@ -411,6 +405,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       setDrafts(serverDrafts)
       setIsDirty(!matchesPublishedSchedule(serverDrafts, published))
       localStorage.setItem(key, JSON.stringify(serverDrafts))
+    } else if (published.length > 0) {
+      nextDrafts = published
+      setDrafts(published)
+      setIsDirty(false)
+      localStorage.setItem(key, JSON.stringify(published))
     } else if (saved && isEditableWeek) {
       nextDrafts = JSON.parse(saved) as ShiftDraft[]
       setDrafts(nextDrafts)

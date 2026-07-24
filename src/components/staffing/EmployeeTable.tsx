@@ -396,7 +396,7 @@ export function EmployeeTable() {
               <TableHead>Birthday</TableHead>
               <TableHead>PIN</TableHead>
               <TableHead>App Login</TableHead>
-              <TableHead className="w-24">Actions</TableHead>
+              <TableHead className="w-28 min-w-28 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -432,15 +432,15 @@ export function EmployeeTable() {
                     {emp.login_enabled ? 'Enabled' : 'Disabled'}
                   </Badge>
                 </TableCell>
-                <TableCell>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => openPayStructure(emp)} title="Pay structure">
+                <TableCell className="w-28 min-w-28 pr-2">
+                  <div className="grid grid-cols-3 justify-end gap-1">
+                    <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openPayStructure(emp)} title="Pay structure">
                       <CircleDollarSign className="w-4 h-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(emp)}>
+                    <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openEdit(emp)} title="Edit employee">
                       <Pencil className="w-4 h-4" />
                     </Button>
-                    <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(emp)}>
+                    <Button size="icon-sm" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDelete(emp)} title="Delete employee">
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>

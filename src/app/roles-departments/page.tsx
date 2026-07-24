@@ -204,22 +204,22 @@ export default function RolesDepartmentsPage() {
               </div>
             </div>
             <div className="overflow-hidden rounded-lg border">
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
+              <div className="grid grid-cols-[minmax(0,1fr)_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
                 <span>Name</span>
-                <span>Description</span>
-                <span>Key</span>
+                <span className="hidden sm:block">Description</span>
+                <span className="hidden sm:block">Key</span>
                 <span />
               </div>
               {roles.map(role => (
-                <div key={role.key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] items-center gap-2 border-t px-3 py-2">
+                <div key={role.key} className="grid grid-cols-[minmax(0,1fr)_32px] items-center gap-2 border-t px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
                   <Input className="min-w-0" value={role.label} onChange={(event) => updateRole(role.key, event.target.value)} />
                   <Input
-                    className="min-w-0"
+                    className="hidden min-w-0 sm:flex"
                     value={role.description ?? ''}
                     onChange={(event) => updateRoleDescription(role.key, event.target.value)}
                     placeholder="Description"
                   />
-                  <span className="min-w-0 truncate font-mono text-[11px] text-slate-500" title={role.key}>{role.key}</span>
+                  <span className="hidden min-w-0 truncate font-mono text-[11px] text-slate-500 sm:block" title={role.key}>{role.key}</span>
                   <Button
                     type="button"
                     variant="ghost"
@@ -258,22 +258,22 @@ export default function RolesDepartmentsPage() {
               </div>
             </div>
             <div className="overflow-hidden rounded-lg border">
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
+              <div className="grid grid-cols-[minmax(0,1fr)_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
                 <span>Name</span>
-                <span>Description</span>
-                <span>Key</span>
+                <span className="hidden sm:block">Description</span>
+                <span className="hidden sm:block">Key</span>
                 <span />
               </div>
               {departments.map(department => (
-                <div key={department.key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] items-center gap-2 border-t px-3 py-2">
+                <div key={department.key} className="grid grid-cols-[minmax(0,1fr)_32px] items-center gap-2 border-t px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
                   <Input className="min-w-0" value={department.label} onChange={(event) => updateDepartment(department.key, event.target.value)} />
                   <Input
-                    className="min-w-0"
+                    className="hidden min-w-0 sm:flex"
                     value={department.description ?? ''}
                     onChange={(event) => updateDepartmentDescription(department.key, event.target.value)}
                     placeholder="Description"
                   />
-                  <span className="min-w-0 truncate font-mono text-[11px] text-slate-500" title={department.key}>{department.key}</span>
+                  <span className="hidden min-w-0 truncate font-mono text-[11px] text-slate-500 sm:block" title={department.key}>{department.key}</span>
                   <Button
                     type="button"
                     variant="ghost"

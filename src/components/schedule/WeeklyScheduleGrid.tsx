@@ -274,7 +274,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
         <p className="text-muted-foreground">Loading…</p>
       ) : (
         <div className="schedule-table-wrap overflow-x-auto rounded-[24px] border border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
-          <table className="schedule-table w-full min-w-[980px] text-[16px]">
+          <table className="schedule-table w-full min-w-[980px] table-fixed text-[16px]">
             <thead className="bg-slate-800 text-white">
               <tr>
                 <th className="sticky left-0 z-10 text-left p-3.5 font-semibold text-[15px] w-40 border-b border-slate-700 bg-slate-900">Employee</th>
@@ -315,8 +315,8 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                             </div>
                           ) : (
                             shifts.map((s, i) => (
-                              <div key={i} className="mb-2 rounded-xl border p-2.5 text-sm" style={roleTheme.shiftCardStyle}>
-                                <div className="whitespace-nowrap font-semibold text-[14px] text-slate-900">
+                              <div key={i} className="schedule-shift-card mb-2 rounded-xl border p-2.5 text-sm" style={roleTheme.shiftCardStyle}>
+                                <div className="schedule-shift-time font-semibold text-[14px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>
                                 <div className="mt-1 text-[13px] text-slate-600">{formatHours(calcHours(s.start_time, s.end_time))}</div>

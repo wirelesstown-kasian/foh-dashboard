@@ -205,24 +205,25 @@
 
   .schedule-table-wrap {
     border-radius: 12px;
-    overflow-x: visible;
+    overflow: hidden;
   }
 
   .schedule-table {
     min-width: 0;
     table-layout: fixed;
-    font-size: 11px;
+    font-size: 10.5px;
   }
 
   .schedule-table th,
   .schedule-table td {
-    padding: 5px;
+    padding: 4px;
+    overflow-wrap: anywhere;
   }
 
   .schedule-table th:first-child,
   .schedule-table td:first-child {
-    width: 88px;
-    min-width: 88px;
+    width: 76px;
+    min-width: 76px;
   }
 
   .schedule-table th:not(:first-child),
@@ -236,6 +237,18 @@
 
   .schedule-table .rounded-xl {
     border-radius: 6px;
+  }
+
+  .schedule-table .schedule-shift-card {
+    margin-bottom: 4px;
+    padding: 5px;
+  }
+
+  .schedule-table .schedule-shift-time {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 10px;
+    line-height: 1.15;
   }
 }
 
