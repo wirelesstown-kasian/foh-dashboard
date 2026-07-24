@@ -203,27 +203,28 @@ export default function RolesDepartmentsPage() {
                 <p className="text-sm text-muted-foreground">Role labels used for staff records and reporting.</p>
               </div>
             </div>
-            <div className="overflow-x-auto rounded-lg border">
-              <div className="grid min-w-[680px] grid-cols-[minmax(120px,1fr)_minmax(180px,1.5fr)_120px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
+            <div className="overflow-hidden rounded-lg border">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
                 <span>Name</span>
                 <span>Description</span>
                 <span>Key</span>
                 <span />
               </div>
               {roles.map(role => (
-                <div key={role.key} className="grid min-w-[680px] grid-cols-[minmax(120px,1fr)_minmax(180px,1.5fr)_120px_44px] items-center gap-2 border-t px-3 py-2">
-                  <Input value={role.label} onChange={(event) => updateRole(role.key, event.target.value)} />
+                <div key={role.key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] items-center gap-2 border-t px-3 py-2">
+                  <Input className="min-w-0" value={role.label} onChange={(event) => updateRole(role.key, event.target.value)} />
                   <Input
+                    className="min-w-0"
                     value={role.description ?? ''}
                     onChange={(event) => updateRoleDescription(role.key, event.target.value)}
                     placeholder="Description"
                   />
-                  <span className="truncate font-mono text-xs text-slate-500">{role.key}</span>
+                  <span className="min-w-0 truncate font-mono text-[11px] text-slate-500" title={role.key}>{role.key}</span>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    className="text-red-600 hover:text-red-700"
+                    className="justify-self-center text-red-600 hover:text-red-700"
                     disabled={role.key === 'manager'}
                     onClick={() => removeRole(role.key)}
                   >
@@ -233,6 +234,7 @@ export default function RolesDepartmentsPage() {
               ))}
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-t bg-slate-50 p-3">
                 <Input
+                  className="min-w-0"
                   value={newRole}
                   onChange={(event) => setNewRole(event.target.value)}
                   placeholder="Add a new role name"
@@ -255,27 +257,28 @@ export default function RolesDepartmentsPage() {
                 <p className="text-sm text-muted-foreground">Department choices used for staff assignment and schedule tabs.</p>
               </div>
             </div>
-            <div className="overflow-x-auto rounded-lg border">
-              <div className="grid min-w-[680px] grid-cols-[minmax(120px,1fr)_minmax(180px,1.5fr)_120px_44px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
+            <div className="overflow-hidden rounded-lg border">
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
                 <span>Name</span>
                 <span>Description</span>
                 <span>Key</span>
                 <span />
               </div>
               {departments.map(department => (
-                <div key={department.key} className="grid min-w-[680px] grid-cols-[minmax(120px,1fr)_minmax(180px,1.5fr)_120px_44px] items-center gap-2 border-t px-3 py-2">
-                  <Input value={department.label} onChange={(event) => updateDepartment(department.key, event.target.value)} />
+                <div key={department.key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_72px_32px] items-center gap-2 border-t px-3 py-2">
+                  <Input className="min-w-0" value={department.label} onChange={(event) => updateDepartment(department.key, event.target.value)} />
                   <Input
+                    className="min-w-0"
                     value={department.description ?? ''}
                     onChange={(event) => updateDepartmentDescription(department.key, event.target.value)}
                     placeholder="Description"
                   />
-                  <span className="truncate font-mono text-xs text-slate-500">{department.key}</span>
+                  <span className="min-w-0 truncate font-mono text-[11px] text-slate-500" title={department.key}>{department.key}</span>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    className="text-red-600 hover:text-red-700"
+                    className="justify-self-center text-red-600 hover:text-red-700"
                     disabled={departments.length <= 1}
                     onClick={() => removeDepartment(department.key)}
                   >
@@ -285,6 +288,7 @@ export default function RolesDepartmentsPage() {
               ))}
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-t bg-slate-50 p-3">
                 <Input
+                  className="min-w-0"
                   value={newDepartment}
                   onChange={(event) => setNewDepartment(event.target.value)}
                   placeholder="Add a new department name"
