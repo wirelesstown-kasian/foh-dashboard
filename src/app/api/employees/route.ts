@@ -89,6 +89,38 @@ type PinLookupEmployee = {
   pin_code?: string | null
 }
 
+function getReplacementScheduleDepartment(currentDepartment: string | null | undefined, scheduleDepartments: string[]) {
+  if (currentDepartment === 'kitchen' && scheduleDepartments.includes('cook')) return 'cook'
+  if (currentDepartment === 'cook' && scheduleDepartments.includes('kitchen')) return 'kitchen'
+  return scheduleDepartments[0]
+}
+
+async function reconcileEmployeeScheduleRows(employeeId: string, scheduleDepartments: string[]) {
+  if (scheduleDepartments.length === 0) return
+
+  for (const table of ['schedules', 'schedule_drafts'] as const) {
+    const rowsResult = await supabaseAdmin
+      .from(table)
+      .select('id, department')
+      .eq('employee_id', employeeId)
+
+    if (rowsResult.error) throw new Error(rowsResult.error.message)
+
+    const invalidRows = ((rowsResult.data ?? []) as Array<{ id: string; department: string | null }>)
+      .filter(row => !row.department || !scheduleDepartments.includes(row.department))
+
+    for (const row of invalidRows) {
+      const replacementDepartment = getReplacementScheduleDepartment(row.department, scheduleDepartments)
+      const updateResult = await supabaseAdmin
+        .from(table)
+        .update({ department: replacementDepartment })
+        .eq('id', row.id)
+
+      if (updateResult.error) throw new Error(updateResult.error.message)
+    }
+  }
+}
+
 async function findDuplicatePin(pin: string, currentEmployeeId?: string) {
   const result = await supabaseAdmin
     .from('employees')
@@ -407,6 +439,12 @@ export async function PATCH(req: NextRequest) {
   const error = await writeEmployeeWithOptionalFallback('update', update, id)
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  try {
+    await reconcileEmployeeScheduleRows(id, normalizedScheduleDepartments)
+  } catch (reconcileError) {
+    return NextResponse.json({ error: reconcileError instanceof Error ? reconcileError.message : 'Failed to update employee schedule rows' }, { status: 500 })
   }
 
   return NextResponse.json({ success: true })
