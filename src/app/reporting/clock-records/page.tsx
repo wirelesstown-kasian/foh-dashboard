@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useClockRecords, useEmployees } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
+import { ReportPeriod, getReportRange } from '@/lib/reporting'
 import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { Employee, ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
@@ -76,7 +75,6 @@ export default function ClockRecordsPage() {
   const employees = useEmployees()
   const { clockRecords, setClockRecords } = useClockRecords()
 
-  const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [period, setPeriod] = useState<ReportPeriod>('daily')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
@@ -102,21 +100,18 @@ export default function ClockRecordsPage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
-  const filteredEmployees = useMemo(
-    () => employees.filter(employee => isEmployeeInDepartment(employee, department)),
-    [employees, department]
-  )
+  const filteredEmployees = employees
   const filteredClockRecords = useMemo(
     () =>
       clockRecords
         .filter(record => record.session_date >= startDate && record.session_date <= endDate)
         .filter(record => {
           const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
-          if (!employee || !isEmployeeInDepartment(employee, department)) return false
+          if (!employee) return false
           return employeeFilter === 'all' || employee.id === employeeFilter
         })
         .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)),
-    [clockRecords, department, employeeFilter, employees, endDate, startDate]
+    [clockRecords, employeeFilter, employees, endDate, startDate]
   )
 
   const openAddHourDialog = () => {
@@ -335,7 +330,6 @@ export default function ClockRecordsPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
           period={period}
