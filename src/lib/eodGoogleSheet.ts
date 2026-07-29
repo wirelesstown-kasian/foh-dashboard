@@ -1,5 +1,6 @@
 import { createSign } from 'crypto'
-import type { CashBalanceEntry, EodReport } from '@/lib/types'
+import { getEffectiveClockHours } from '@/lib/clockUtils'
+import type { CashBalanceEntry, EodReport, ShiftClock } from '@/lib/types'
 
 type GoogleSheetsConfig = {
   clientEmail: string
@@ -7,6 +8,8 @@ type GoogleSheetsConfig = {
   spreadsheetId: string
   sheetName: string
   cashLogSheetName: string
+  clockRecordsSheetName: string
+  wageReportSheetName: string
 }
 
 function getConfig(): GoogleSheetsConfig | null {
@@ -15,9 +18,11 @@ function getConfig(): GoogleSheetsConfig | null {
   const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
   const sheetName = process.env.GOOGLE_SHEETS_EOD_SHEET_NAME ?? 'EOD'
   const cashLogSheetName = process.env.GOOGLE_SHEETS_CASH_LOG_SHEET_NAME ?? 'Cash Log'
+  const clockRecordsSheetName = process.env.GOOGLE_SHEETS_CLOCK_RECORDS_SHEET_NAME ?? 'Clock Records'
+  const wageReportSheetName = process.env.GOOGLE_SHEETS_WAGE_REPORT_SHEET_NAME ?? 'Wage Report'
 
   if (!clientEmail || !privateKey || !spreadsheetId) return null
-  return { clientEmail, privateKey, spreadsheetId, sheetName, cashLogSheetName }
+  return { clientEmail, privateKey, spreadsheetId, sheetName, cashLogSheetName, clockRecordsSheetName, wageReportSheetName }
 }
 
 function base64UrlEncode(value: string) {
@@ -90,6 +95,22 @@ async function getSpreadsheetSheetTitles(config: GoogleSheetsConfig, accessToken
   )
 
   return (metadata.sheets ?? []).map(sheet => sheet.properties?.title).filter((title): title is string => Boolean(title))
+}
+
+async function getSpreadsheetSheets(config: GoogleSheetsConfig, accessToken: string) {
+  const metadata = await googleSheetsRequest<{
+    sheets?: Array<{ properties?: { sheetId?: number; title?: string } }>
+  }>(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?fields=sheets.properties(sheetId,title)`,
+    accessToken,
+  )
+
+  return (metadata.sheets ?? [])
+    .map(sheet => ({
+      sheetId: sheet.properties?.sheetId,
+      title: sheet.properties?.title,
+    }))
+    .filter((sheet): sheet is { sheetId: number; title: string } => typeof sheet.sheetId === 'number' && typeof sheet.title === 'string')
 }
 
 async function ensureSheetExists(config: GoogleSheetsConfig, accessToken: string, sheetName: string) {
@@ -216,6 +237,62 @@ async function clearEodSheet(config: GoogleSheetsConfig, accessToken: string) {
       body: JSON.stringify({}),
     }
   )
+}
+
+async function clearSheetColumns(config: GoogleSheetsConfig, accessToken: string, sheetName: string, columns: string) {
+  const resolvedSheetName = await resolveSheetName(config, accessToken, sheetName, [sheetName])
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  await googleSheetsRequest(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodedSheetName}!${columns}:clear`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }
+  )
+}
+
+async function deleteSheetRowByKey(config: GoogleSheetsConfig, accessToken: string, sheetName: string, keyColumn: string, entryKey: string) {
+  const resolvedSheetName = await resolveSheetName(config, accessToken, sheetName, [sheetName])
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  const sheets = await getSpreadsheetSheets(config, accessToken)
+  const sheet = sheets.find(candidate => candidate.title === resolvedSheetName)
+  if (!sheet) return { success: true, skipped: true, reason: 'Sheet not found' }
+
+  const keyColumnValues = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!${keyColumn}2:${keyColumn}`,
+    accessToken,
+  )
+  const rowIndex = (keyColumnValues.values ?? []).findIndex(row => row[0] === entryKey)
+  if (rowIndex < 0) {
+    return { success: true, skipped: true, reason: 'Row not found' }
+  }
+
+  const sheetRowIndex = rowIndex + 1
+  await googleSheetsRequest(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}:batchUpdate`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId: sheet.sheetId,
+                dimension: 'ROWS',
+                startIndex: sheetRowIndex,
+                endIndex: sheetRowIndex + 1,
+              },
+            },
+          },
+        ],
+      }),
+    }
+  )
+
+  return { success: true, skipped: false, action: 'deleted', rowNumber: sheetRowIndex + 1 }
 }
 
 export async function syncEodReportToGoogleSheet(report: EodSheetReport) {
@@ -414,4 +491,222 @@ export async function syncEodCashCountToGoogleSheet(report: {
 
   const action = await upsertCashLogRow(config, accessToken, row, `eod_${report.id}`)
   return { success: true, skipped: false, action }
+}
+
+type ClockSheetRecord = ShiftClock & {
+  employee?: { name?: string | null; role?: string | null } | Array<{ name?: string | null; role?: string | null }> | null
+}
+
+const CLOCK_RECORDS_SHEET_HEADERS = [
+  'Session Date',
+  'Employee',
+  'Role',
+  'Clock In',
+  'Clock Out',
+  'Worked Hours',
+  'Auto Clock Out',
+  'Approval Status',
+  'Manager Note',
+  'Updated At',
+  'Record ID',
+]
+
+function getClockRecordEmployee(record: ClockSheetRecord) {
+  const relatedEmployee = record.employee
+  if (Array.isArray(relatedEmployee)) return relatedEmployee[0] ?? null
+  return relatedEmployee ?? null
+}
+
+function buildClockRecordSheetRow(record: ClockSheetRecord) {
+  const employee = getClockRecordEmployee(record)
+  return [
+    record.session_date,
+    employee?.name ?? '',
+    employee?.role ?? '',
+    record.clock_in_at,
+    record.clock_out_at ?? '',
+    getEffectiveClockHours(record).toFixed(2),
+    record.auto_clock_out ? 'Yes' : 'No',
+    record.approval_status,
+    record.manager_note ?? '',
+    record.updated_at,
+    record.id,
+  ]
+}
+
+async function ensureClockRecordsSheetHeaders(config: GoogleSheetsConfig, accessToken: string) {
+  const resolvedSheetName = await resolveSheetName(config, accessToken, config.clockRecordsSheetName, ['Clock Records'])
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  const headerRange = `${encodedSheetName}!A1:K1`
+  const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(`${baseUrl}/${headerRange}`, accessToken)
+  const currentHeaders = headerCheck.values?.[0] ?? []
+  const headersMatch = CLOCK_RECORDS_SHEET_HEADERS.length === currentHeaders.length && CLOCK_RECORDS_SHEET_HEADERS.every((header, index) => currentHeaders[index] === header)
+
+  if (!headersMatch) {
+    await googleSheetsRequest(
+      `${baseUrl}/${headerRange}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ values: [CLOCK_RECORDS_SHEET_HEADERS] }),
+      }
+    )
+  }
+}
+
+export async function syncClockRecordToGoogleSheet(record: ClockSheetRecord) {
+  const config = getConfig()
+  if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+
+  const accessToken = await getAccessToken(config)
+  const resolvedSheetName = await resolveSheetName(config, accessToken, config.clockRecordsSheetName, ['Clock Records'])
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+
+  await ensureClockRecordsSheetHeaders(config, accessToken)
+
+  const recordIdColumn = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!K2:K`,
+    accessToken,
+  )
+  const existingRowIndex = (recordIdColumn.values ?? []).findIndex(row => row[0] === record.id)
+  const values = [buildClockRecordSheetRow(record)]
+
+  if (existingRowIndex >= 0) {
+    const rowNumber = existingRowIndex + 2
+    await googleSheetsRequest(
+      `${baseUrl}/${encodedSheetName}!A${rowNumber}:K${rowNumber}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ values }),
+      }
+    )
+    return { success: true, skipped: false, action: 'updated', rowNumber }
+  }
+
+  await googleSheetsRequest(
+    `${baseUrl}/${encodedSheetName}!A:K:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({ values }),
+    }
+  )
+
+  return { success: true, skipped: false, action: 'appended' }
+}
+
+export async function removeClockRecordFromGoogleSheet(recordId: string) {
+  const config = getConfig()
+  if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+  const accessToken = await getAccessToken(config)
+  return deleteSheetRowByKey(config, accessToken, config.clockRecordsSheetName, 'K', recordId)
+}
+
+export async function resetClockRecordsSheetInGoogleSheet(records: ClockSheetRecord[]) {
+  const config = getConfig()
+  if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+
+  const accessToken = await getAccessToken(config)
+  const resolvedSheetName = await resolveSheetName(config, accessToken, config.clockRecordsSheetName, ['Clock Records'])
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+
+  await clearSheetColumns(config, accessToken, resolvedSheetName, 'A:K')
+
+  const sortedRecords = [...records].sort((left, right) => {
+    if (left.session_date !== right.session_date) return left.session_date < right.session_date ? 1 : -1
+    return right.clock_in_at.localeCompare(left.clock_in_at)
+  })
+  const values = [CLOCK_RECORDS_SHEET_HEADERS, ...sortedRecords.map(buildClockRecordSheetRow)]
+
+  await googleSheetsRequest(
+    `${baseUrl}/${encodedSheetName}!A1:K?valueInputOption=USER_ENTERED`,
+    accessToken,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ values }),
+    }
+  )
+
+  return { success: true, skipped: false, action: 'reset', rowCount: Math.max(values.length - 1, 0) }
+}
+
+export type WageSheetRow = {
+  periodStart: string
+  periodEnd: string
+  view: string
+  employeeName: string
+  role: string
+  hours: number
+  tips: number
+  tipRate: number | null
+  tipCap: number | null
+  baseWages: number
+  guaranteeTopUp: number
+  totalEarnings: number
+  status: string
+  rowKey: string
+}
+
+const WAGE_REPORT_SHEET_HEADERS = [
+  'Period Start',
+  'Period End',
+  'View',
+  'Employee',
+  'Role',
+  'Hours',
+  'Tips',
+  'Tips Per Hour',
+  'Tip Cap',
+  'Base Wages',
+  'Guaranteed Top-Up',
+  'Total Earnings',
+  'Status',
+  'Row Key',
+]
+
+function buildWageReportSheetRow(row: WageSheetRow) {
+  return [
+    row.periodStart,
+    row.periodEnd,
+    row.view,
+    row.employeeName,
+    row.role,
+    row.hours.toFixed(2),
+    row.tips.toFixed(2),
+    row.tipRate !== null ? row.tipRate.toFixed(2) : '',
+    row.tipCap !== null ? row.tipCap.toFixed(2) : '',
+    row.baseWages.toFixed(2),
+    row.guaranteeTopUp.toFixed(2),
+    row.totalEarnings.toFixed(2),
+    row.status,
+    row.rowKey,
+  ]
+}
+
+export async function resetWageReportSheetInGoogleSheet(rows: WageSheetRow[]) {
+  const config = getConfig()
+  if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+
+  const accessToken = await getAccessToken(config)
+  const resolvedSheetName = await resolveSheetName(config, accessToken, config.wageReportSheetName, ['Wage Report'])
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+
+  await clearSheetColumns(config, accessToken, resolvedSheetName, 'A:N')
+
+  const values = [WAGE_REPORT_SHEET_HEADERS, ...rows.map(buildWageReportSheetRow)]
+  await googleSheetsRequest(
+    `${baseUrl}/${encodedSheetName}!A1:N?valueInputOption=USER_ENTERED`,
+    accessToken,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ values }),
+    }
+  )
+
+  return { success: true, skipped: false, action: 'reset', rowCount: Math.max(values.length - 1, 0) }
 }

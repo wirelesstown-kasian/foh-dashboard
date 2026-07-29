@@ -191,6 +191,7 @@ export default function WageReportPage() {
   const [view, setView] = useState<TipReportView>('earnings')
   const [employeeFilter, setEmployeeFilter] = useState('all')
   const [refreshing, setRefreshing] = useState(false)
+  const [sheetSyncing, setSheetSyncing] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null)
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
@@ -446,6 +447,29 @@ export default function WageReportPage() {
     setRefreshing(false)
   }
 
+  const handleSheetSync = async () => {
+    setSheetSyncing(true)
+    setRefreshMessage(null)
+    try {
+      const res = await fetch('/api/wage-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: startDate,
+          end_date: endDate,
+          view,
+        }),
+      })
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; rowCount?: number }
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to sync wage report to Google Sheets')
+      setRefreshMessage(`Wage report synced to Google Sheets${typeof payload.rowCount === 'number' ? ` (${payload.rowCount} rows)` : ''}.`)
+    } catch (error) {
+      setRefreshMessage(error instanceof Error ? error.message : 'Failed to sync wage report to Google Sheets')
+    } finally {
+      setSheetSyncing(false)
+    }
+  }
+
   return (
     <div className="p-6">
       <AdminSubpageHeader
@@ -498,6 +522,9 @@ export default function WageReportPage() {
                   Updated {formatDistanceToNow(lastRefreshedAt, { addSuffix: true })}
                 </span>
               )}
+              <Button variant="outline" size="sm" onClick={handleSheetSync} disabled={sheetSyncing}>
+                {sheetSyncing ? 'Syncing Sheet...' : 'Sync Sheet'}
+              </Button>
               <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
                 {refreshing ? 'Refreshing…' : 'Refresh'}
               </Button>
