@@ -2,14 +2,15 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness } from 'lucide-react'
+import { ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, ReceiptText } from 'lucide-react'
 
 const adminCards = [
   { label: 'Task Admin', href: '/task-admin', icon: ClipboardList, description: 'Manage task categories and daily assignments' },
   { label: 'Staffing', href: '/staffing', icon: Users, description: 'Manage employees, roles, PINs, and app logins' },
   { label: 'Schedule Planner', href: '/schedule-planning', icon: CalendarDays, description: 'Build and publish weekly schedules' },
   { label: 'Roles & Departments', href: '/roles-departments', icon: BriefcaseBusiness, description: 'Manage employee role labels and primary departments' },
-  { label: 'Reporting', href: '/reporting', icon: BarChart3, description: 'View EOD reports and analytics' },
+  { label: 'Sales Analysis', href: '/reporting/eod-history', icon: ReceiptText, description: 'Review sales, tips, deposits, and period totals' },
+  { label: 'Reporting', href: '/reporting', icon: BarChart3, description: 'Open task, wage, clock, and full reporting tools' },
   { label: 'Email Settings', href: '/email-settings', icon: MailCheck, description: 'Control sender details and email triggers' },
 ]
 
@@ -37,7 +38,7 @@ export default function AdminPage() {
           Exit Admin
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {adminCards.map(({ label, href, icon: Icon, description }) => (
           <Link
             key={href}
