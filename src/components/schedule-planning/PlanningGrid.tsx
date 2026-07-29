@@ -817,20 +817,30 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           body: JSON.stringify({ week_start: startDate, week_end: endDate }),
         })
         const payload = (await response.json().catch(() => ({}))) as { success?: boolean; sent?: number; error?: string; errors?: string[]; message?: string }
-        if (!response.ok || payload.success === false) {
-          throw new Error(payload.errors?.join(' ') || payload.error || payload.message || 'Failed to send schedule emails')
+        const emailErrorMessage = payload.errors?.join(' ') || payload.error || payload.message || 'Failed to send schedule emails'
+
+        if (!response.ok && response.status !== 207) {
+          throw new Error(emailErrorMessage)
         }
 
-        const markSentResult = await supabase
-          .from('schedule_publications')
-          .update({ email_sent_at: new Date().toISOString() })
-          .eq('week_start', startDate)
-        if (markSentResult.error) throw markSentResult.error
+        if (response.ok && payload.success !== false) {
+          const markSentResult = await supabase
+            .from('schedule_publications')
+            .update({ email_sent_at: new Date().toISOString() })
+            .eq('week_start', startDate)
+          if (markSentResult.error) throw markSentResult.error
 
-        setPublishFeedback({
-          tone: 'success',
-          message: `Schedule published and emails sent${typeof payload.sent === 'number' ? ` (${payload.sent} sent)` : ''}.`,
-        })
+          setPublishFeedback({
+            tone: 'success',
+            message: `Schedule published and emails sent${typeof payload.sent === 'number' ? ` (${payload.sent} sent)` : ''}.`,
+          })
+        } else {
+          const sentLabel = typeof payload.sent === 'number' ? ` ${payload.sent} email${payload.sent === 1 ? '' : 's'} sent.` : ''
+          setPublishFeedback({
+            tone: 'error',
+            message: `Schedule published, but email delivery was only partially successful.${sentLabel} ${emailErrorMessage}`.trim(),
+          })
+        }
       } else {
         const queuedLabel = scheduledSendAt.toLocaleString('en-US', {
           month: 'short',

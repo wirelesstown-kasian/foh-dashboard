@@ -5,8 +5,6 @@ import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getEmailSettings } from '@/lib/appSettings'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
-import { employeeMatchesScheduleDepartment } from '@/lib/organization'
-import type { Employee } from '@/lib/types'
 
 function formatCurrency(value: number) {
   return `$${value.toFixed(2)}`
@@ -36,11 +34,11 @@ export async function POST(req: NextRequest) {
     employee_id?: string
     start_date?: string
     end_date?: string
-    department?: 'foh' | 'boh'
+    department?: string
     report_html?: string
   }
 
-  if (!employee_id || !start_date || !end_date || !department) {
+  if (!employee_id || !start_date || !end_date) {
     return NextResponse.json({ error: 'Missing performance report email payload' }, { status: 400 })
   }
 
@@ -102,8 +100,7 @@ export async function POST(req: NextRequest) {
   const taskRate = hours > 0 ? taskCount / hours : 0
   const tipRate = hours > 0 ? tips / hours : 0
 
-  const filteredEmployees = ((employees ?? []) as Employee[]).filter(candidate => employeeMatchesScheduleDepartment(candidate, department))
-  const filteredEmployeeIds = new Set(filteredEmployees.map(candidate => candidate.id))
+  const filteredEmployeeIds = new Set((employees ?? []).map(candidate => candidate.id))
   const { data: periodCompletions, error: periodCompletionsError } = await supabaseAdmin
     .from('task_completions')
     .select('employee_id, status')
@@ -141,7 +138,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const baseStats = filteredEmployees.map(candidate => {
+  const baseStats = (employees ?? []).map(candidate => {
     const tasks = (monthCompletions ?? []).filter(completion => completion.employee_id === candidate.id && completion.status !== 'incomplete').length
     const candidateHours = monthHoursByEmp.get(candidate.id) ?? 0
     const totalTips = monthTipsByEmp.get(candidate.id) ?? 0

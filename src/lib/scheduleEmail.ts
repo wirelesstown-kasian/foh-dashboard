@@ -67,7 +67,7 @@ export async function sendWeeklyScheduleEmails({
     })
   }
 
-  const emailPromises: Promise<void>[] = []
+  const emailQueue: Array<() => Promise<void>> = []
   const fohSchedules = (schedules as Array<{
     date: string
     start_time: string
@@ -177,7 +177,7 @@ export async function sendWeeklyScheduleEmails({
     `)
 
     const weekStartShort = weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    emailPromises.push(
+    emailQueue.push(() =>
       sendEmail({
         resendKey,
         to: employee.email,
@@ -190,18 +190,29 @@ export async function sendWeeklyScheduleEmails({
     )
   }
 
-  if (emailPromises.length === 0) {
+  if (emailQueue.length === 0) {
     return { success: true, sent: 0, message: 'No scheduled employees have an email address' }
   }
 
-  const results = await Promise.allSettled(emailPromises)
-  const errors = results
-    .filter(result => result.status === 'rejected')
-    .map(result => (result as PromiseRejectedResult).reason?.message ?? 'Unknown error')
+  // Send sequentially to stay under Resend's 5 requests/second limit.
+  let sent = 0
+  const errors: string[] = []
 
-  if (errors.length > 0) {
-    return { success: false, errors, sent: results.length - errors.length }
+  for (const send of emailQueue) {
+    try {
+      await send()
+      sent++
+      if (sent < emailQueue.length) {
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'Unknown error')
+    }
   }
 
-  return { success: true, sent: results.length }
+  if (errors.length > 0) {
+    return { success: false, errors, sent }
+  }
+
+  return { success: true, sent }
 }

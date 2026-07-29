@@ -3,16 +3,15 @@
 import { useMemo, useState } from 'react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, useScheduledDepartmentIds, useTaskCompletions } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
+import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
@@ -59,7 +58,6 @@ export default function WageReportPage() {
   const { completions } = useTaskCompletions()
   const { roleDefinitions } = useAppSettings()
 
-  const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
@@ -76,18 +74,7 @@ export default function WageReportPage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
-  const scheduledDeptIds = useScheduledDepartmentIds(startDate, endDate)
-  const filteredEmployees = useMemo(
-    () => employees.filter(employee => {
-      const dept = employee.primary_department ?? 'foh'
-      if (dept === 'hybrid') {
-        const scheduled = scheduledDeptIds.get(department)
-        return scheduled && scheduled.size > 0 ? scheduled.has(employee.id) : true
-      }
-      return isEmployeeInDepartment(employee, department)
-    }),
-    [employees, department, scheduledDeptIds]
-  )
+  const filteredEmployees = employees
 
   const monthStart = format(new Date(`${startDate}T12:00:00`), 'yyyy-MM-01')
   const monthEnd = format(new Date(new Date(`${endDate}T12:00:00`).getFullYear(), new Date(`${endDate}T12:00:00`).getMonth() + 1, 0), 'yyyy-MM-dd')
@@ -355,7 +342,6 @@ export default function WageReportPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         {refreshMessage && (
           <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
