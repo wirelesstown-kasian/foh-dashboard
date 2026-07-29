@@ -3,14 +3,16 @@
 import { useMemo, useState } from 'react'
 import { addDays, format, getDay } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
+import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useEmployees, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
+import { useAppSettings } from '@/components/useAppSettings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ReportPeriod, getReportRange } from '@/lib/reporting'
+import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { Task, TaskCompletion, TaskCompletionStatus } from '@/lib/types'
 
 type TaskSummaryRow = {
@@ -36,7 +38,10 @@ export default function TaskDetailPage() {
   const employees = useEmployees()
   const { completions, setCompletions } = useTaskCompletions()
   const tasks = useTasks() as (Task & { category?: { type?: string } })[]
+  const { departmentDefinitions } = useAppSettings()
+  const initialParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
 
+  const [department, setDepartment] = useState<ReportDepartment>(initialParams?.get('department') ?? 'foh')
   const [period, setPeriod] = useState<ReportPeriod>('daily')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
@@ -52,7 +57,17 @@ export default function TaskDetailPage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
-  const filteredEmployees = employees
+  const activeDepartmentKeys = useMemo(
+    () => departmentDefinitions.filter(definition => definition.is_active).map(definition => definition.key),
+    [departmentDefinitions]
+  )
+  const selectedDepartment = activeDepartmentKeys.includes(department)
+    ? department
+    : activeDepartmentKeys[0] ?? department
+  const filteredEmployees = useMemo(
+    () => employees.filter(employee => isEmployeeInDepartment(employee, selectedDepartment)),
+    [employees, selectedDepartment]
+  )
   const filteredTasks = useMemo(() => {
     if (period !== 'daily' || startDate !== endDate) return tasks
     const dayIndex = getDay(new Date(`${startDate}T12:00:00`))
@@ -207,6 +222,7 @@ export default function TaskDetailPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
+      <DepartmentTabs department={selectedDepartment} onChange={setDepartment} />
       <div className="rounded-xl border bg-white p-5">
         {statusMessage && <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{statusMessage}</div>}
         <ReportingToolbar

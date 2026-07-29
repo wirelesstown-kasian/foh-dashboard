@@ -5,6 +5,7 @@ import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getEmailSettings } from '@/lib/appSettings'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { isEmployeeInDepartment } from '@/lib/reporting'
 
 function formatCurrency(value: number) {
   return `$${value.toFixed(2)}`
@@ -100,7 +101,10 @@ export async function POST(req: NextRequest) {
   const taskRate = hours > 0 ? taskCount / hours : 0
   const tipRate = hours > 0 ? tips / hours : 0
 
-  const filteredEmployeeIds = new Set((employees ?? []).map(candidate => candidate.id))
+  const filteredEmployees = (employees ?? []).filter(candidate => (
+    !department || isEmployeeInDepartment(candidate, department)
+  ))
+  const filteredEmployeeIds = new Set(filteredEmployees.map(candidate => candidate.id))
   const { data: periodCompletions, error: periodCompletionsError } = await supabaseAdmin
     .from('task_completions')
     .select('employee_id, status')
@@ -138,7 +142,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const baseStats = (employees ?? []).map(candidate => {
+  const baseStats = filteredEmployees.map(candidate => {
     const tasks = (monthCompletions ?? []).filter(completion => completion.employee_id === candidate.id && completion.status !== 'incomplete').length
     const candidateHours = monthHoursByEmp.get(candidate.id) ?? 0
     const totalTips = monthTipsByEmp.get(candidate.id) ?? 0

@@ -6,6 +6,7 @@ import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useClockRecords, useEmployees } from '@/components/reporting/useReportingData'
+import { useAppSettings } from '@/components/useAppSettings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -45,6 +46,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 export default function ClockRecordsPage() {
   const employees = useEmployees()
   const { clockRecords, setClockRecords } = useClockRecords()
+  const { departmentDefinitions } = useAppSettings()
 
   const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [period, setPeriod] = useState<ReportPeriod>('daily')
@@ -63,9 +65,16 @@ export default function ClockRecordsPage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
+  const activeDepartmentKeys = useMemo(
+    () => departmentDefinitions.filter(definition => definition.is_active).map(definition => definition.key),
+    [departmentDefinitions]
+  )
+  const selectedDepartment = activeDepartmentKeys.includes(department)
+    ? department
+    : activeDepartmentKeys[0] ?? department
   const filteredEmployees = useMemo(
-    () => employees.filter(employee => isEmployeeInDepartment(employee, department)),
-    [employees, department]
+    () => employees.filter(employee => isEmployeeInDepartment(employee, selectedDepartment)),
+    [employees, selectedDepartment]
   )
   const filteredClockRecords = useMemo(
     () =>
@@ -73,11 +82,11 @@ export default function ClockRecordsPage() {
         .filter(record => record.session_date >= startDate && record.session_date <= endDate)
         .filter(record => {
           const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
-          if (!employee || !isEmployeeInDepartment(employee, department)) return false
+          if (!employee || !isEmployeeInDepartment(employee, selectedDepartment)) return false
           return employeeFilter === 'all' || employee.id === employeeFilter
         })
         .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)),
-    [clockRecords, department, employeeFilter, employees, endDate, startDate]
+    [clockRecords, employeeFilter, employees, endDate, selectedDepartment, startDate]
   )
 
   const saveClockAdjustment = async (record: ShiftClock) => {
@@ -226,7 +235,7 @@ export default function ClockRecordsPage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
+      <DepartmentTabs department={selectedDepartment} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
           period={period}
