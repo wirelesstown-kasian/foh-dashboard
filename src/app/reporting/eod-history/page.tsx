@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
+import { PinModal } from '@/components/layout/PinModal'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
+import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import { CashBalanceEntry, Employee, EodReport, ShiftClock } from '@/lib/types'
 import { getCashVariance, getExpectedCashDeposit } from '@/lib/eodVariance'
@@ -37,16 +39,12 @@ function isEodCloserRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
 
-function isTipEligibleRole(role: Employee['role']) {
-  return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
-}
-
 function aggregateClockRowsByEmployee(records: ShiftClock[], employees: Employee[]) {
   const grouped = new Map<string, { employee_id: string; hours_worked: number; start_time: string | null; end_time: string | null }>()
 
   for (const record of records) {
     const employee = employees.find(item => item.id === record.employee_id)
-    if (!employee || !isTipEligibleRole(employee.role)) continue
+    if (!employee || !isTipEligibleEmployee(employee)) continue
 
     const existing = grouped.get(record.employee_id) ?? {
       employee_id: record.employee_id,
@@ -72,6 +70,9 @@ const EMPTY_FORM = {
   closed_by_employee_id: '',
   cash_total: '',
   batch_total: '',
+  net_revenue: '',
+  delivery_payment: '',
+  sales_tax: '',
   cc_tip: '',
   cash_tip: '',
   actual_cash_on_hand: '',
@@ -90,6 +91,63 @@ function getSignedCashAmount(entry: CashBalanceEntry) {
   return entry.entry_type === 'cash_in' ? Number(entry.amount) : Number(entry.amount) * -1
 }
 
+function getDeliveryPayment(report: Pick<EodReport, 'delivery_order_amount'>, audit?: { deliveryPayment: string }) {
+  if (audit && audit.deliveryPayment.trim() !== '') {
+    return Number(audit.deliveryPayment || 0)
+  }
+  return Number(report.delivery_order_amount ?? 0)
+}
+
+function getDisplayBatchTotal(report: Pick<EodReport, 'batch_total' | 'delivery_order_amount'>, audit?: { deliveryPayment: string }) {
+  return Number(report.batch_total ?? 0) - getDeliveryPayment(report, audit)
+}
+
+function CurrencyInput({
+  value,
+  onChange,
+  placeholder,
+  onBlur,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  onBlur?: () => void
+}) {
+  return (
+    <div className="relative mt-1">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+      <Input
+        type="number"
+        step="0.01"
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        className="pl-7"
+      />
+    </div>
+  )
+}
+
+function getTipTotalFromForm(form: { cc_tip: string; cash_tip: string }) {
+  return (Number(form.cc_tip || 0) || 0) + (Number(form.cash_tip || 0) || 0)
+}
+
+function formatDecimalInputValue(value: string) {
+  const trimmed = value.trim()
+  if (trimmed === '') return ''
+  const numericValue = Number(trimmed)
+  if (!Number.isFinite(numericValue)) return ''
+  if (Number.isNaN(numericValue)) return value
+  return numericValue.toFixed(2)
+}
+
+function isFiniteCurrencyInput(value: string) {
+  const trimmed = value.trim()
+  if (trimmed === '') return true
+  return Number.isFinite(Number(trimmed))
+}
+
 export default function EodHistoryPage() {
   const { eodReports } = useEodReports()
   const employees = useEmployees()
@@ -101,12 +159,14 @@ export default function EodHistoryPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [showEditPin, setShowEditPin] = useState(false)
+  const [editPinError, setEditPinError] = useState<string | null>(null)
   const [cashEntryForm, setCashEntryForm] = useState({
     ...EMPTY_CASH_ENTRY_FORM,
     entry_date: format(new Date(), 'yyyy-MM-dd'),
   })
   const [cashEntries, setCashEntries] = useState<CashBalanceEntry[]>([])
-  const [inlineAudit, setInlineAudit] = useState<Record<string, { actualCash: string; varianceNote: string }>>({})
+  const [inlineAudit, setInlineAudit] = useState<Record<string, { actualCash: string; deliveryPayment: string; varianceNote: string }>>({})
   const [auditSavingId, setAuditSavingId] = useState<string | null>(null)
   const [savedAuditIds, setSavedAuditIds] = useState<Set<string>>(new Set())
   const [saveAllRunning, setSaveAllRunning] = useState(false)
@@ -117,6 +177,17 @@ export default function EodHistoryPage() {
 
   useEffect(() => {
     setReports(eodReports)
+    setInlineAudit(current => {
+      const next = { ...current }
+      for (const report of eodReports) {
+        next[report.id] = {
+          actualCash: current[report.id]?.actualCash ?? (report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''),
+          deliveryPayment: current[report.id]?.deliveryPayment ?? (Number(report.delivery_order_amount ?? 0) > 0 ? String(report.delivery_order_amount ?? 0) : ''),
+          varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+        }
+      }
+      return next
+    })
     setSavedAuditIds(current => {
       const next = new Set(current)
       for (const report of eodReports) {
@@ -157,7 +228,8 @@ export default function EodHistoryPage() {
           const tax = Number(report.sales_tax ?? 0)
           return {
             cash: sum.cash + report.cash_total,
-            batch: sum.batch + report.batch_total,
+            batch: sum.batch + getDisplayBatchTotal(report),
+            delivery: sum.delivery + Number(report.delivery_order_amount ?? 0),
             revenue: sum.revenue + report.revenue_total,
             tax: sum.tax + tax,
             tip: sum.tip + report.tip_total,
@@ -166,7 +238,7 @@ export default function EodHistoryPage() {
             variance: sum.variance + Number(report.cash_variance ?? 0),
           }
         },
-        { cash: 0, batch: 0, revenue: 0, tax: 0, tip: 0, net: 0, deposit: 0, variance: 0 }
+        { cash: 0, batch: 0, delivery: 0, revenue: 0, tax: 0, tip: 0, net: 0, deposit: 0, variance: 0 }
       ),
     [filteredEodReports]
   )
@@ -199,6 +271,28 @@ export default function EodHistoryPage() {
     return balances
   }, [currentCarryingCash, filteredCashEntries])
 
+  const editTipTotal = getTipTotalFromForm(form)
+  const editGrossRevenue = (Number(form.cash_total || 0) || 0) + (Number(form.batch_total || 0) || 0)
+  const editNetRevenue = editGrossRevenue - (Number(form.sales_tax || 0) || 0) - editTipTotal
+
+  const syncFormFromBatchInputs = (updater: (current: typeof EMPTY_FORM) => typeof EMPTY_FORM) => {
+    setForm(current => {
+      const next = updater(current)
+      const grossRevenue = (Number(next.cash_total || 0) || 0) + (Number(next.batch_total || 0) || 0)
+      const netRevenue = grossRevenue - (Number(next.sales_tax || 0) || 0) - getTipTotalFromForm(next)
+      return { ...next, net_revenue: String(netRevenue) }
+    })
+  }
+
+  const syncFormFromNetRevenue = (netRevenueValue: string) => {
+    setForm(current => {
+      const next = { ...current, net_revenue: netRevenueValue }
+      const grossRevenue = (Number(netRevenueValue || 0) || 0) + (Number(next.sales_tax || 0) || 0) + getTipTotalFromForm(next)
+      const batchTotal = grossRevenue - (Number(next.cash_total || 0) || 0)
+      return { ...next, batch_total: String(batchTotal) }
+    })
+  }
+
   useEffect(() => {
     setInlineAudit(current => {
       const next = { ...current }
@@ -206,6 +300,7 @@ export default function EodHistoryPage() {
         if (next[report.id]) continue
         next[report.id] = {
           actualCash: report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : '',
+          deliveryPayment: Number(report.delivery_order_amount ?? 0) > 0 ? String(report.delivery_order_amount ?? 0) : '',
           varianceNote: report.variance_note ?? '',
         }
       }
@@ -231,11 +326,14 @@ export default function EodHistoryPage() {
       closed_by_employee_id: report.closed_by_employee_id ?? '',
       cash_total: String(report.cash_total),
       batch_total: String(report.batch_total),
+      net_revenue: String(Number(report.revenue_total ?? 0) - Number(report.sales_tax ?? 0) - Number(report.tip_total ?? 0)),
+      sales_tax: report.sales_tax != null ? String(report.sales_tax) : '',
       cc_tip: String(report.cc_tip),
       cash_tip: String(report.cash_tip),
       actual_cash_on_hand: report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : '',
       variance_note: report.variance_note ?? '',
       memo: report.memo ?? '',
+      delivery_payment: String(report.delivery_order_amount ?? 0),
     })
     setSaveError(null)
     setSaveNotice(null)
@@ -245,6 +343,11 @@ export default function EodHistoryPage() {
   const handleCashEntrySubmit = async () => {
     if (!cashEntryForm.entry_date || !cashEntryForm.description.trim()) {
       setSaveError('Date and description are required for cash in / cash out.')
+      return
+    }
+
+    if (!isFiniteCurrencyInput(cashEntryForm.cash_in_amount) || !isFiniteCurrencyInput(cashEntryForm.cash_out_amount)) {
+      setSaveError('Cash in and cash out amounts must be valid numbers.')
       return
     }
 
@@ -328,9 +431,24 @@ export default function EodHistoryPage() {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = async (editedByName?: string | null) => {
     if (!form.session_date) {
       setSaveError('Session date is required')
+      return
+    }
+
+    const currencyFields = [
+      form.cash_total,
+      form.batch_total,
+      form.net_revenue,
+      form.delivery_payment,
+      form.sales_tax,
+      form.cc_tip,
+      form.cash_tip,
+      form.actual_cash_on_hand,
+    ]
+    if (currencyFields.some(value => !isFiniteCurrencyInput(value))) {
+      setSaveError('All amount fields must be valid numbers.')
       return
     }
 
@@ -341,26 +459,39 @@ export default function EodHistoryPage() {
     try {
       const cashTotal = Number(form.cash_total || 0)
       const batchTotal = Number(form.batch_total || 0)
+      const netRevenue = Number(form.net_revenue || 0)
+      const deliveryPayment = Number(form.delivery_payment || 0)
+      const salesTax = Number(form.sales_tax || 0)
       const ccTip = Number(form.cc_tip || 0)
       const cashTip = Number(form.cash_tip || 0)
+      const tipTotal = ccTip + cashTip
+      const grossRevenue = netRevenue + salesTax + tipTotal
       const actualCashOnHand = Number(form.actual_cash_on_hand || 0)
       const expectedCash = getExpectedCashDeposit(cashTotal, cashTip)
       const cashVariance = getCashVariance(actualCashOnHand, cashTotal, cashTip)
+      const nextMemo = editingReportId
+        ? [
+          form.memo.trim(),
+          editedByName ? `[Edited ${new Date().toLocaleString('en-US')}] by ${editedByName}` : '',
+        ].filter(Boolean).join('\n')
+        : form.memo.trim()
 
       const payload = {
         session_date: form.session_date,
         closed_by_employee_id: form.closed_by_employee_id || null,
         cash_total: cashTotal,
         batch_total: batchTotal,
-        revenue_total: cashTotal + batchTotal,
+        revenue_total: grossRevenue,
+        delivery_order_amount: deliveryPayment,
+        sales_tax: salesTax,
         cc_tip: ccTip,
         cash_tip: cashTip,
-        tip_total: ccTip + cashTip,
+        tip_total: tipTotal,
         cash_deposit: expectedCash,
         actual_cash_on_hand: actualCashOnHand,
         cash_variance: cashVariance,
         variance_note: form.variance_note.trim() || null,
-        memo: form.memo.trim() || null,
+        memo: nextMemo || null,
       }
 
       const query = editingReportId
@@ -389,6 +520,7 @@ export default function EodHistoryPage() {
       const tipResults = calculateTips(ccTip + cashTip, eligibleRows.map(row => ({
         employee_id: row.employee_id,
         hours_worked: row.hours_worked,
+        tip_pool_hourly_rate: employees.find(employee => employee.id === row.employee_id)?.tip_pool_hourly_rate ?? null,
       })))
 
       const deleteTips = await supabase.from('tip_distributions').delete().eq('eod_report_id', reportId)
@@ -458,10 +590,50 @@ export default function EodHistoryPage() {
     }
   }
 
+  const handleEditPinConfirm = async (pin: string) => {
+    setEditPinError(null)
+
+    const response = await fetch('/api/manager-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin }),
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as { error?: string }
+      const message = payload.error ?? 'Manager PIN required'
+      setEditPinError(message)
+      throw new Error(message)
+    }
+
+    const payload = await response.json() as { managerId?: string }
+    const editedByName = employees.find(employee => employee.id === payload.managerId)?.name ?? 'Manager'
+    setShowEditPin(false)
+    await handleSave(editedByName)
+  }
+
+  const handleSaveClick = async () => {
+    if (editingReportId) {
+      setEditPinError(null)
+      setShowEditPin(true)
+      return
+    }
+    await handleSave()
+  }
+
   const handleAuditSave = async (report: EodReport) => {
-    const currentAudit = inlineAudit[report.id] ?? { actualCash: '', varianceNote: '' }
-    if (currentAudit.actualCash.trim() === '') {
-      setSaveError('Actual cash on hand is required.')
+    const currentAudit = inlineAudit[report.id] ?? { actualCash: '', deliveryPayment: '', varianceNote: '' }
+    const hasActualInput = currentAudit.actualCash.trim() !== ''
+    const hasDeliveryInput = currentAudit.deliveryPayment.trim() !== ''
+    const hasNoteInput = currentAudit.varianceNote.trim() !== ''
+
+    if (!hasActualInput && !hasDeliveryInput && !hasNoteInput) {
+      setSaveError('Enter actual cash, delivery payment, or a variance note.')
+      return
+    }
+
+    if (!isFiniteCurrencyInput(currentAudit.actualCash) || !isFiniteCurrencyInput(currentAudit.deliveryPayment)) {
+      setSaveError('Actual cash and delivery payment must be valid numbers.')
       return
     }
 
@@ -470,12 +642,17 @@ export default function EodHistoryPage() {
     setSaveNotice(null)
 
     try {
-      const actualCashOnHand = Number(currentAudit.actualCash || 0)
-      const cashVariance = getCashVariance(actualCashOnHand, Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0))
+      const actualCashOnHand = hasActualInput ? Number(currentAudit.actualCash || 0) : Number(report.actual_cash_on_hand ?? 0)
+      const deliveryPayment = hasDeliveryInput ? Number(currentAudit.deliveryPayment || 0) : Number(report.delivery_order_amount ?? 0)
+      const hasActualCashValue = hasActualInput || Number(report.actual_cash_on_hand ?? 0) > 0
+      const cashVariance = hasActualCashValue
+        ? getCashVariance(actualCashOnHand, Number(report.cash_total ?? 0), Number(report.cash_tip ?? 0))
+        : Number(report.cash_variance ?? 0)
 
       const { error } = await supabase
         .from('eod_reports')
         .update({
+          delivery_order_amount: deliveryPayment,
           actual_cash_on_hand: actualCashOnHand,
           cash_variance: cashVariance,
           variance_note: currentAudit.varianceNote.trim() || null,
@@ -501,21 +678,42 @@ export default function EodHistoryPage() {
       notifyReportingDataChanged()
       setReports(current => current.map(item => item.id === report.id ? {
         ...item,
+        delivery_order_amount: deliveryPayment,
         actual_cash_on_hand: actualCashOnHand,
         cash_variance: cashVariance,
         variance_note: currentAudit.varianceNote.trim() || null,
       } : item))
       setSavedAuditIds(current => new Set([...current, report.id]))
-      setSaveNotice(`Cash audit saved for ${report.session_date}. Variance: ${formatCurrency(cashVariance)}.`)
+      setSaveNotice(
+        hasActualCashValue
+          ? `EOD audit saved for ${report.session_date}. Variance: ${formatCurrency(cashVariance)}.`
+          : `Audit details saved for ${report.session_date}.`
+      )
     } finally {
       setAuditSavingId(null)
     }
   }
 
+  const hasInlineAuditChanges = (report: EodReport) => {
+    const audit = inlineAudit[report.id]
+    if (!audit) return false
+
+    const currentActual = audit.actualCash.trim()
+    const currentDelivery = audit.deliveryPayment.trim()
+    const currentNote = audit.varianceNote.trim()
+
+    const originalActual = report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''
+    const originalDelivery = Number(report.delivery_order_amount ?? 0) > 0 ? String(report.delivery_order_amount ?? 0) : ''
+    const originalNote = (report.variance_note ?? '').trim()
+
+    return currentActual !== originalActual || currentDelivery !== originalDelivery || currentNote !== originalNote
+  }
+
   const handleSaveAll = async () => {
     const pending = filteredEodReports.filter(report => {
       const audit = inlineAudit[report.id]
-      return (audit?.actualCash ?? '').trim() !== '' && !savedAuditIds.has(report.id)
+      const hasValue = (((audit?.actualCash ?? '').trim() !== '') || ((audit?.deliveryPayment ?? '').trim() !== '') || ((audit?.varianceNote ?? '').trim() !== ''))
+      return hasValue && hasInlineAuditChanges(report) && !savedAuditIds.has(report.id)
     })
     if (pending.length === 0) return
     setSaveAllRunning(true)
@@ -663,13 +861,14 @@ export default function EodHistoryPage() {
             <TableRow>
               <TableHead className="w-[92px]">Date</TableHead>
               <TableHead className="w-[88px] text-right">Cash</TableHead>
-              <TableHead className="w-[88px] text-right">Batch</TableHead>
-              <TableHead className="w-[96px] text-right">Revenue</TableHead>
+              <TableHead className="w-[110px] text-right">Batch Total</TableHead>
+              <TableHead className="w-[96px] text-right">Gross Revenue</TableHead>
               <TableHead className="w-[82px] text-right">Tax</TableHead>
               <TableHead className="w-[82px] text-right">Tips</TableHead>
-              <TableHead className="w-[96px] text-right text-emerald-700">Net</TableHead>
+              <TableHead className="w-[96px] text-right text-emerald-700">Net Revenue</TableHead>
               <TableHead className="w-[96px] text-right">Deposit</TableHead>
               <TableHead className="w-[150px]">Actual Cash</TableHead>
+              <TableHead className="w-[150px]">Delivery Payment</TableHead>
               <TableHead className="w-[90px] text-right">Variance</TableHead>
               <TableHead className="w-[180px]">Variance Note</TableHead>
               <TableHead className="w-[120px]">Memo</TableHead>
@@ -678,7 +877,7 @@ export default function EodHistoryPage() {
                   size="sm"
                   className="h-7 px-3 text-xs"
                   onClick={() => void handleSaveAll()}
-                  disabled={saveAllRunning || filteredEodReports.every(r => (inlineAudit[r.id]?.actualCash ?? '').trim() === '' || savedAuditIds.has(r.id))}
+                  disabled={saveAllRunning || filteredEodReports.every(r => !hasInlineAuditChanges(r) || savedAuditIds.has(r.id))}
                 >
                   {saveAllRunning ? 'Saving…' : 'Save All'}
                 </Button>
@@ -690,11 +889,11 @@ export default function EodHistoryPage() {
               <TableRow key={report.id}>
                 <TableCell className="py-2 text-xs font-medium">{format(new Date(`${report.session_date}T12:00:00`), 'MMM d')}</TableCell>
                 <TableCell className="py-2 text-right text-xs">{formatCurrency(report.cash_total)}</TableCell>
-                <TableCell className="py-2 text-right text-xs">{formatCurrency(report.batch_total)}</TableCell>
-                <TableCell className="py-2 text-right text-xs font-semibold">{formatCurrency(report.revenue_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs">{formatCurrency(getDisplayBatchTotal(report, inlineAudit[report.id]))}</TableCell>
+                <TableCell className="py-2 text-right text-xs font-semibold">{formatCurrency(Number(report.revenue_total ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-muted-foreground">{formatCurrency(Number(report.sales_tax ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs text-green-700">{formatCurrency(report.tip_total)}</TableCell>
-                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency(report.revenue_total - Number(report.sales_tax ?? 0) - report.tip_total)}</TableCell>
+                <TableCell className="py-2 text-right text-xs font-semibold text-emerald-700">{formatCurrency(Number(report.revenue_total ?? 0) - Number(report.sales_tax ?? 0) - Number(report.tip_total ?? 0))}</TableCell>
                 <TableCell className="py-2 text-right text-xs">{formatCurrency(report.cash_deposit)}</TableCell>
                 <TableCell className="py-2">
                   <Input
@@ -707,11 +906,54 @@ export default function EodHistoryPage() {
                         ...current,
                         [report.id]: {
                           actualCash: event.target.value,
+                          deliveryPayment: current[report.id]?.deliveryPayment ?? (Number(report.delivery_order_amount ?? 0) > 0 ? String(report.delivery_order_amount ?? 0) : ''),
+                          varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+                        },
+                      }))
+                    }}
+                    onBlur={event => {
+                      const formattedValue = formatDecimalInputValue(event.target.value)
+                      setInlineAudit(current => ({
+                        ...current,
+                        [report.id]: {
+                          actualCash: formattedValue,
+                          deliveryPayment: current[report.id]?.deliveryPayment ?? (Number(report.delivery_order_amount ?? 0) > 0 ? String(report.delivery_order_amount ?? 0) : ''),
                           varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
                         },
                       }))
                     }}
                     placeholder="Actual cash required"
+                    className="h-8 text-xs"
+                  />
+                </TableCell>
+                <TableCell className="py-2">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={inlineAudit[report.id]?.deliveryPayment ?? ''}
+                    onChange={event => {
+                      setSavedAuditIds(current => { const next = new Set(current); next.delete(report.id); return next })
+                      setInlineAudit(current => ({
+                        ...current,
+                        [report.id]: {
+                          actualCash: current[report.id]?.actualCash ?? (report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''),
+                          deliveryPayment: event.target.value,
+                          varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+                        },
+                      }))
+                    }}
+                    onBlur={event => {
+                      const formattedValue = formatDecimalInputValue(event.target.value)
+                      setInlineAudit(current => ({
+                        ...current,
+                        [report.id]: {
+                          actualCash: current[report.id]?.actualCash ?? (report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''),
+                          deliveryPayment: formattedValue,
+                          varianceNote: current[report.id]?.varianceNote ?? report.variance_note ?? '',
+                        },
+                      }))
+                    }}
+                    placeholder="Delivery payment"
                     className="h-8 text-xs"
                   />
                 </TableCell>
@@ -730,6 +972,7 @@ export default function EodHistoryPage() {
                       ...current,
                       [report.id]: {
                         actualCash: current[report.id]?.actualCash ?? (report.actual_cash_on_hand > 0 ? String(report.actual_cash_on_hand) : ''),
+                        deliveryPayment: current[report.id]?.deliveryPayment ?? (Number(report.delivery_order_amount ?? 0) > 0 ? String(report.delivery_order_amount ?? 0) : ''),
                         varianceNote: event.target.value,
                       },
                     }))}
@@ -750,7 +993,15 @@ export default function EodHistoryPage() {
                         Saved
                       </Button>
                     ) : (
-                      <Button size="sm" className="h-7 px-2 text-xs" onClick={() => void handleAuditSave(report)} disabled={auditSavingId === report.id || !(inlineAudit[report.id]?.actualCash ?? '').trim()}>
+                      <Button
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => void handleAuditSave(report)}
+                        disabled={
+                          auditSavingId === report.id ||
+                          !hasInlineAuditChanges(report)
+                        }
+                      >
                         {auditSavingId === report.id ? 'Saving…' : 'Save'}
                       </Button>
                     )}
@@ -760,7 +1011,7 @@ export default function EodHistoryPage() {
             ))}
             {filteredEodReports.length === 0 && (
               <TableRow>
-                <TableCell colSpan={13} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
+                    <TableCell colSpan={14} className="py-6 text-center text-muted-foreground">No EOD reports for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -776,6 +1027,7 @@ export default function EodHistoryPage() {
                 <TableCell className="text-right font-bold text-emerald-700">{formatCurrency(totals.net)}</TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(totals.deposit)}</TableCell>
                 <TableCell />
+                <TableCell className="text-right font-semibold">{formatCurrency(totals.delivery)}</TableCell>
                 <TableCell className={`text-right font-semibold ${totals.variance === 0 ? '' : totals.variance > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(totals.variance)}</TableCell>
                 <TableCell />
                 <TableCell />
@@ -787,7 +1039,7 @@ export default function EodHistoryPage() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingReportId ? 'Edit Manual EOD Entry' : 'Add Manual EOD Entry'}</DialogTitle>
             <DialogDescription>
@@ -812,7 +1064,11 @@ export default function EodHistoryPage() {
                 onValueChange={(value: string | null) => setForm(current => ({ ...current, closed_by_employee_id: value === 'none' ? '' : (value ?? '') }))}
               >
                 <SelectTrigger className="mt-1">
-                  <SelectValue />
+                  <span className={form.closed_by_employee_id ? '' : 'text-muted-foreground'}>
+                    {form.closed_by_employee_id
+                      ? (employees.find(employee => employee.id === form.closed_by_employee_id)?.name ?? 'Unknown staff')
+                      : 'None'}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
@@ -823,68 +1079,80 @@ export default function EodHistoryPage() {
               </Select>
             </div>
             <div>
-              <Label>Cash Total</Label>
-              <Input
-                type="number"
-                step="0.01"
+              <Label>EOD Cash</Label>
+              <CurrencyInput
                 value={form.cash_total}
-                onChange={event => setForm(current => ({ ...current, cash_total: event.target.value }))}
-                className="mt-1"
+                onChange={value => syncFormFromBatchInputs(current => ({ ...current, cash_total: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, cash_total: formatDecimalInputValue(current.cash_total) }))}
+                placeholder="0.00"
               />
             </div>
             <div>
-              <Label>Batch Total</Label>
-              <Input
-                type="number"
-                step="0.01"
+              <Label>Total Batch Amount</Label>
+              <CurrencyInput
                 value={form.batch_total}
-                onChange={event => setForm(current => ({ ...current, batch_total: event.target.value }))}
-                className="mt-1"
+                onChange={value => syncFormFromBatchInputs(current => ({ ...current, batch_total: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, batch_total: formatDecimalInputValue(current.batch_total) }))}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label>Net Revenue</Label>
+              <CurrencyInput
+                value={form.net_revenue}
+                onChange={syncFormFromNetRevenue}
+                onBlur={() => syncFormFromNetRevenue(formatDecimalInputValue(form.net_revenue))}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label>Sales Tax</Label>
+              <CurrencyInput
+                value={form.sales_tax}
+                onChange={value => syncFormFromBatchInputs(current => ({ ...current, sales_tax: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, sales_tax: formatDecimalInputValue(current.sales_tax) }))}
+                placeholder="0.00"
               />
             </div>
             <div>
               <Label>CC Tip</Label>
-              <Input
-                type="number"
-                step="0.01"
+              <CurrencyInput
                 value={form.cc_tip}
-                onChange={event => setForm(current => ({ ...current, cc_tip: event.target.value }))}
-                className="mt-1"
+                onChange={value => syncFormFromBatchInputs(current => ({ ...current, cc_tip: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, cc_tip: formatDecimalInputValue(current.cc_tip) }))}
+                placeholder="0.00"
               />
             </div>
             <div>
               <Label>Cash Tip</Label>
-              <Input
-                type="number"
-                step="0.01"
+              <CurrencyInput
                 value={form.cash_tip}
-                onChange={event => setForm(current => ({ ...current, cash_tip: event.target.value }))}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label>Actual Cash on Hand</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.actual_cash_on_hand}
-                onChange={event => setForm(current => ({ ...current, actual_cash_on_hand: event.target.value }))}
-                className="mt-1"
+                onChange={value => syncFormFromBatchInputs(current => ({ ...current, cash_tip: value }))}
+                onBlur={() => syncFormFromBatchInputs(current => ({ ...current, cash_tip: formatDecimalInputValue(current.cash_tip) }))}
+                placeholder="0.00"
               />
             </div>
           </div>
 
           <div className="rounded-xl border bg-amber-50/60 p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Cash Audit</div>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
+            <div className="mt-3 grid gap-4 md:grid-cols-3">
               <div>
                 <Label>Actual Cash on Hand</Label>
-                <Input
-                  type="number"
-                  step="0.01"
+                <CurrencyInput
                   value={form.actual_cash_on_hand}
-                  onChange={event => setForm(current => ({ ...current, actual_cash_on_hand: event.target.value }))}
-                  className="mt-1"
+                  onChange={value => setForm(current => ({ ...current, actual_cash_on_hand: value }))}
+                  onBlur={() => setForm(current => ({ ...current, actual_cash_on_hand: formatDecimalInputValue(current.actual_cash_on_hand) }))}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <Label>Delivery Payment</Label>
+                <CurrencyInput
+                  value={form.delivery_payment}
+                  onChange={value => setForm(current => ({ ...current, delivery_payment: value }))}
+                  onBlur={() => setForm(current => ({ ...current, delivery_payment: formatDecimalInputValue(current.delivery_payment) }))}
+                  placeholder="0.00"
                 />
               </div>
               <div>
@@ -904,7 +1172,7 @@ export default function EodHistoryPage() {
               </div>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Actual Cash on Hand - (Cash Total + Cash Tip) = Variance
+              Actual Cash on Hand - (EOD Cash + Cash Tip) = Variance
             </p>
           </div>
 
@@ -938,12 +1206,20 @@ export default function EodHistoryPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSaveClick} disabled={saving}>
               {saving ? 'Saving…' : editingReportId ? 'Save Changes' : 'Create Entry'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <PinModal
+        open={showEditPin}
+        title="Approve EOD Edit"
+        description="Enter manager PIN to save these EOD changes"
+        onConfirm={handleEditPinConfirm}
+        onClose={() => { setShowEditPin(false); setEditPinError(null) }}
+        error={editPinError}
+      />
     </div>
   )
 }

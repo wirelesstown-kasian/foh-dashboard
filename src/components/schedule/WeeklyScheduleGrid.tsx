@@ -11,7 +11,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 interface WeeklyScheduleGridProps {
   department: ScheduleDepartment
@@ -19,7 +20,7 @@ interface WeeklyScheduleGridProps {
 }
 
 export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGridProps) {
-  const { roleDefinitions } = useAppSettings()
+  const { roleDefinitions, departmentDefinitions } = useAppSettings()
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -36,9 +37,19 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     setLoading(true)
     const startDate = formatDate(days[0])
     const endDate = formatDate(days[6])
+    const loadEmployees = async () => {
+      const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
+      const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+        ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
+        : initial
+      return {
+        ...result,
+        data: withScheduleDepartments(withTipPoolHourlyRate(result.data ?? [])) as Employee[],
+      }
+    }
 
     const [empRes, schRes, draftRes] = await Promise.all([
-      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+      loadEmployees(),
       supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_drafts').select('employee_id, display_order').eq('week_start', startDate).eq('department', department).order('display_order'),
     ])
@@ -66,12 +77,14 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             schedule.employee ?? {
               id: schedule.employee_id,
               name: namesById.get(schedule.employee_id) ?? `Staff ${schedule.employee_id.slice(0, 6)}`,
-              role: department === 'boh' ? 'kitchen_staff' : 'server',
+              role: department,
               primary_department: department,
+              schedule_departments: [department],
               phone: null,
               email: null,
               hourly_wage: null,
               guaranteed_hourly: null,
+              tip_pool_hourly_rate: null,
               pin_hash: '',
               birth_date: null,
               login_enabled: false,
@@ -118,11 +131,12 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
   const renderedDays = visibleDays.length > 0 ? visibleDays : days
   const totalWeekHours = days.reduce((sum, day) => sum + getDayTotal(formatDate(day)), 0)
   const totalShifts = schedules.length
+  const departmentLabel = getDepartmentLabel(department, departmentDefinitions)
 
   const exportDepartmentPdf = () => {
     if (days.length === 0) return
 
-    const title = `${department.toUpperCase()} Schedule`
+    const title = `${departmentLabel} Schedule`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = employees.map(employee => {
       const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
@@ -215,10 +229,10 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
   }
 
   return (
-    <div className="space-y-2">
+    <div className="schedule-view space-y-2">
       <div className="overflow-x-auto rounded-[18px] border border-slate-300 bg-white px-3.5 py-2 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
-        <div className="flex min-w-max items-center gap-3 whitespace-nowrap">
-          {/* 1. FOH / BOH */}
+        <div className="schedule-toolbar flex min-w-max items-center gap-3 whitespace-nowrap">
+          {/* 1. Department tabs */}
           {rightSlot}
           {/* 2. Today's Week */}
           <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
@@ -229,7 +243,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getPrevWeek(weekRef))}>
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <h1 className="min-w-48 text-center pt-0.5 text-base font-semibold tracking-tight text-slate-900">
+            <h1 className="schedule-week-label min-w-48 text-center pt-0.5 text-base font-semibold tracking-tight text-slate-900">
               {formatWeekRange(weekRef)}
             </h1>
             <Button variant="outline" size="sm" className="h-8 w-8 rounded-lg" onClick={() => setWeekRef(getNextWeek(weekRef))}>
@@ -259,8 +273,8 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
       {loading ? (
         <p className="text-muted-foreground">Loading…</p>
       ) : (
-        <div className="overflow-x-auto rounded-[24px] border border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
-          <table className="w-full min-w-[980px] text-[16px]">
+        <div className="schedule-table-wrap overflow-x-auto rounded-[24px] border border-slate-300 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.06)]">
+          <table className="schedule-table w-full min-w-[980px] table-fixed text-[16px]">
             <thead className="bg-slate-800 text-white">
               <tr>
                 <th className="sticky left-0 z-10 text-left p-3.5 font-semibold text-[15px] w-40 border-b border-slate-700 bg-slate-900">Employee</th>
@@ -301,8 +315,8 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                             </div>
                           ) : (
                             shifts.map((s, i) => (
-                              <div key={i} className="mb-2 rounded-xl border p-2.5 text-sm" style={roleTheme.shiftCardStyle}>
-                                <div className="whitespace-nowrap font-semibold text-[14px] text-slate-900">
+                              <div key={i} className="schedule-shift-card mb-2 rounded-xl border p-2.5 text-sm" style={roleTheme.shiftCardStyle}>
+                                <div className="schedule-shift-time font-semibold text-[14px] text-slate-900">
                                   {formatTime(s.start_time)} – {formatTime(s.end_time)}
                                 </div>
                                 <div className="mt-1 text-[13px] text-slate-600">{formatHours(calcHours(s.start_time, s.end_time))}</div>

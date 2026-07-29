@@ -7,6 +7,8 @@ import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateU
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,7 +43,7 @@ function aggregateClockTipRows(records: ShiftClock[], employees: Employee[]): Ti
 
   for (const record of records) {
     const employee = employees.find(item => item.id === record.employee_id)
-    if (!employee || !isTipEligibleRole(employee.role)) continue
+    if (!employee || !isTipEligibleEmployee(employee)) continue
 
     const existing = grouped.get(record.employee_id) ?? {
       employee_id: record.employee_id,
@@ -89,10 +91,6 @@ function getFinancialDraftKey(sessionDate: string) {
   return `eod-financials:${sessionDate}`
 }
 
-function isTipEligibleRole(role: Employee['role']) {
-  return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
-}
-
 function isEodCloserRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
@@ -138,6 +136,7 @@ export default function EodPage() {
   const businessDate = getBusinessDate()
   const today = getBusinessDateString()
   const [session, setSession] = useState<DailySession | null>(null)
+  const [appCanManageAdmin, setAppCanManageAdmin] = useState(false)
   const [employees, setEmployees] = useState<Employee[]>([])
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
@@ -161,6 +160,7 @@ export default function EodPage() {
   const [tipDistributionSaved, setTipDistributionSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+
   const [startingCash, setStartingCash] = useState<number>(0)
   const [coinSubtotalOverride, setCoinSubtotalOverride] = useState<string>('')
   const [billSubtotalOverride, setBillSubtotalOverride] = useState<string>('')
@@ -174,7 +174,7 @@ export default function EodPage() {
 
   const [form, setForm] = useState({
     cash_total: '',
-    batch_total: '',
+    net_revenue: '',
     cc_tip: '',
     cash_tip: '',
     sales_tax: '',
@@ -183,20 +183,78 @@ export default function EodPage() {
   })
   const [tipRows, setTipRows] = useState<TipRow[]>([])
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
-  const tipEligibleEmployees = employees.filter(employee => isTipEligibleRole(employee.role))
+  const tipEligibleEmployees = employees.filter(employee => isTipEligibleEmployee(employee))
   const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
 
+  const toFinancialForm = useCallback((value: Partial<{
+    cash_total: string | number | null
+    batch_total: string | number | null
+    net_revenue: string | number | null
+    tip_total: string | number | null
+    cc_tip: string | number | null
+    cash_tip: string | number | null
+    sales_tax: string | number | null
+    memo: string | null
+    closed_by: string | null
+  }>) => {
+    const cashTotal = value.cash_total != null ? String(value.cash_total) : ''
+    const salesTax = value.sales_tax != null ? String(value.sales_tax) : ''
+    const hasLegacyRevenueValues =
+      value.batch_total != null ||
+      value.net_revenue != null ||
+      cashTotal.trim() !== '' ||
+      salesTax.trim() !== ''
+    const resolvedNetRevenue = value.net_revenue != null
+      ? String(value.net_revenue)
+      : hasLegacyRevenueValues
+        ? String(
+            Math.max(
+              0,
+              (Number(value.cash_total ?? 0) || 0) +
+              (Number(value.batch_total ?? 0) || 0) -
+              (Number(value.sales_tax ?? 0) || 0) -
+              (Number(value.tip_total ?? 0) || 0)
+            )
+          )
+        : ''
+
+    return {
+      cash_total: cashTotal,
+      net_revenue: resolvedNetRevenue,
+      cc_tip: value.cc_tip != null ? String(value.cc_tip) : '',
+      cash_tip: value.cash_tip != null ? String(value.cash_tip) : '',
+      sales_tax: salesTax,
+      memo: value.memo ?? '',
+      closed_by: value.closed_by ?? '',
+    }
+  }, [])
+
   const load = useCallback(async () => {
-    const [sessRes, empRes, schRes, eodRes, clockRes] = await Promise.all([
+    const loadEmployees = async () => {
+      const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
+      const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+        ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
+        : initial
+      return {
+        ...result,
+        data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+      }
+    }
+
+    const [sessRes, empRes, schRes, eodRes, clockRes, appSessionRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
-      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+      loadEmployees(),
       supabase.from('schedules').select('*').eq('date', today),
       supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
       )),
+      fetch('/api/app-session', { cache: 'no-store' }).then(async res => (
+        (await res.json().catch(() => ({}))) as { can_manage_admin?: boolean }
+      )),
     ])
     setSession(sessRes.data ?? null)
+    setAppCanManageAdmin(appSessionRes.can_manage_admin === true)
     setStartingCash(Number(sessRes.data?.starting_cash ?? 0))
     setEmployees(empRes.data ?? [])
     setSchedules(schRes.data ?? [])
@@ -207,19 +265,10 @@ export default function EodPage() {
     setCurrentReportId(eod?.id ?? null)
 
     if (eod) {
-      setForm({
-        cash_total: String(eod.cash_total),
-        batch_total: String(eod.batch_total),
-        cc_tip: String(eod.cc_tip),
-        cash_tip: String(eod.cash_tip),
-        sales_tax: eod.sales_tax != null ? String(eod.sales_tax) : '',
-        memo: eod.memo ?? '',
-        closed_by: eod.closed_by_employee_id ?? '',
-      })
-      setTipRows((eod.tip_distributions ?? [])
+      const savedTipRows = (eod.tip_distributions ?? [])
         .filter((d: TipDistribution & { employee?: Employee }) => {
-          const role = d.employee?.role ?? (empRes.data ?? []).find((employee: Employee) => employee.id === d.employee_id)?.role
-          return !!role && isTipEligibleRole(role)
+          const employee = d.employee ?? (empRes.data ?? []).find((item: Employee) => item.id === d.employee_id)
+          return !!employee && isTipEligibleEmployee(employee)
         })
         .map((d: TipDistribution & { employee?: Employee }) => {
           const clockRecord = (clockRes.records ?? []).find((record: ShiftClock) => record.employee_id === d.employee_id)
@@ -230,9 +279,28 @@ export default function EodPage() {
             clock_out_at: clockRecord?.clock_out_at ?? null,
             name: d.employee?.name ?? '',
           }
-        }))
+        })
+
+      setForm(toFinancialForm({
+        cash_total: eod.cash_total,
+        batch_total: eod.batch_total,
+        tip_total: eod.tip_total,
+        cc_tip: eod.cc_tip,
+        cash_tip: eod.cash_tip,
+        sales_tax: eod.sales_tax,
+        memo: eod.memo,
+        closed_by: eod.closed_by_employee_id,
+      }))
+      const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
+      if (savedTipRows.length > 0) {
+        const missingClockRows = clockBasedRows.filter(row => !savedTipRows.some(savedRow => savedRow.employee_id === row.employee_id))
+        setTipRows([...savedTipRows, ...missingClockRows])
+        setTipDistributionSaved(missingClockRows.length === 0)
+      } else {
+        setTipRows(clockBasedRows)
+        setTipDistributionSaved(false)
+      }
       setFinancialsSaved(true)
-      setTipDistributionSaved(true)
     } else {
       const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
 
@@ -241,11 +309,12 @@ export default function EodPage() {
       setTipDistributionSaved(false)
     }
     setLoading(false)
-  }, [today])
+  }, [toFinancialForm, today])
 
   useEffect(() => {
     void load()
   }, [load])
+
 
   useEffect(() => {
     if (loading) return
@@ -253,8 +322,8 @@ export default function EodPage() {
     const storedFinancials = window.localStorage.getItem(getFinancialDraftKey(today))
     if (storedFinancials && !existing) {
       try {
-        const parsed = JSON.parse(storedFinancials) as typeof form
-        setForm(parsed)
+        const parsed = JSON.parse(storedFinancials) as Partial<typeof form & { batch_total?: string }>
+        setForm(toFinancialForm(parsed))
         setFinancialsSaved(true)
       } catch {
         window.localStorage.removeItem(getFinancialDraftKey(today))
@@ -262,7 +331,7 @@ export default function EodPage() {
     }
 
     const stored = window.localStorage.getItem(getTipDraftKey(today))
-    if (!stored) return
+    if (!stored || ((existing?.tip_distributions?.length ?? 0) > 0)) return
 
     try {
       const parsed = JSON.parse(stored) as TipRow[]
@@ -273,7 +342,7 @@ export default function EodPage() {
     } catch {
       window.localStorage.removeItem(getTipDraftKey(today))
     }
-  }, [existing, loading, today])
+  }, [existing, loading, toFinancialForm, today])
 
   const openClockRecords = clockRecords.filter(record => !record.clock_out_at)
   const openClockStaff = openClockRecords.map(record => ({
@@ -283,7 +352,9 @@ export default function EodPage() {
   }))
   const pendingApprovalRecords = clockRecords.filter(record => record.approval_status === 'pending_review')
   const hasOpenClockWarnings = openClockRecords.length > 0
-  const isLocked = !managerOverride && (!!existing || !session || session.current_phase !== 'complete')
+  const hasManagerAccess = managerOverride
+  const hasFinalizedEod = !!existing && (existing.tip_distributions?.length ?? 0) > 0
+  const isLocked = !hasManagerAccess && (hasFinalizedEod || !session || session.current_phase !== 'complete')
 
   const DENOM_VALUES: Record<string, number> = {
     d100: 100, d50: 50, d20: 20, d10: 10, d5: 5,
@@ -298,20 +369,22 @@ export default function EodPage() {
   const registerTotal = effectiveCoinTotal + effectiveBillTotal
   const cashFromDrawer = Math.max(0, registerTotal - startingCash)
 
-  const grossRevenue = (parseFloat(form.cash_total) || 0) + (parseFloat(form.batch_total) || 0)
-  const salesTax = parseFloat(form.sales_tax) || 0
-  const netRevenue = grossRevenue - salesTax
+  const cashTotal = parseFloat(form.cash_total) || 0
+  const netRevenue = parseFloat(form.net_revenue) || 0
   const tipTotal = (parseFloat(form.cc_tip) || 0) + (parseFloat(form.cash_tip) || 0)
-  const totalCashDeposit = (parseFloat(form.cash_total) || 0) + (parseFloat(form.cash_tip) || 0)
+  const salesTax = parseFloat(form.sales_tax) || 0
+  const grossRevenue = netRevenue + salesTax + tipTotal
+  const batchTotal = grossRevenue - cashTotal
+  const totalCashDeposit = cashTotal + (parseFloat(form.cash_tip) || 0)
 
   const tipResults = calculateTips(
     tipTotal,
     tipRows.map(r => ({
       employee_id: r.employee_id,
       hours_worked: r.hours_worked,
+      tip_pool_hourly_rate: employees.find(employee => employee.id === r.employee_id)?.tip_pool_hourly_rate ?? null,
     }))
   )
-
   const setField = (field: string, value: string) => {
     setFinancialsSaved(false)
     setForm(f => ({ ...f, [field]: value }))
@@ -362,10 +435,66 @@ export default function EodPage() {
   }
 
   const handleFinancialSave = async () => {
+    if (batchTotal < 0) {
+      setSaveError('Net revenue plus sales tax and total tip must be at least as much as cash amount.')
+      return
+    }
+
     window.localStorage.setItem(getFinancialDraftKey(today), JSON.stringify(form))
-    setFinancialsSaved(true)
     setSaveError(null)
-    setShowFinancialConfirm(false)
+
+    try {
+      const payload = {
+        session_date: today,
+        closed_by_employee_id: form.closed_by || null,
+        starting_cash: startingCash,
+        cash_total: cashTotal,
+        batch_total: batchTotal,
+        revenue_total: grossRevenue,
+        cc_tip: parseFloat(form.cc_tip) || 0,
+        cash_tip: parseFloat(form.cash_tip) || 0,
+        tip_total: tipTotal,
+        cash_deposit: totalCashDeposit,
+        sales_tax: salesTax,
+        memo: form.memo || null,
+        updated_at: new Date().toISOString(),
+      }
+
+      let reportId = currentReportId
+
+      if (existing) {
+        const updateResult = await supabase
+          .from('eod_reports')
+          .update(payload)
+          .eq('id', existing.id)
+          .select()
+          .single()
+
+        if (updateResult.error || !updateResult.data) throw updateResult.error ?? new Error('Failed to save revenue and tips.')
+        reportId = updateResult.data.id
+        setExisting(current => current
+          ? { ...current, ...(updateResult.data as EodReport), tip_distributions: current.tip_distributions }
+          : (updateResult.data as EodReport)
+        )
+      } else {
+        const insertResult = await supabase
+          .from('eod_reports')
+          .insert(payload)
+          .select()
+          .single()
+
+        if (insertResult.error || !insertResult.data) throw insertResult.error ?? new Error('Failed to save revenue and tips.')
+        reportId = insertResult.data.id
+        setExisting({ ...(insertResult.data as EodReport), tip_distributions: [] })
+      }
+
+      setCurrentReportId(reportId ?? null)
+      setFinancialsSaved(true)
+      setShowFinancialConfirm(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save revenue and tips.'
+      setSaveError(message)
+    }
   }
 
   const saveTipDistributions = async (reportId: string) => {
@@ -392,12 +521,16 @@ export default function EodPage() {
     setSaving(true)
     setSaveError(null)
     try {
+      if (batchTotal < 0) {
+        throw new Error('Net revenue plus sales tax and total tip must be at least as much as cash amount.')
+      }
+
       const payload = {
         session_date: today,
         closed_by_employee_id: form.closed_by || null,
         starting_cash: startingCash,
-        cash_total: parseFloat(form.cash_total) || 0,
-        batch_total: parseFloat(form.batch_total) || 0,
+        cash_total: cashTotal,
+        batch_total: batchTotal,
         revenue_total: grossRevenue,
         cc_tip: parseFloat(form.cc_tip) || 0,
         cash_tip: parseFloat(form.cash_tip) || 0,
@@ -427,7 +560,20 @@ export default function EodPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report_id: reportId }),
       })
-      void sheetSync
+      const sheetSyncPayload = await sheetSync.json().catch(() => ({})) as {
+        error?: string
+        eod?: { error?: string; success?: boolean; skipped?: boolean; reason?: string }
+        cashLog?: { error?: string; success?: boolean; skipped?: boolean; reason?: string }
+      }
+      if (!sheetSync.ok) {
+        const detail = [
+          sheetSyncPayload.eod?.error ? `EOD sheet: ${sheetSyncPayload.eod.error}` : '',
+          sheetSyncPayload.cashLog?.error ? `Cash Log: ${sheetSyncPayload.cashLog.error}` : '',
+          sheetSyncPayload.error ?? '',
+        ].filter(Boolean).join(' | ')
+        setSaveError(`EOD saved, but Google Sheets sync failed${detail ? `: ${detail}` : '.'}`)
+      }
+
       await load()
       window.localStorage.removeItem(getFinancialDraftKey(today))
       window.localStorage.removeItem(getTipDraftKey(today))
@@ -570,8 +716,10 @@ export default function EodPage() {
             <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Closed By</span><span className="font-medium">{closedByName}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Starting Cash</span><span>${startingCash.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Cash Total</span><span>${(parseFloat(form.cash_total) || 0).toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Batch Total</span><span>${(parseFloat(form.batch_total) || 0).toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Cash Amount</span><span>${cashTotal.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Net Revenue</span><span>${netRevenue.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Sales Tax</span><span>${salesTax.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Calculated Batch</span><span>${batchTotal.toFixed(2)}</span></div>
               <div className="flex justify-between font-semibold border-t pt-2"><span>Gross Revenue</span><span>${grossRevenue.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">CC Tips</span><span>${(parseFloat(form.cc_tip) || 0).toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Cash Tips</span><span>${(parseFloat(form.cash_tip) || 0).toFixed(2)}</span></div>
@@ -599,6 +747,9 @@ export default function EodPage() {
                         </div>
                         <div className="text-right">
                           <span className="text-muted-foreground text-xs mr-3">{row ? formatHours(row.hours_worked) : ''}</span>
+                          {r.is_fixed_tip && r.fixed_tip_rate !== null && (
+                            <span className="mr-3 text-xs text-blue-700">${r.fixed_tip_rate.toFixed(2)}/hr cap</span>
+                          )}
                           <span className="font-semibold text-green-700">${r.net_tip.toFixed(2)}</span>
                         </div>
                       </div>
@@ -622,13 +773,14 @@ export default function EodPage() {
     </Dialog>
   )
 
-  const eodAlreadySaved = !!existing
+  const eodAlreadySaved = hasFinalizedEod
   const canSaveFinancials =
     form.cash_total.trim() !== '' &&
-    form.batch_total.trim() !== '' &&
+    form.net_revenue.trim() !== '' &&
     form.cc_tip.trim() !== '' &&
     form.cash_tip.trim() !== '' &&
-    form.sales_tax.trim() !== ''
+    form.sales_tax.trim() !== '' &&
+    batchTotal >= 0
   const financialStepState: 'saved' | 'dirty' | 'locked' =
     financialsSaved ? 'saved' : canSaveFinancials ? 'dirty' : 'locked'
   const tipStepState: 'saved' | 'dirty' | 'ready' | 'locked' =
@@ -788,6 +940,14 @@ export default function EodPage() {
                 {pendingApprovalRecords.length > 0 && <p className="mt-1">{pendingApprovalRecords.length} auto clock-out{pendingApprovalRecords.length > 1 ? 's are' : ' is'} pending manager approval.</p>}
               </div>
             )}
+            <div className="flex flex-col items-center gap-3">
+              <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
+                Manager PIN Access
+              </Button>
+              <p className="max-w-sm text-xs text-muted-foreground">
+                Managers can open EOD from here without waiting for all dashboard tasks to be completed.
+              </p>
+            </div>
             {eodAlreadySaved && (
               <div className="flex flex-col items-center gap-3">
                 <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
@@ -809,6 +969,11 @@ export default function EodPage() {
           </div>
         ) : (
           <>
+            {appCanManageAdmin && !managerOverride && (
+              <div className="mb-6 rounded-xl border border-blue-300 bg-blue-50 px-5 py-4 text-sm text-blue-800">
+                Manager access is active. You can view and prepare EOD before all dashboard tasks are complete.
+              </div>
+            )}
             {(openClockRecords.length > 0 || pendingApprovalRecords.length > 0) && (
               <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-800">
                 <p className="font-semibold">Attendance Warning</p>
@@ -904,35 +1069,33 @@ export default function EodPage() {
                     <div key={key} className="flex items-center gap-1.5">
                       <span className="w-9 text-right text-sm font-semibold text-slate-600 shrink-0">{label}</span>
                       <Input
-                        type="number"
-                        min="0"
-                        step="1"
+                        type="text"
+                        inputMode="numeric"
                         value={count}
                         onChange={e => {
-                          const c = e.target.value
+                          const c = e.target.value.replace(/\D/g, '')
                           const a = c ? ((parseInt(c) || 0) * value).toFixed(2) : ''
                           const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
                           setDenoms(newDenoms)
-                          // clear subtotal override for this group when counting individually
                           const newCoinOverride = isCoin ? '' : coinSubtotalOverride
                           const newBillOverride = !isCoin ? '' : billSubtotalOverride
                           if (isCoin) setCoinSubtotalOverride('')
                           else setBillSubtotalOverride('')
                           recomputeCashTotal(newDenoms, newCoinOverride, newBillOverride)
                         }}
-                        placeholder="개수"
+                        placeholder="qty"
                         className="h-8 w-16 text-center text-xs px-1"
                       />
                       <span className="text-xs text-muted-foreground shrink-0">×</span>
                       <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={amount}
                         onChange={e => {
-                          const a = e.target.value
-                          const c = a ? String(Math.round((parseFloat(a) || 0) / value)) : ''
-                          const newDenoms = { ...denoms, [key]: { count: c, amount: a } }
+                          const raw = e.target.value
+                          if (!/^\d*\.?\d{0,2}$/.test(raw)) return
+                          const c = raw ? String(Math.round((parseFloat(raw) || 0) / value)) : ''
+                          const newDenoms = { ...denoms, [key]: { count: c, amount: raw } }
                           setDenoms(newDenoms)
                           const newCoinOverride = isCoin ? '' : coinSubtotalOverride
                           const newBillOverride = !isCoin ? '' : billSubtotalOverride
@@ -940,47 +1103,93 @@ export default function EodPage() {
                           else setBillSubtotalOverride('')
                           recomputeCashTotal(newDenoms, newCoinOverride, newBillOverride)
                         }}
-                        placeholder="금액"
+                        placeholder="amt"
                         className="h-8 w-20 text-center text-xs px-1"
                       />
                     </div>
                   )
                 }
-                const SubtotalRow = ({ label, computed, override, setOverride, isCoin }: {
-                  label: string; computed: number; override: string;
+                const renderSubtotalRow = ({ computed, override, setOverride, isCoin }: {
+                  computed: number; override: string;
                   setOverride: (v: string) => void; isCoin: boolean
-                }) => (
-                  <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-dashed">
-                    <span className="w-9 shrink-0" />
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">{label}</span>
-                    <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
-                      onChange={e => {
-                        setOverride(e.target.value)
-                        recomputeCashTotal(denoms, isCoin ? e.target.value : coinSubtotalOverride, isCoin ? billSubtotalOverride : e.target.value)
-                      }}
-                      placeholder="0.00"
-                      className="h-8 w-20 text-center text-xs px-1 font-semibold"
-                    />
-                  </div>
-                )
+                }) => {
+                  const handleChange = (val: string) => {
+                    if (!/^\d*\.?\d{0,2}$/.test(val)) return
+                    setOverride(val)
+                    recomputeCashTotal(denoms, isCoin ? val : coinSubtotalOverride, isCoin ? billSubtotalOverride : val)
+                  }
+                  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+                    if (override === '') {
+                      const init = computed > 0 ? computed.toFixed(2) : ''
+                      setOverride(init)
+                      recomputeCashTotal(denoms, isCoin ? init : coinSubtotalOverride, isCoin ? billSubtotalOverride : init)
+                      requestAnimationFrame(() => e.target.select())
+                    }
+                  }
+                  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+                    const trimmed = e.target.value.trim()
+                    if (trimmed === '') {
+                      setOverride('')
+                      recomputeCashTotal(denoms, isCoin ? '' : coinSubtotalOverride, isCoin ? billSubtotalOverride : '')
+                      return
+                    }
+                    const formatted = (Number(trimmed) || 0).toFixed(2)
+                    setOverride(formatted)
+                    recomputeCashTotal(denoms, isCoin ? formatted : coinSubtotalOverride, isCoin ? billSubtotalOverride : formatted)
+                  }
+                  if (!isCoin) {
+                    return (
+                      <div className="mt-4 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
+                        <p className="text-sm font-extrabold text-emerald-900 text-center mb-3">Bill Total</p>
+                        <Input
+                          type="text" inputMode="decimal"
+                          value={override}
+                          onChange={e => handleChange(e.target.value)}
+                          onFocus={handleFocus}
+                          onBlur={handleBlur}
+                          placeholder="0.00"
+                          className="h-14 w-full text-center text-xl px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm"
+                        />
+                        <p className="mt-2 text-center text-xs font-medium text-emerald-800">
+                          Enter total bills here to skip counting each denomination. Updates Cash Amount below.
+                        </p>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className="mt-2 pt-2 border-t border-dashed">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-9 shrink-0" />
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 text-center">Coin Total</span>
+                        <span className="text-xs text-muted-foreground shrink-0 invisible">×</span>
+                        <Input
+                          type="text" inputMode="decimal"
+                          value={override}
+                          onChange={e => handleChange(e.target.value)}
+                          onFocus={handleFocus}
+                          onBlur={handleBlur}
+                          placeholder="0.00"
+                          className="h-8 w-20 text-center text-xs px-1 font-semibold"
+                        />
+                      </div>
+                    </div>
+                  )
+                }
                 return (
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-4">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
-                      <div className="space-y-1.5">{coins.map(renderRow)}</div>
-                      <SubtotalRow label="Coin Total" computed={computedCoinTotal} override={coinSubtotalOverride} setOverride={setCoinSubtotalOverride} isCoin={true} />
+                  <>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Coins</p>
+                        <div className="space-y-1.5">{coins.map(renderRow)}</div>
+                        {renderSubtotalRow({ computed: computedCoinTotal, override: coinSubtotalOverride, setOverride: setCoinSubtotalOverride, isCoin: true })}
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
+                        <div className="space-y-1.5">{bills.map(renderRow)}</div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
-                      <div className="space-y-1.5">{bills.map(renderRow)}</div>
-                      <SubtotalRow label="Bill Total" computed={computedBillTotal} override={billSubtotalOverride} setOverride={setBillSubtotalOverride} isCoin={false} />
-                    </div>
-                  </div>
+                    {renderSubtotalRow({ computed: computedBillTotal, override: billSubtotalOverride, setOverride: setBillSubtotalOverride, isCoin: false })}
+                  </>
                 )
               })()}
 
@@ -1018,12 +1227,21 @@ export default function EodPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <Label>Cash Total</Label>
-                      <Input type="number" step="0.01" value={form.cash_total} onChange={e => setField('cash_total', e.target.value)} placeholder="0.00" />
+                      <Label>Cash Amount</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={form.cash_total}
+                        readOnly
+                        aria-readonly="true"
+                        placeholder="0.00"
+                        className="bg-muted font-semibold text-slate-700"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">Imported from the cash drawer calculator above.</p>
                     </div>
                     <div>
-                      <Label>Batch Total</Label>
-                      <Input type="number" step="0.01" value={form.batch_total} onChange={e => setField('batch_total', e.target.value)} placeholder="0.00" />
+                      <Label>Net Revenue</Label>
+                      <Input type="number" step="0.01" value={form.net_revenue} onChange={e => setField('net_revenue', e.target.value)} placeholder="0.00" />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -1032,12 +1250,23 @@ export default function EodPage() {
                       <Input type="number" step="0.01" value={form.sales_tax} onChange={e => setField('sales_tax', e.target.value)} placeholder="0.00" />
                     </div>
                     <div>
-                      <Label>Gross Revenue</Label>
+                      <Label>Calculated Batch</Label>
                       <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold">
-                        ${grossRevenue.toFixed(2)}
+                        ${batchTotal.toFixed(2)}
                       </div>
                     </div>
                   </div>
+                  <div>
+                    <Label>Gross Revenue</Label>
+                    <div className="flex h-9 w-full items-center rounded-md border border-input bg-muted px-3 text-sm font-semibold">
+                      ${grossRevenue.toFixed(2)}
+                    </div>
+                  </div>
+                  {batchTotal < 0 && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      Net revenue plus sales tax and total tip must be at least as much as cash amount.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1101,7 +1330,7 @@ export default function EodPage() {
                     <h2 className="font-semibold">Tip Distribution</h2>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    House takes 15% — distributing ${(tipTotal * 0.85).toFixed(2)} among staff using clock-in / clock-out hours
+                    House takes 15% — tips are shared by hours, and capped staff receive no more than their Tip Cap / Hr
                   </p>
                   {!financialsSaved && (
                     <p className="mt-1 text-xs text-amber-600">Save Revenue & Tips first to activate this section.</p>
@@ -1126,6 +1355,7 @@ export default function EodPage() {
                     <th className="text-left pb-2 font-medium w-20">Share %</th>
                     <th className="text-left pb-2 font-medium w-28">Tip Amount</th>
                     <th className="text-left pb-2 font-medium w-24">Tip / Hr</th>
+                    <th className="text-left pb-2 font-medium w-24">Tip Cap</th>
                     <th className="w-10" />
                   </tr>
                 </thead>
@@ -1156,6 +1386,9 @@ export default function EodPage() {
                         <td className="py-2 pr-3 text-muted-foreground">{result ? (result.tip_share * 100).toFixed(1) + '%' : '—'}</td>
                         <td className="py-2 font-semibold text-green-700">{result ? `$${result.net_tip.toFixed(2)}` : '—'}</td>
                         <td className="py-2 text-sm text-gray-700">{tipPerHour !== null ? `$${tipPerHour.toFixed(2)}` : '—'}</td>
+                        <td className="py-2 text-xs text-muted-foreground">
+                          {result?.is_fixed_tip && result.fixed_tip_rate !== null ? `$${result.fixed_tip_rate.toFixed(2)}/hr` : '—'}
+                        </td>
                         <td className="py-2">
                           <Button size="sm" variant="ghost" className="text-red-400 h-7 w-7 p-0" onClick={() => removeTipRow(idx)}>
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1228,8 +1461,8 @@ export default function EodPage() {
       </div>
       <PinModal
         open={showUnlockPin}
-        title="Unlock Saved EOD"
-        description="Manager PIN required to reopen this EOD"
+        title="Unlock EOD"
+        description="Enter manager PIN to open this EOD screen"
         onConfirm={handleManagerUnlock}
         onClose={() => { setShowUnlockPin(false); setUnlockError(null) }}
         error={unlockError}

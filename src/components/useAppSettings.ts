@@ -13,9 +13,10 @@ const DEFAULT_ROLE_DEFINITIONS: RoleDefinition[] = [
 ]
 
 const DEFAULT_DEPARTMENT_DEFINITIONS: DepartmentDefinition[] = [
-  { key: 'foh', label: 'FOH', description: 'Front-of-house staff and service floor', is_active: true, display_order: 0 },
-  { key: 'boh', label: 'BOH', description: 'Back-of-house kitchen operations', is_active: true, display_order: 1 },
-  { key: 'hybrid', label: 'Hybrid', description: 'Floats across both FOH and BOH', is_active: true, display_order: 2 },
+  { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', is_active: true, display_order: 0 },
+  { key: 'server', label: 'Server', description: 'Dining room service', is_active: true, display_order: 1 },
+  { key: 'cook', label: 'Cook', description: 'Cooking shifts', is_active: true, display_order: 2 },
+  { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', is_active: true, display_order: 3 },
 ]
 
 export function useAppSettings() {

@@ -5,6 +5,9 @@ export type ScheduleDepartment = string
 export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
 export type TaskCompletionStatus = 'complete' | 'incomplete'
 export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
+export type ReviewAttributionStatus = 'auto_match' | 'ai_estimate' | 'manual' | 'unassigned'
+export type ReviewSentiment = 'positive' | 'neutral' | 'negative'
+export type ReviewCategory = 'food' | 'service' | 'wait_time' | 'ambiance' | 'price'
 
 export interface Employee {
   id: string
@@ -12,10 +15,13 @@ export interface Employee {
   phone: string | null
   email: string | null
   pin_hash?: string
+  pin_code?: string | null
   role: EmployeeRole
   primary_department?: PrimaryDepartment
+  schedule_departments?: string[]
   hourly_wage: number | null
   guaranteed_hourly: number | null
+  tip_pool_hourly_rate: number | null
   birth_date: string | null
   login_enabled?: boolean
   is_active: boolean
@@ -85,6 +91,7 @@ export interface EodReport {
   cash_total: number
   batch_total: number
   revenue_total: number
+  delivery_order_amount: number
   cc_tip: number
   cash_tip: number
   tip_total: number
@@ -144,4 +151,48 @@ export interface CashBalanceEntry {
   description: string
   created_at: string
   updated_at: string
+}
+
+export interface GoogleReview {
+  id: string
+  google_review_id: string
+  author_name: string
+  reviewer_photo_url: string | null
+  rating: number
+  review_text: string
+  review_date: string
+  language: string | null
+  source_payload?: Record<string, unknown> | null
+  sentiment: ReviewSentiment | null
+  categories: ReviewCategory[]
+  staff_mentions: string[]
+  matched_employee_id: string | null
+  matched_employee_ids: string[]
+  confidence: number | null
+  reason: string | null
+  attribution_status: ReviewAttributionStatus
+  points: number
+  assigned_method: string | null
+  assigned_by_employee_id: string | null
+  created_at: string
+  updated_at: string
+  matched_employee?: Employee | null
+  matched_employees?: Employee[]
+  assigned_by_employee?: Employee | null
+}
+
+export interface ReviewAssignment {
+  id: string
+  review_id: string
+  previous_employee_id: string | null
+  next_employee_id: string | null
+  previous_employee_ids: string[]
+  next_employee_ids: string[]
+  assigned_by_employee_id: string | null
+  assignment_method: string
+  note: string | null
+  created_at: string
+  previous_employee?: Employee | null
+  next_employee?: Employee | null
+  assigned_by_employee?: Employee | null
 }

@@ -129,11 +129,11 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-sans);
-    letter-spacing: -0.025em;
+    letter-spacing: 0;
   }
 }
 
@@ -146,6 +146,11 @@
   *:focus-visible {
     outline: none !important;
     box-shadow: none !important;
+  }
+
+  /* Prevent iOS rubber-band scroll making the whole page float */
+  body {
+    overscroll-behavior: none;
   }
 }
 
@@ -161,5 +166,111 @@
   main {
     padding-inline: 12px;
     padding-bottom: 12px;
+  }
+
+  .schedule-page {
+    padding: 8px;
+  }
+
+  .schedule-view {
+    gap: 6px;
+  }
+
+  .schedule-view > div:first-child {
+    padding: 6px 8px;
+  }
+
+  .schedule-toolbar {
+    min-width: 0;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .schedule-toolbar [data-slot="tabs-list"] {
+    height: 28px;
+  }
+
+  .schedule-toolbar [data-slot="tabs-trigger"],
+  .schedule-toolbar [data-slot="button"],
+  .schedule-toolbar [data-slot="select-trigger"] {
+    height: 28px;
+    padding-inline: 7px;
+    font-size: 11px;
+  }
+
+  .schedule-week-label {
+    min-width: 128px;
+    font-size: 12px;
+  }
+
+  .schedule-table-wrap {
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .schedule-table {
+    min-width: 0;
+    table-layout: fixed;
+    font-size: 10.5px;
+  }
+
+  .schedule-table th,
+  .schedule-table td {
+    padding: 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .schedule-table th:first-child,
+  .schedule-table td:first-child {
+    width: 76px;
+    min-width: 76px;
+  }
+
+  .schedule-table th:not(:first-child),
+  .schedule-table td:not(:first-child) {
+    min-width: 0;
+  }
+
+  .schedule-table [class*="tracking-"] {
+    letter-spacing: 0;
+  }
+
+  .schedule-table .rounded-xl {
+    border-radius: 6px;
+  }
+
+  .schedule-table .schedule-shift-card {
+    margin-bottom: 4px;
+    padding: 5px;
+  }
+
+  .schedule-table .schedule-shift-time {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+}
+
+@media (pointer: coarse) and (orientation: portrait) {
+  html {
+    font-size: 15px;
+  }
+
+  body {
+    background: linear-gradient(180deg, #f4f5f7 0%, #eef1f4 100%);
+  }
+
+  main {
+    padding-inline: 8px;
+    padding-bottom: 16px;
+  }
+
+  /* Hide webkit scrollbar in the mobile tab strip */
+  nav [style*="scrollbarWidth"] {
+    -webkit-overflow-scrolling: touch;
+  }
+  nav [style*="scrollbarWidth"]::-webkit-scrollbar {
+    display: none;
   }
 }

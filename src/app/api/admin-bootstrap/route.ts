@@ -5,6 +5,10 @@ import { hasActiveManagers } from '@/lib/adminBootstrap'
 import { hashPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
+function isMissingPinCodeColumn(error: { message?: string } | null | undefined) {
+  return (error?.message?.toLowerCase() ?? '').includes('pin_code')
+}
+
 export async function GET() {
   try {
     return NextResponse.json({ needsSetup: !(await hasActiveManagers()) })
@@ -29,12 +33,24 @@ export async function POST(req: NextRequest) {
     }
 
     const pinHash = await hashPin(pin)
-    const { error } = await supabaseAdmin.from('employees').insert({
+    const payload = {
       name: name.trim(),
       email: typeof email === 'string' && email.trim() ? email.trim() : null,
       role: 'manager',
       pin_hash: pinHash,
-    })
+      pin_code: pin,
+    }
+    let { error } = await supabaseAdmin.from('employees').insert(payload)
+    if (error && isMissingPinCodeColumn(error)) {
+      const fallbackPayload: Omit<typeof payload, 'pin_code'> = {
+        name: payload.name,
+        email: payload.email,
+        role: payload.role,
+        pin_hash: payload.pin_hash,
+      }
+      const fallback = await supabaseAdmin.from('employees').insert(fallbackPayload)
+      error = fallback.error
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

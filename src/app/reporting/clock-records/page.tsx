@@ -11,14 +11,32 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
-import { ShiftClock } from '@/lib/types'
+import { Employee, ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
+import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { supabase } from '@/lib/supabase'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
+import { Plus } from 'lucide-react'
+
+type ClockEditState = {
+  sessionDate: string
+  clockIn: string
+  clockOut: string
+  note: string
+}
+
+type AddHourFormState = {
+  employeeId: string
+  sessionDate: string
+  clockIn: string
+  clockOut: string
+  note: string
+}
 
 function isoToTimeInput(value: string | null) {
   if (!value) return ''
@@ -43,21 +61,42 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback
 }
 
+function getEmployeeNameById(employees: Employee[], employeeId: string) {
+  return employees.find(employee => employee.id === employeeId)?.name ?? null
+}
+
+function getClockRecordEmployeeName(record: ShiftClock, employees: Employee[]) {
+  const relatedEmployee = record.employee as Employee | Employee[] | undefined
+  if (Array.isArray(relatedEmployee)) {
+    return relatedEmployee[0]?.name ?? getEmployeeNameById(employees, record.employee_id) ?? 'Unknown Staff'
+  }
+  return relatedEmployee?.name ?? getEmployeeNameById(employees, record.employee_id) ?? 'Unknown Staff'
+}
+
 export default function ClockRecordsPage() {
   const employees = useEmployees()
   const { clockRecords, setClockRecords } = useClockRecords()
   const { departmentDefinitions } = useAppSettings()
 
-  const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [period, setPeriod] = useState<ReportPeriod>('daily')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
+  const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [employeeFilter, setEmployeeFilter] = useState('all')
   const [editingClockId, setEditingClockId] = useState<string | null>(null)
-  const [clockEdits, setClockEdits] = useState<Record<string, { clockIn: string; clockOut: string; note: string }>>({})
+  const [clockEdits, setClockEdits] = useState<Record<string, ClockEditState>>({})
   const [savingClockId, setSavingClockId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  const [addHourOpen, setAddHourOpen] = useState(false)
+  const [addHourForm, setAddHourForm] = useState<AddHourFormState>({
+    employeeId: '',
+    sessionDate: format(new Date(), 'yyyy-MM-dd'),
+    clockIn: '',
+    clockOut: '',
+    note: '',
+  })
+  const [addingHour, setAddingHour] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ShiftClock | null>(null)
   const [deletingClockId, setDeletingClockId] = useState<string | null>(null)
 
@@ -89,6 +128,72 @@ export default function ClockRecordsPage() {
     [clockRecords, employeeFilter, employees, endDate, selectedDepartment, startDate]
   )
 
+  const openAddHourDialog = () => {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const defaultDate = today >= startDate && today <= endDate ? today : endDate
+    const defaultEmployeeId = employeeFilter !== 'all' ? employeeFilter : filteredEmployees[0]?.id ?? ''
+    setAddHourForm({
+      employeeId: defaultEmployeeId,
+      sessionDate: defaultDate,
+      clockIn: '',
+      clockOut: '',
+      note: '',
+    })
+    setStatus(null)
+    setAddHourOpen(true)
+  }
+
+  const saveAddedHour = async () => {
+    if (!addHourForm.employeeId || !addHourForm.sessionDate || !addHourForm.clockIn || !addHourForm.clockOut) {
+      setStatus('Employee, date, clock in, and clock out are required.')
+      return
+    }
+
+    const clockInAt = timeInputToIso(addHourForm.sessionDate, addHourForm.clockIn)
+    const clockOutAt = timeInputToIso(addHourForm.sessionDate, addHourForm.clockOut)
+    if (!clockInAt || !clockOutAt) {
+      setStatus('Clock in and clock out times are required.')
+      return
+    }
+    if (new Date(clockOutAt).getTime() <= new Date(clockInAt).getTime()) {
+      setStatus('Clock out must be after clock in.')
+      return
+    }
+
+    setAddingHour(true)
+    setStatus(null)
+    const res = await fetch('/api/clock-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'manual_add',
+        employee_id: addHourForm.employeeId,
+        session_date: addHourForm.sessionDate,
+        clock_in_at: clockInAt,
+        clock_out_at: clockOutAt,
+        manager_note: addHourForm.note,
+      }),
+    })
+    const json = (await res.json().catch(() => ({}))) as { record?: ShiftClock; error?: string }
+    if (!res.ok || !json.record) {
+      setStatus(json.error ?? 'Failed to add clock record')
+      setAddingHour(false)
+      return
+    }
+
+    setClockRecords(prev => [json.record!, ...prev])
+    try {
+      await recomputeSessionTips(json.record.session_date)
+      notifyReportingDataChanged()
+      setAddHourOpen(false)
+      setStatus('Clock record added and tip distribution recalculated.')
+    } catch (error) {
+      setStatus(getErrorMessage(error, 'Clock record added, but tip distribution refresh failed'))
+    } finally {
+      setAddingHour(false)
+    }
+  }
+
   const saveClockAdjustment = async (record: ShiftClock) => {
     const currentEdit = clockEdits[record.id]
     if (!currentEdit) return
@@ -100,8 +205,9 @@ export default function ClockRecordsPage() {
       body: JSON.stringify({
         id: record.id,
         action: 'adjust',
-        clock_in_at: timeInputToIso(record.session_date, currentEdit.clockIn),
-        clock_out_at: timeInputToIso(record.session_date, currentEdit.clockOut),
+        session_date: currentEdit.sessionDate,
+        clock_in_at: timeInputToIso(currentEdit.sessionDate, currentEdit.clockIn),
+        clock_out_at: timeInputToIso(currentEdit.sessionDate, currentEdit.clockOut),
         manager_note: currentEdit.note,
       }),
     })
@@ -113,7 +219,10 @@ export default function ClockRecordsPage() {
     }
     setClockRecords(prev => prev.map(item => item.id === record.id ? json.record! : item))
     try {
-      await recomputeSessionTips(record.session_date)
+      const datesToRecompute = Array.from(new Set([record.session_date, json.record.session_date]))
+      for (const sessionDate of datesToRecompute) {
+        await recomputeSessionTips(sessionDate)
+      }
       notifyReportingDataChanged()
     } catch (error) {
       setStatus(getErrorMessage(error, 'Clock record updated, but tip distribution refresh failed'))
@@ -148,8 +257,7 @@ export default function ClockRecordsPage() {
 
     for (const record of refreshedClockRecords) {
       const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
-      const isTipEligible = employee?.role === 'manager' || employee?.role === 'server' || employee?.role === 'busser' || employee?.role === 'runner'
-      if (!employee || !isTipEligible) continue
+      if (!employee || !isTipEligibleEmployee(employee)) continue
 
       const existing = grouped.get(record.employee_id) ?? {
         employee_id: record.employee_id,
@@ -171,6 +279,7 @@ export default function ClockRecordsPage() {
     const tipResults = calculateTips(totalTip, tipRows.map(row => ({
       employee_id: row.employee_id,
       hours_worked: row.hours_worked,
+      tip_pool_hourly_rate: employees.find(employee => employee.id === row.employee_id)?.tip_pool_hourly_rate ?? null,
     })))
 
     const deleteRes = await supabase.from('tip_distributions').delete().eq('eod_report_id', eodRes.data.id)
@@ -248,7 +357,9 @@ export default function ClockRecordsPage() {
           onCustomEndChange={setCustomEnd}
           leftSlot={
             <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)}>
-              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-44">
+                <span>{employeeFilter === 'all' ? 'All Staff' : getEmployeeNameById(employees, employeeFilter) ?? 'Unknown Staff'}</span>
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Staff</SelectItem>
                 {filteredEmployees.map(employee => (
@@ -258,9 +369,14 @@ export default function ClockRecordsPage() {
             </Select>
           }
           rightSlot={
-            <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
-              Open {filteredClockRecords.filter(record => isClockPending(record)).length}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={openAddHourDialog} disabled={filteredEmployees.length === 0}>
+                <Plus className="mr-2 h-4 w-4" /> Add Hour
+              </Button>
+              <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+                Open {filteredClockRecords.filter(record => isClockPending(record)).length}
+              </Badge>
+            </div>
           }
         />
         {status && <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{status}</div>}
@@ -279,20 +395,32 @@ export default function ClockRecordsPage() {
           </TableHeader>
           <TableBody>
             {filteredClockRecords.map(record => {
-              const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
+              const employeeName = getClockRecordEmployeeName(record, employees)
               const currentEdit = clockEdits[record.id] ?? {
+                sessionDate: record.session_date,
                 clockIn: isoToTimeInput(record.clock_in_at),
                 clockOut: isoToTimeInput(record.clock_out_at),
                 note: record.manager_note ?? '',
               }
               const isEditing = editingClockId === record.id
-              const previewIn = timeInputToIso(record.session_date, currentEdit.clockIn)
-              const previewOut = currentEdit.clockOut ? timeInputToIso(record.session_date, currentEdit.clockOut) : null
+              const previewIn = timeInputToIso(currentEdit.sessionDate, currentEdit.clockIn)
+              const previewOut = currentEdit.clockOut ? timeInputToIso(currentEdit.sessionDate, currentEdit.clockOut) : null
               const workedHours = previewIn && previewOut ? calculateClockHours(previewIn, previewOut) : 0
               return (
                 <TableRow key={record.id}>
-                  <TableCell className="font-medium">{format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
-                  <TableCell>{employee?.name ?? 'Unknown Staff'}</TableCell>
+                  <TableCell className="font-medium">
+                    {isEditing ? (
+                      <Input
+                        type="date"
+                        value={currentEdit.sessionDate}
+                        onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, sessionDate: event.target.value } }))}
+                        className="h-8 w-36"
+                      />
+                    ) : (
+                      format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')
+                    )}
+                  </TableCell>
+                  <TableCell>{employeeName}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={record.auto_clock_out ? 'border-orange-300 bg-orange-50 text-orange-800' : record.clock_out_at ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>
                       {record.auto_clock_out ? 'Auto Clock-Out' : record.clock_out_at ? 'Closed' : 'Open'}
@@ -368,7 +496,7 @@ export default function ClockRecordsPage() {
                           {record.clock_out_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
                         </div>
                         <div className="flex flex-col gap-2">
-                          <Button size="sm" variant="outline" onClick={() => { setClockEdits(prev => ({ ...prev, [record.id]: { clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at), note: record.manager_note ?? '' } })); setEditingClockId(record.id) }}>Edit Times</Button>
+                          <Button size="sm" variant="outline" onClick={() => { setClockEdits(prev => ({ ...prev, [record.id]: { sessionDate: record.session_date, clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at), note: record.manager_note ?? '' } })); setEditingClockId(record.id) }}>Edit Times</Button>
                         </div>
                       </div>
                     )}
@@ -385,6 +513,72 @@ export default function ClockRecordsPage() {
         </Table>
       </div>
 
+      <Dialog open={addHourOpen} onOpenChange={setAddHourOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Missing Hours</DialogTitle>
+            <DialogDescription>
+              Add a missing shift for an employee. Tip distribution will recalculate for this business day.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Employee</Label>
+              <Select value={addHourForm.employeeId} onValueChange={(value: string | null) => value && setAddHourForm(prev => ({ ...prev, employeeId: value }))}>
+                <SelectTrigger>
+                  <span>{getEmployeeNameById(filteredEmployees, addHourForm.employeeId) ?? 'Select employee'}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredEmployees.map(employee => (
+                    <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>Date</Label>
+                <Input
+                  type="date"
+                  value={addHourForm.sessionDate}
+                  onChange={event => setAddHourForm(prev => ({ ...prev, sessionDate: event.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>Clock In</Label>
+                <Input
+                  type="time"
+                  value={addHourForm.clockIn}
+                  onChange={event => setAddHourForm(prev => ({ ...prev, clockIn: event.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>Clock Out</Label>
+                <Input
+                  type="time"
+                  value={addHourForm.clockOut}
+                  onChange={event => setAddHourForm(prev => ({ ...prev, clockOut: event.target.value }))}
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Manager Note</Label>
+              <Input
+                value={addHourForm.note}
+                onChange={event => setAddHourForm(prev => ({ ...prev, note: event.target.value }))}
+                placeholder="Missing clock record, corrected schedule, etc."
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddHourOpen(false)} disabled={addingHour}>Cancel</Button>
+            <Button onClick={saveAddedHour} disabled={addingHour || !addHourForm.employeeId || !addHourForm.sessionDate || !addHourForm.clockIn || !addHourForm.clockOut}>
+              {addingHour ? 'Adding…' : 'Add Hour'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -395,7 +589,7 @@ export default function ClockRecordsPage() {
           </DialogHeader>
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {deleteTarget
-              ? `${deleteTarget.employee?.name ?? employees.find(item => item.id === deleteTarget.employee_id)?.name ?? 'This employee'} • ${format(new Date(`${deleteTarget.session_date}T12:00:00`), 'MMM d, yyyy')} • ${format(new Date(deleteTarget.clock_in_at), 'p')}`
+              ? `${getClockRecordEmployeeName(deleteTarget, employees)} • ${format(new Date(`${deleteTarget.session_date}T12:00:00`), 'MMM d, yyyy')} • ${format(new Date(deleteTarget.clock_in_at), 'p')}`
               : 'Delete this clock record?'}
           </div>
           <DialogFooter>

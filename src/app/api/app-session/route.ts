@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { APP_SESSION_COOKIE, createAppSessionValue, getAppSessionMaxAge, parseAppSessionValue } from '@/lib/appAuth'
-import { ADMIN_SESSION_COOKIE, createAdminSessionValue } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE } from '@/lib/adminSession'
 import { verifyPassword } from '@/lib/password'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
@@ -20,6 +20,19 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ authenticated: false, login_ready: loginReady })
   }
+
+  cookieStore.set(APP_SESSION_COOKIE, createAppSessionValue({
+    employeeId: session.employeeId,
+    name: session.name,
+    email: session.email,
+    role: session.role,
+  }), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+    maxAge: getAppSessionMaxAge(),
+  })
 
   return NextResponse.json({
     authenticated: true,
@@ -76,16 +89,6 @@ export async function POST(req: NextRequest) {
     path: '/',
     maxAge: getAppSessionMaxAge(),
   })
-
-  if (employee.role === 'manager') {
-    cookieStore.set(ADMIN_SESSION_COOKIE, createAdminSessionValue(), {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 60 * 60 * 8,
-    })
-  }
 
   return NextResponse.json({
     success: true,

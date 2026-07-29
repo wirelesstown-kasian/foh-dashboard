@@ -12,6 +12,7 @@ import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format, startOfMonth } from 'date-fns'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
@@ -44,9 +45,19 @@ export default function DashboardPage() {
     try {
       setLoadError(null)
       const monthStart = format(startOfMonth(businessDate), 'yyyy-MM-dd')
+      const loadEmployees = async () => {
+        const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true)
+        const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+          ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true)
+          : initial
+        return {
+          ...result,
+          data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+        }
+      }
 
       const [empRes, schRes, catRes, taskRes, compRes, monthCompRes, sessRes, clockRes] = await Promise.all([
-        supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true),
+        loadEmployees(),
         supabase.from('schedules').select('*').eq('date', today),
         supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
         supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),
@@ -171,14 +182,14 @@ export default function DashboardPage() {
   return (
     <div className="flex min-h-full flex-col">
       <div className="space-y-2.5 border-b bg-white px-4 py-3">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between md:gap-4">
           <div>
             <h1 className="text-lg font-bold">{format(businessDate, 'EEEE, MMMM d, yyyy')}</h1>
           </div>
-          <div className="flex items-center gap-4 pt-1">
+          <div className="flex flex-wrap items-center gap-3 md:gap-4 md:pt-1">
             <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
             <div className="flex items-center gap-2">
-              <div className="h-2 w-32 overflow-hidden rounded-full bg-gray-200">
+              <div className="h-2 w-28 overflow-hidden rounded-full bg-gray-200">
                 <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progressPct}%` }} />
               </div>
               <span className="text-sm font-medium">{doneTasks}/{totalTasks} resolved</span>
@@ -186,9 +197,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="hidden md:block">
-          <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} clockRecords={clockRecords} today={today} />
-        </div>
+        <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} clockRecords={clockRecords} today={today} />
         {doneTasks !== completedTasks && (
           <p className="text-xs text-muted-foreground">
             {completedTasks} completed, {doneTasks - completedTasks} marked incomplete
@@ -222,7 +231,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 md:overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="hidden md:block shrink-0">
           <StaffSidebar schedules={schedules} employees={employees} clockRecords={clockRecords} />
         </div>

@@ -22,8 +22,23 @@ const EMPTY_SETTINGS: EmailSettings = {
   eod_tip_emails_enabled: true,
   eod_admin_summary_enabled: true,
   schedule_emails_enabled: true,
+  queued_schedule_emails_enabled: true,
+  schedule_default_send_day: 'sunday',
+  schedule_default_send_time: '21:00',
+  weekly_summary_emails_enabled: true,
+  weekly_summary_recipient: '',
   wage_report_emails_enabled: true,
 }
+
+const WEEKDAY_OPTIONS = [
+  { value: 'sunday', label: 'Sunday' },
+  { value: 'monday', label: 'Monday' },
+  { value: 'tuesday', label: 'Tuesday' },
+  { value: 'wednesday', label: 'Wednesday' },
+  { value: 'thursday', label: 'Thursday' },
+  { value: 'friday', label: 'Friday' },
+  { value: 'saturday', label: 'Saturday' },
+]
 
 function BooleanSelect({
   value,
@@ -139,8 +154,69 @@ export default function EmailSettingsPage() {
           </div>
 
           <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-semibold">Automatic Emails</h2>
+            <p className="mt-1 text-sm text-muted-foreground">These are the emails that go out without someone pressing a send button.</p>
+            <div className="mt-4 space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold">Queued Schedule Emails</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Sent automatically to scheduled employees when a published schedule is queued instead of sent immediately.</p>
+                  </div>
+                  <div className="w-40">
+                    <Label>Auto Send</Label>
+                    <div className="mt-1">
+                      <BooleanSelect value={settings.queued_schedule_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, queued_schedule_emails_enabled: nextValue }))} />
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label>Default Queue Day</Label>
+                    <div className="mt-1">
+                      <Select value={settings.schedule_default_send_day} onValueChange={(nextValue: string | null) => setSettings((prev) => ({ ...prev, schedule_default_send_day: nextValue ?? prev.schedule_default_send_day }))}>
+                        <SelectTrigger>
+                          <span>{WEEKDAY_OPTIONS.find((option) => option.value === settings.schedule_default_send_day)?.label ?? 'Select day'}</span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {WEEKDAY_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Default Queue Time</Label>
+                    <Input type="time" value={settings.schedule_default_send_time} onChange={(event) => setSettings((prev) => ({ ...prev, schedule_default_send_time: event.target.value }))} className="mt-1" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-semibold">Weekly Summary Email</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Automatic Tuesday-Sunday summary that currently goes out on the deployed Monday morning cron.</p>
+                  </div>
+                  <div className="w-40">
+                    <Label>Auto Send</Label>
+                    <div className="mt-1">
+                      <BooleanSelect value={settings.weekly_summary_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, weekly_summary_emails_enabled: nextValue }))} />
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <Label>Summary Recipient</Label>
+                  <Input value={settings.weekly_summary_recipient} onChange={(event) => setSettings((prev) => ({ ...prev, weekly_summary_recipient: event.target.value }))} className="mt-1" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
             <h2 className="text-lg font-semibold">Triggers</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Disable a trigger here without changing code or environment variables.</p>
+            <p className="mt-1 text-sm text-muted-foreground">These apply when someone manually sends a report or schedule from the dashboard.</p>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
                 <Label>EOD Tip Emails</Label>

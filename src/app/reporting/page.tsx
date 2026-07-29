@@ -2,9 +2,15 @@
 
 import Link from 'next/link'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { BarChart3, ClipboardCheck, DollarSign, FileClock, ReceiptText } from 'lucide-react'
+import { BarChart3, ClipboardCheck, DollarSign, FileClock, LineChart, ReceiptText } from 'lucide-react'
 
 const reportingCards = [
+  {
+    href: '/reporting/dashboard',
+    title: 'Dashboard',
+    description: 'See net revenue pace, projections, and compact operating trends.',
+    icon: LineChart,
+  },
   {
     href: '/reporting/task-performance',
     title: 'Task Performance',

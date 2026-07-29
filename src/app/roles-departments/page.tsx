@@ -6,8 +6,9 @@ import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AppSettings, DepartmentDefinition, RoleDefinition } from '@/lib/appSettings'
-import { getRoleDotStyle, sortDefinitionsByOrder, titleCaseWords } from '@/lib/organization'
+import { sortDefinitionsByOrder, titleCaseWords } from '@/lib/organization'
 import { Employee } from '@/lib/types'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 
 const DEFAULT_ROLES: RoleDefinition[] = [
   { key: 'manager', label: 'Manager', description: 'Admin access and oversight', color: '#8b5cf6', is_active: true, display_order: 0 },
@@ -18,9 +19,10 @@ const DEFAULT_ROLES: RoleDefinition[] = [
 ]
 
 const DEFAULT_DEPARTMENTS: DepartmentDefinition[] = [
-  { key: 'foh', label: 'FOH', description: 'Front-of-house staff and service floor', is_active: true, display_order: 0 },
-  { key: 'boh', label: 'BOH', description: 'Back-of-house kitchen operations', is_active: true, display_order: 1 },
-  { key: 'hybrid', label: 'Hybrid', description: 'Floats across both FOH and BOH', is_active: true, display_order: 2 },
+  { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', is_active: true, display_order: 0 },
+  { key: 'server', label: 'Server', description: 'Dining room service', is_active: true, display_order: 1 },
+  { key: 'cook', label: 'Cook', description: 'Cooking shifts', is_active: true, display_order: 2 },
+  { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', is_active: true, display_order: 3 },
 ]
 
 function slugifyRoleKey(value: string) {
@@ -78,12 +80,6 @@ export default function RolesDepartmentsPage() {
   const updateRoleDescription = (key: string, description: string) => {
     setRoles(currentRoles => currentRoles.map(role => (
       role.key === key ? { ...role, description } : role
-    )))
-  }
-
-  const updateRoleColor = (key: string, color: string) => {
-    setRoles(currentRoles => currentRoles.map(role => (
-      role.key === key ? { ...role, color } : role
     )))
   }
 
@@ -151,6 +147,14 @@ export default function RolesDepartmentsPage() {
     setError(null)
   }
 
+  const removeDepartment = (key: string) => {
+    if (employees.some(employee => getEmployeeScheduleDepartments(employee).includes(key))) {
+      setError('Move employees off this department before removing it')
+      return
+    }
+    setDepartments(currentDepartments => currentDepartments.filter(department => department.key !== key))
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setError(null)
@@ -182,75 +186,55 @@ export default function RolesDepartmentsPage() {
     <div className="p-6">
       <AdminSubpageHeader
         title="Roles & Departments"
-        subtitle="Manage role labels and the primary department choices used across Staffing, Reporting, Schedule, and Today’s Staff."
+        subtitle="Manage role labels and schedule department choices used across Staffing, Reporting, Schedule, and Today’s Staff."
       />
 
       {loading ? (
         <p className="text-muted-foreground">Loading roles and departments…</p>
       ) : (
         <div className="space-y-6">
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
+          <div className="rounded-xl border bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
                 <BriefcaseBusiness className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold">Roles</h2>
-                <p className="text-sm text-muted-foreground">Change the role name, write a description, and pick the color used across schedule and staffing views.</p>
+                <h2 className="text-base font-semibold">Roles</h2>
+                <p className="text-sm text-muted-foreground">Role labels used for staff records and reporting.</p>
               </div>
             </div>
-            <div className="space-y-3">
+            <div className="overflow-hidden rounded-lg border">
+              <div className="grid grid-cols-[minmax(0,1fr)_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
+                <span>Name</span>
+                <span className="hidden sm:block">Description</span>
+                <span className="hidden sm:block">Key</span>
+                <span />
+              </div>
               {roles.map(role => (
-                <div key={role.key} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1 space-y-3">
-                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-                        <div>
-                          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Name</p>
-                          <Input value={role.label} onChange={(event) => updateRole(role.key, event.target.value)} />
-                        </div>
-                        <div>
-                          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Color</p>
-                          <div className="flex items-center gap-3 rounded-lg border bg-white px-3 py-2">
-                            <input
-                              type="color"
-                              value={role.color ?? '#64748b'}
-                              onChange={(event) => updateRoleColor(role.key, event.target.value)}
-                              className="h-9 w-12 cursor-pointer rounded border border-slate-200 bg-transparent"
-                            />
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex h-3 w-3 rounded-full" style={getRoleDotStyle(role.key, roles)} />
-                              <span className="font-mono text-sm text-slate-600">{role.color ?? '#64748b'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Description</p>
-                        <Input
-                          value={role.description ?? ''}
-                          onChange={(event) => updateRoleDescription(role.key, event.target.value)}
-                          placeholder="What this role is responsible for"
-                        />
-                      </div>
-                      <div className="rounded-lg border bg-white px-3 py-2 text-sm text-slate-600">
-                        <span className="font-semibold text-slate-800">System key:</span> {role.key}
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="text-red-600 hover:text-red-700"
-                      disabled={role.key === 'manager'}
-                      onClick={() => removeRole(role.key)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                <div key={role.key} className="grid grid-cols-[minmax(0,1fr)_32px] items-center gap-2 border-t px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
+                  <Input className="min-w-0" value={role.label} onChange={(event) => updateRole(role.key, event.target.value)} />
+                  <Input
+                    className="hidden min-w-0 sm:flex"
+                    value={role.description ?? ''}
+                    onChange={(event) => updateRoleDescription(role.key, event.target.value)}
+                    placeholder="Description"
+                  />
+                  <span className="hidden min-w-0 truncate font-mono text-[11px] text-slate-500 sm:block" title={role.key}>{role.key}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="justify-self-center text-red-600 hover:text-red-700"
+                    disabled={role.key === 'manager'}
+                    onClick={() => removeRole(role.key)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               ))}
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 pt-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-t bg-slate-50 p-3">
                 <Input
+                  className="min-w-0"
                   value={newRole}
                   onChange={(event) => setNewRole(event.target.value)}
                   placeholder="Add a new role name"
@@ -263,40 +247,48 @@ export default function RolesDepartmentsPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+          <div className="rounded-xl border bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
                 <Building2 className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold">Primary Departments</h2>
-                <p className="text-sm text-muted-foreground">Change the department name and description used throughout staffing and scheduling.</p>
+                <h2 className="text-base font-semibold">Schedule Departments</h2>
+                <p className="text-sm text-muted-foreground">Department choices used for staff assignment and schedule tabs.</p>
               </div>
             </div>
-            <div className="space-y-3">
+            <div className="overflow-hidden rounded-lg border">
+              <div className="grid grid-cols-[minmax(0,1fr)_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
+                <span>Name</span>
+                <span className="hidden sm:block">Description</span>
+                <span className="hidden sm:block">Key</span>
+                <span />
+              </div>
               {departments.map(department => (
-                <div key={department.key} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <div className="space-y-3">
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Name</p>
-                      <Input value={department.label} onChange={(event) => updateDepartment(department.key, event.target.value)} />
-                    </div>
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Description</p>
-                      <Input
-                        value={department.description ?? ''}
-                        onChange={(event) => updateDepartmentDescription(department.key, event.target.value)}
-                        placeholder="What this department covers"
-                      />
-                    </div>
-                    <div className="rounded-lg border bg-white px-3 py-2 text-sm text-slate-600">
-                      <span className="font-semibold text-slate-800">System key:</span> {department.key}
-                    </div>
-                  </div>
+                <div key={department.key} className="grid grid-cols-[minmax(0,1fr)_32px] items-center gap-2 border-t px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
+                  <Input className="min-w-0" value={department.label} onChange={(event) => updateDepartment(department.key, event.target.value)} />
+                  <Input
+                    className="hidden min-w-0 sm:flex"
+                    value={department.description ?? ''}
+                    onChange={(event) => updateDepartmentDescription(department.key, event.target.value)}
+                    placeholder="Description"
+                  />
+                  <span className="hidden min-w-0 truncate font-mono text-[11px] text-slate-500 sm:block" title={department.key}>{department.key}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="justify-self-center text-red-600 hover:text-red-700"
+                    disabled={departments.length <= 1}
+                    onClick={() => removeDepartment(department.key)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               ))}
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 pt-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-t bg-slate-50 p-3">
                 <Input
+                  className="min-w-0"
                   value={newDepartment}
                   onChange={(event) => setNewDepartment(event.target.value)}
                   placeholder="Add a new department name"
@@ -307,7 +299,7 @@ export default function RolesDepartmentsPage() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                `foh` and `boh` keep the operational tabs consistent. `hybrid` lets a person appear as a fallback in both schedule filters while still being grouped cleanly on the dashboard.
+                Staff can be assigned to more than one department from Staffing. They appear in each selected department schedule.
               </p>
             </div>
           </div>

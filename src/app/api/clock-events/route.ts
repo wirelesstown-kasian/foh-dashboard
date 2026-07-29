@@ -144,6 +144,72 @@ async function getClockRecordById(id: string) {
   return data as ShiftClock
 }
 
+async function createManualClockRecord(payload: {
+  employee_id?: string
+  session_date?: string
+  clock_in_at?: string | null
+  clock_out_at?: string | null
+  manager_note?: string | null
+}) {
+  if (!(await requireAdmin())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { employee_id, session_date, clock_in_at, clock_out_at, manager_note } = payload
+  if (!employee_id || !session_date || !clock_in_at || !clock_out_at) {
+    return NextResponse.json({ error: 'Employee, date, clock in, and clock out are required' }, { status: 400 })
+  }
+  if (!isValidSessionDate(session_date)) {
+    return NextResponse.json({ error: 'Invalid session_date format' }, { status: 400 })
+  }
+  if (new Date(clock_out_at).getTime() <= new Date(clock_in_at).getTime()) {
+    return NextResponse.json({ error: 'Clock out must be after clock in' }, { status: 400 })
+  }
+
+  const { data: employee, error: employeeError } = await supabaseAdmin
+    .from('employees')
+    .select('id')
+    .eq('id', employee_id)
+    .eq('is_active', true)
+    .single()
+
+  if (employeeError || !employee) {
+    return NextResponse.json({ error: employeeError?.message ?? 'Employee not found' }, { status: 404 })
+  }
+
+  const nowIso = new Date().toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('shift_clocks')
+    .insert({
+      session_date,
+      employee_id,
+      clock_in_at,
+      clock_out_at,
+      clock_in_photo_path: '',
+      clock_out_photo_path: null,
+      auto_clock_out: false,
+      approval_status: 'adjusted',
+      approved_hours: calculateClockHours(clock_in_at, clock_out_at),
+      manager_note: manager_note?.trim() || 'Manual hours added by manager.',
+      manager_approved_by: null,
+      manager_approved_at: nowIso,
+      updated_at: nowIso,
+    })
+    .select('id')
+    .single()
+
+  if (error || !data?.id) {
+    return NextResponse.json({ error: error?.message ?? 'Failed to add clock record' }, { status: 500 })
+  }
+
+  try {
+    const record = await getClockRecordById(data.id)
+    return NextResponse.json({ success: true, record })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to reload clock record' }, { status: 500 })
+  }
+}
+
 async function upsertClockTaskCompletion(taskId: string | null | undefined, employeeId: string, sessionDate: string) {
   if (!taskId) return
   const { data: existing } = await supabaseAdmin
@@ -201,13 +267,22 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   await processOverdueClockRecords()
 
-  const { action, pin, session_date, photo_data_url, task_id, skip_photo } = await req.json() as {
-    action?: 'clock_in' | 'clock_out'
+  const payload = await req.json() as {
+    action?: 'clock_in' | 'clock_out' | 'manual_add'
     pin?: string
     session_date?: string
+    employee_id?: string
+    clock_in_at?: string | null
+    clock_out_at?: string | null
+    manager_note?: string | null
     photo_data_url?: string
     task_id?: string
     skip_photo?: boolean
+  }
+  const { action, pin, session_date, photo_data_url, task_id, skip_photo } = payload
+
+  if (action === 'manual_add') {
+    return createManualClockRecord(payload)
   }
 
   if (!action || !session_date) {
@@ -304,12 +379,13 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, approved_hours, manager_note, clock_in_at, clock_out_at } = await req.json() as {
+  const { id, approved_hours, manager_note, clock_in_at, clock_out_at, session_date } = await req.json() as {
     id?: string
     approved_hours?: number | string | null
     manager_note?: string | null
     clock_in_at?: string | null
     clock_out_at?: string | null
+    session_date?: string | null
   }
 
   if (!id) {
@@ -336,9 +412,13 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: existingError?.message ?? 'Clock record not found' }, { status: 404 })
   }
 
+  const nextSessionDate = session_date?.trim() ? session_date : existing.session_date
   const nextClockInAt = clock_in_at?.trim() ? clock_in_at : existing.clock_in_at
   const nextClockOutAt = clock_out_at?.trim() ? clock_out_at : existing.clock_out_at
 
+  if (!isValidSessionDate(nextSessionDate)) {
+    return NextResponse.json({ error: 'Invalid session_date format' }, { status: 400 })
+  }
   if (!nextClockInAt) {
     return NextResponse.json({ error: 'Clock in time is required' }, { status: 400 })
   }
@@ -348,6 +428,7 @@ export async function PATCH(req: NextRequest) {
 
   const fallbackHours = nextClockOutAt ? calculateClockHours(nextClockInAt, nextClockOutAt) : 0
   const update = {
+    session_date: nextSessionDate,
     approval_status: 'approved',
     approved_hours: numericHours ?? fallbackHours,
     manager_note: manager_note?.trim() || null,

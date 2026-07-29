@@ -1,4 +1,5 @@
 import { DepartmentDefinition, RoleDefinition } from '@/lib/appSettings'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { Employee, PrimaryDepartment, ScheduleDepartment } from '@/lib/types'
 
 type RoleColorTheme = {
@@ -94,8 +95,7 @@ export function getRoleDotStyle(roleKey: string, definitions: RoleDefinition[] =
 }
 
 export function employeeMatchesScheduleDepartment(employee: Employee, department: ScheduleDepartment) {
-  const primaryDepartment = employee.primary_department?.trim()
-  return primaryDepartment === 'hybrid' || primaryDepartment === department
+  return getEmployeeScheduleDepartments(employee).includes(department)
 }
 
 export function getFallbackScheduleDepartment(employee: Employee): ScheduleDepartment {
@@ -104,6 +104,12 @@ export function getFallbackScheduleDepartment(employee: Employee): ScheduleDepar
 
 export function getPrimaryDepartmentBadge(primaryDepartment: PrimaryDepartment | undefined, definitions: DepartmentDefinition[]) {
   return getDepartmentLabel(primaryDepartment ?? 'unassigned', definitions)
+}
+
+export function getScheduleDepartmentBadges(employee: Pick<Employee, 'primary_department' | 'schedule_departments'>, definitions: DepartmentDefinition[]) {
+  return getEmployeeScheduleDepartments(employee)
+    .map(department => getDepartmentLabel(department, definitions))
+    .join(', ')
 }
 
 export function sortDefinitionsByOrder<T extends { display_order: number; label: string }>(definitions: T[]) {

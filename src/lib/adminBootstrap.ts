@@ -4,6 +4,10 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 export const DEFAULT_ADMIN_NAME = 'Default Admin'
 export const DEFAULT_ADMIN_PIN = '1234'
 
+function isMissingPinCodeColumn(error: { message?: string } | null | undefined) {
+  return (error?.message?.toLowerCase() ?? '').includes('pin_code')
+}
+
 export async function hasActiveManagers() {
   const { count, error } = await supabaseAdmin
     .from('employees')
@@ -24,12 +28,24 @@ export async function ensureDefaultAdmin() {
   }
 
   const pinHash = await hashPin(DEFAULT_ADMIN_PIN)
-  const { error } = await supabaseAdmin.from('employees').insert({
+  const payload = {
     name: DEFAULT_ADMIN_NAME,
     role: 'manager',
     email: null,
     pin_hash: pinHash,
-  })
+    pin_code: DEFAULT_ADMIN_PIN,
+  }
+  let { error } = await supabaseAdmin.from('employees').insert(payload)
+  if (error && isMissingPinCodeColumn(error)) {
+    const fallbackPayload: Omit<typeof payload, 'pin_code'> = {
+      name: payload.name,
+      role: payload.role,
+      email: payload.email,
+      pin_hash: payload.pin_hash,
+    }
+    const fallback = await supabaseAdmin.from('employees').insert(fallbackPayload)
+    error = fallback.error
+  }
 
   if (error) {
     throw new Error(error.message)

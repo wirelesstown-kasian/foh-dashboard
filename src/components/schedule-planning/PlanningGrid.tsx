@@ -16,9 +16,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download, Save } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import type { EmailSettings } from '@/lib/appSettings'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 type ShiftDraft = {
   id?: string
@@ -32,13 +34,36 @@ type ShiftDraft = {
 
 type PublishMode = 'immediate' | 'queued'
 
-const QUEUED_SEND_HOUR = 21
-const QUEUED_SEND_MINUTE = 0
+const DEFAULT_SCHEDULE_EMAIL_SETTINGS: Pick<EmailSettings, 'schedule_default_send_day' | 'schedule_default_send_time'> = {
+  schedule_default_send_day: 'sunday',
+  schedule_default_send_time: '21:00',
+}
 
 function formatTimeInputValue(date: Date) {
   const hour = String(date.getHours()).padStart(2, '0')
   const minute = String(date.getMinutes()).padStart(2, '0')
   return `${hour}:${minute}`
+}
+
+function getQueuedDayOffset(day: string) {
+  switch (day) {
+    case 'sunday':
+      return -1
+    case 'monday':
+      return 0
+    case 'tuesday':
+      return 1
+    case 'wednesday':
+      return 2
+    case 'thursday':
+      return 3
+    case 'friday':
+      return 4
+    case 'saturday':
+      return 5
+    default:
+      return -1
+  }
 }
 
 function snapTimeToHalfHour(value: string) {
@@ -142,7 +167,7 @@ interface PlanningGridProps {
 }
 
 export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
-  const { roleDefinitions } = useAppSettings()
+  const { roleDefinitions, departmentDefinitions } = useAppSettings()
   const [weekRef, setWeekRef] = useState(new Date())
   const [days, setDays] = useState<Date[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -164,8 +189,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [shiftActionTarget, setShiftActionTarget] = useState<{ draftIndex: number; employeeId: string; date: string } | null>(null)
   const [staffRemovalTarget, setStaffRemovalTarget] = useState<Employee | null>(null)
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [publishFeedback, setPublishFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
+  const [scheduleEmailDefaults, setScheduleEmailDefaults] = useState(DEFAULT_SCHEDULE_EMAIL_SETTINGS)
   const allowedTimeOptions = getAllowedTimeOptions()
+  const departmentLabel = getDepartmentLabel(department, departmentDefinitions)
 
   useEffect(() => {
     setDays(getWeekDays(weekRef))
@@ -179,12 +207,40 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const currentRowsKey = `${currentDraftKey}_rows`
   const mondayDate = days[0] ? formatDate(days[0]) : null
 
+  useEffect(() => {
+    let mounted = true
+
+    const loadEmailSettings = async () => {
+      const res = await fetch('/api/app-settings', { cache: 'no-store' })
+      const data = res.ok
+        ? await res.json() as { settings?: Partial<EmailSettings> }
+        : {}
+      if (!mounted || !data.settings) return
+      setScheduleEmailDefaults({
+        schedule_default_send_day: data.settings.schedule_default_send_day ?? DEFAULT_SCHEDULE_EMAIL_SETTINGS.schedule_default_send_day,
+        schedule_default_send_time: data.settings.schedule_default_send_time ?? DEFAULT_SCHEDULE_EMAIL_SETTINGS.schedule_default_send_time,
+      })
+    }
+
+    void loadEmailSettings()
+    const handleSettingsUpdate = () => {
+      void loadEmailSettings()
+    }
+    window.addEventListener('app-settings-updated', handleSettingsUpdate)
+
+    return () => {
+      mounted = false
+      window.removeEventListener('app-settings-updated', handleSettingsUpdate)
+    }
+  }, [])
+
   const getQueuedSendAt = useCallback((weekStartDate: Date) => {
     const queued = new Date(weekStartDate)
-    queued.setDate(queued.getDate() - 1)
-    queued.setHours(QUEUED_SEND_HOUR, QUEUED_SEND_MINUTE, 0, 0)
+    queued.setDate(queued.getDate() + getQueuedDayOffset(scheduleEmailDefaults.schedule_default_send_day))
+    const [hourText = '21', minuteText = '00'] = scheduleEmailDefaults.schedule_default_send_time.split(':')
+    queued.setHours(Number(hourText), Number(minuteText), 0, 0)
     return queued
-  }, [])
+  }, [scheduleEmailDefaults.schedule_default_send_day, scheduleEmailDefaults.schedule_default_send_time])
 
   const getSelectedQueuedSendAt = useCallback(() => {
     const fallback = getQueuedSendAt(days[0] ?? new Date())
@@ -245,12 +301,31 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const startDate = formatDate(days[0])
     const endDate = formatDate(days[6])
     const key = `${draftKey(days[0])}_${department}`
+    const loadEmployees = async () => {
+      const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
+      const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+        ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
+        : initial
+      return {
+        ...result,
+        data: withScheduleDepartments(withTipPoolHourlyRate(result.data ?? [])) as Employee[],
+      }
+    }
 
-    const [empRes, schRes, draftWeekRes, draftRes] = await Promise.all([
-      supabase.from('employees').select('id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at').eq('is_active', true).order('name'),
+    const previousDraftOrderPromise = supabase
+      .from('schedule_drafts')
+      .select('week_start, employee_id, display_order')
+      .lt('week_start', startDate)
+      .eq('department', department)
+      .order('week_start', { ascending: false })
+      .order('display_order')
+
+    const [empRes, schRes, draftWeekRes, draftRes, previousDraftOrderRes] = await Promise.all([
+      loadEmployees(),
       supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
       supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('display_order').order('date'),
+      previousDraftOrderPromise,
     ])
     const activeEmployees = (empRes.data ?? []).filter(employee => employeeMatchesScheduleDepartment(employee, department))
     // schedules query is already filtered by department — no role-based filtering needed
@@ -277,10 +352,12 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               name: namesById.get(schedule.employee_id) ?? `Staff ${schedule.employee_id.slice(0, 6)}`,
               role: 'server',
               primary_department: department,
+              schedule_departments: [department],
               phone: null,
               email: null,
               hourly_wage: null,
               guaranteed_hourly: null,
+              tip_pool_hourly_rate: null,
               pin_hash: '',
               birth_date: null,
               login_enabled: false,
@@ -304,9 +381,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       end_time: s.end_time,
     }))
 
-    const hasServerDraftWeek = !!draftWeekRes.data && !draftWeekRes.error
-    const hasServerDrafts = (draftRes.data?.length ?? 0) > 0
-    const canUseServerDrafts = (hasServerDraftWeek || hasServerDrafts) && !draftRes.error
+    const serverDraftRows = (draftRes.data ?? []) as Array<ShiftDraft & { id?: string }>
+    const hasDepartmentServerDrafts = serverDraftRows.length > 0
 
     if (draftWeekRes.error || draftRes.error) {
       setServerDraftsReady(false)
@@ -315,13 +391,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     }
 
     let nextDrafts: ShiftDraft[] = published
-    if (published.length > 0) {
-      nextDrafts = published
-      setDrafts(published)
-      setIsDirty(false)
-      localStorage.setItem(key, JSON.stringify(published))
-    } else if (canUseServerDrafts && isEditableWeek) {
-      const serverDrafts = ((draftRes.data ?? []) as Array<ShiftDraft & { id?: string }>).map(draft => ({
+    if (hasDepartmentServerDrafts && isEditableWeek) {
+      const serverDrafts = serverDraftRows.map(draft => ({
         id: draft.id,
         employee_id: draft.employee_id,
         date: draft.date,
@@ -334,6 +405,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       setDrafts(serverDrafts)
       setIsDirty(!matchesPublishedSchedule(serverDrafts, published))
       localStorage.setItem(key, JSON.stringify(serverDrafts))
+    } else if (published.length > 0) {
+      nextDrafts = published
+      setDrafts(published)
+      setIsDirty(false)
+      localStorage.setItem(key, JSON.stringify(published))
     } else if (saved && isEditableWeek) {
       nextDrafts = JSON.parse(saved) as ShiftDraft[]
       setDrafts(nextDrafts)
@@ -357,16 +433,31 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       : savedRows
         ? (JSON.parse(savedRows) as string[])
         : []
+    const previousRows = (previousDraftOrderRes.data ?? []) as Array<{ week_start: string; employee_id: string; display_order: number | null }>
+    const latestPreviousWeekStart = previousRows[0]?.week_start
+    const previousOrderedRowIds = latestPreviousWeekStart
+      ? Array.from(
+        new Set(
+          previousRows
+            .filter(row => row.week_start === latestPreviousWeekStart)
+            .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+            .map(row => row.employee_id)
+        )
+      )
+      : []
 
     // When published schedules exist, show ONLY published employees to avoid
     // stale draft rows (employees who were drafted but not published) bleeding through.
     // In draft mode, include restored row order so previously added staff stays visible.
     const candidateIds = published.length > 0
       ? autoShownIds
-      : Array.from(new Set([...restoredRowIds, ...autoShownIds]))
+      : Array.from(new Set([...restoredRowIds, ...autoShownIds, ...previousOrderedRowIds]))
 
     // Sort candidates by saved draft order where available
-    const draftOrderMap = new Map(serverOrderedRowIds.map((id, i) => [id, i]))
+    const draftOrderMap = new Map(
+      (serverOrderedRowIds.length > 0 ? serverOrderedRowIds : previousOrderedRowIds)
+        .map((id, i) => [id, i])
+    )
     const validRowIds = candidateIds
       .filter(employeeId =>
         [...activeEmployees, ...scheduledOnlyEmployees].some(employee => employee.id === employeeId)
@@ -505,7 +596,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const exportPlannerPdf = () => {
     if (days.length === 0) return
 
-    const title = `${department.toUpperCase()} Planner`
+    const title = `${departmentLabel} Planner`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = displayedEmployees.map(employee => {
       const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
@@ -602,6 +693,26 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     printWindow.document.close()
     printWindow.focus()
     printWindow.print()
+  }
+
+  const handleSaveDraft = async () => {
+    if (days.length === 0 || !isEditableWeek || !serverDraftsReady) return
+    setManualSaveStatus('saving')
+    try {
+      await saveServerDrafts(formatDate(days[0]), department, drafts, displayedEmployeeIds)
+      localStorage.setItem(currentDraftKey, JSON.stringify(drafts))
+      localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
+      setIsDirty(true)
+      setManualSaveStatus('saved')
+      window.setTimeout(() => setManualSaveStatus('idle'), 2400)
+    } catch (error) {
+      console.error('Failed to save schedule draft', error)
+      setManualSaveStatus('idle')
+      setPublishFeedback({
+        tone: 'error',
+        message: error instanceof Error ? error.message : 'Failed to save draft.',
+      })
+    }
   }
 
   const addStaffRow = () => {
@@ -769,9 +880,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       const startDate = formatDate(days[0])
       const endDate = formatDate(days[6])
       const key = `${draftKey(days[0])}_${department}`
+      await saveServerDrafts(startDate, department, drafts, displayedEmployeeIds)
 
-      // Delete by department so FOH and BOH schedules don't interfere with each other.
-      // Managers can have independent shifts in each department.
+      // Delete by department so each schedule tab can be published independently.
       const deleteResult = await supabase
         .from('schedules')
         .delete()
@@ -814,13 +925,16 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         const response = await fetch('/api/send-schedule-email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ week_start: startDate, week_end: endDate }),
+          body: JSON.stringify({ week_start: startDate, week_end: endDate, department }),
         })
         const payload = (await response.json().catch(() => ({}))) as { success?: boolean; sent?: number; error?: string; errors?: string[]; message?: string }
         const emailErrorMessage = payload.errors?.join(' ') || payload.error || payload.message || 'Failed to send schedule emails'
 
         if (!response.ok && response.status !== 207) {
           throw new Error(emailErrorMessage)
+        }
+        if ((payload.sent ?? 0) <= 0) {
+          throw new Error(payload.message || 'Schedule published, but no schedule emails were sent. Check Email Settings and employee email addresses.')
         }
 
         if (response.ok && payload.success !== false) {
@@ -881,7 +995,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     <div>
       <div className="mb-4 overflow-x-auto rounded-[18px] border border-slate-300 bg-white px-3.5 py-2 shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
         <div className="flex min-w-max items-center gap-3 whitespace-nowrap">
-          {/* 1. FOH / BOH */}
+          {/* 1. Department tabs */}
           {rightSlot}
           {/* 2. Today's Week */}
           <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => setWeekRef(new Date())}>
@@ -925,9 +1039,13 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             <Download className="w-4 h-4 mr-1.5" />
             Export PDF
           </Button>
+          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => void handleSaveDraft()} disabled={!isEditableWeek || manualSaveStatus === 'saving' || !serverDraftsReady}>
+            <Save className="w-4 h-4 mr-1.5" />
+            {manualSaveStatus === 'saving' ? 'Saving' : manualSaveStatus === 'saved' ? 'Saved' : 'Save Draft'}
+          </Button>
           <Button size="sm" className="h-8 rounded-lg px-3" onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
             <Send className="w-4 h-4 mr-1.5" />
-            Publish {department.toUpperCase()}
+            Publish
           </Button>
         </div>
       </div>
@@ -939,7 +1057,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       )}
 
       <div className="mb-5 rounded-2xl border bg-slate-50/80 p-4 md:p-5">
-        <h2 className="text-lg font-semibold">{department === 'boh' ? 'BOH Staff Lines' : 'FOH Staff Lines'}</h2>
+        <h2 className="text-lg font-semibold">{departmentLabel} Staff Lines</h2>
         <p className="text-sm text-muted-foreground">
           Add only the staff you want to schedule for this week, then build shifts row by row.
         </p>
@@ -1143,7 +1261,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              This will remove all staff rows and draft shifts for this week&apos;s {department.toUpperCase()} schedule. Enter a manager PIN to confirm.
+              This will remove all staff rows and draft shifts for this week&apos;s {departmentLabel} schedule. Enter a manager PIN to confirm.
             </p>
             <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
               This action cannot be undone.
@@ -1188,7 +1306,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              You are about to publish the {department.toUpperCase()} schedule for {formatWeekRange(weekRef)}.
+              You are about to publish the {departmentLabel} schedule for {formatWeekRange(weekRef)}.
             </p>
             <div className="rounded-lg border bg-slate-50 p-3 text-sm">
               <div className="flex justify-between">
