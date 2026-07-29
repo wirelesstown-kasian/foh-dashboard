@@ -2,13 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ReportDepartment, ReportPeriod, formatCurrency, getPercent, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
+import { ReportPeriod, formatCurrency, getPercent, getReportRange } from '@/lib/reporting'
 import { getRoleLabel } from '@/lib/organization'
 import { Trophy } from 'lucide-react'
 import { format } from 'date-fns'
@@ -20,9 +19,8 @@ export default function TaskPerformancePage() {
   const { completions } = useTaskCompletions()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
-  const { roleDefinitions, departmentDefinitions } = useAppSettings()
+  const { roleDefinitions } = useAppSettings()
 
-  const [department, setDepartment] = useState<ReportDepartment>('foh')
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
@@ -34,17 +32,7 @@ export default function TaskPerformancePage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
-  const activeDepartmentKeys = useMemo(
-    () => departmentDefinitions.filter(definition => definition.is_active).map(definition => definition.key),
-    [departmentDefinitions]
-  )
-  const selectedDepartment = activeDepartmentKeys.includes(department)
-    ? department
-    : activeDepartmentKeys[0] ?? department
-  const filteredEmployees = useMemo(
-    () => employees.filter(employee => isEmployeeInDepartment(employee, selectedDepartment)),
-    [employees, selectedDepartment]
-  )
+  const filteredEmployees = employees
   const monthStart = format(new Date(`${startDate}T12:00:00`), 'yyyy-MM-01')
   const monthEnd = format(new Date(new Date(`${endDate}T12:00:00`).getFullYear(), new Date(`${endDate}T12:00:00`).getMonth() + 1, 0), 'yyyy-MM-dd')
   const { filteredCompletions, employeeMonthStats, perfRows, totalTasks } = useMemo(
@@ -71,7 +59,7 @@ export default function TaskPerformancePage() {
       totalTasks,
       startDate,
       endDate,
-      departmentLabel: selectedDepartment.toUpperCase(),
+      departmentLabel: 'ALL STAFF',
     })
 
   const handleEmailReport = async (employeeId: string) => {
@@ -102,7 +90,6 @@ export default function TaskPerformancePage() {
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
-      <DepartmentTabs department={selectedDepartment} onChange={setDepartment} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
           period={period}
@@ -115,7 +102,7 @@ export default function TaskPerformancePage() {
           onCustomEndChange={setCustomEnd}
           rightSlot={
             <a
-              href={`/reporting/task-detail?department=${selectedDepartment}`}
+              href="/reporting/task-detail"
               className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               Task Detail
@@ -161,9 +148,9 @@ export default function TaskPerformancePage() {
           <TableBody>
             {perfRows.map((row, idx) => (
               <TableRow key={row.emp.id}>
-                <TableCell>{idx === 0 ? <Trophy className="h-4 w-4 text-amber-500" /> : idx + 1}</TableCell>
-                <TableCell>
-                  <a className="font-medium hover:underline" href={`/reporting/task-detail?employee=${row.emp.id}&department=${selectedDepartment}`}>
+              <TableCell>{idx === 0 ? <Trophy className="h-4 w-4 text-amber-500" /> : idx + 1}</TableCell>
+              <TableCell>
+                  <a className="font-medium hover:underline" href={`/reporting/task-detail?employee=${row.emp.id}`}>
                     {row.emp.name}
                   </a>
                   <Button size="sm" variant="outline" className="ml-3" onClick={() => setDetailEmployeeId(row.emp.id)}>
