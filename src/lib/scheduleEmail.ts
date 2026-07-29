@@ -76,7 +76,8 @@ export async function sendWeeklyScheduleEmails({
   }>).filter(schedule => schedule.employee && schedule.employee.role !== 'kitchen_staff')
 
   for (const { employee, shifts } of empMap.values()) {
-    if (!employee.email) continue
+    const employeeEmail = employee.email
+    if (!employeeEmail) continue
 
     const totalHours = shifts.reduce((sum, shift) => sum + calcHours(shift.start_time, shift.end_time), 0)
     const shiftsByDate = new Map(shifts.map(shift => [shift.date, shift]))
@@ -180,7 +181,7 @@ export async function sendWeeklyScheduleEmails({
     emailQueue.push(() =>
       sendEmail({
         resendKey,
-        to: employee.email,
+        to: employeeEmail,
         subject: `Your Schedule — Week of ${weekStartShort}`,
         html,
         fromName: emailSettings.from_name,
