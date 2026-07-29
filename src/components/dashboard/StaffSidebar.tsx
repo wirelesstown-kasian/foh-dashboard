@@ -32,10 +32,22 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
     return { employee, schedule, record }
   }).filter(entry => entry.employee)
 
-  const groupedStaff = {
-    foh: staffOnToday.filter(({ employee, schedule }) => (schedule?.department ?? getFallbackScheduleDepartment(employee!)) === 'foh'),
-    boh: staffOnToday.filter(({ employee, schedule }) => (schedule?.department ?? getFallbackScheduleDepartment(employee!)) === 'boh'),
-  }
+  const activeDepartmentKeys = departmentDefinitions
+    .filter(definition => definition.is_active)
+    .map(definition => definition.key)
+  const presentDepartmentKeys = Array.from(new Set(
+    staffOnToday
+      .map(({ employee, schedule }) => schedule?.department ?? getFallbackScheduleDepartment(employee!))
+      .filter(Boolean)
+  ))
+  const departmentKeys = Array.from(new Set([...activeDepartmentKeys, ...presentDepartmentKeys]))
+  const groupedStaff = departmentKeys.map(departmentKey => ({
+    key: departmentKey,
+    label: getDepartmentLabel(departmentKey, departmentDefinitions),
+    entries: staffOnToday.filter(({ employee, schedule }) => (
+      schedule?.department ?? getFallbackScheduleDepartment(employee!)
+    ) === departmentKey),
+  }))
 
   return (
     <aside className="flex min-h-0 w-72 shrink-0 flex-col border-r bg-white">
@@ -49,11 +61,8 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
         {staffOnToday.length === 0 && (
           <p className="text-xs text-muted-foreground text-center py-4">No scheduled or clocked-in staff today</p>
         )}
-        {([
-          ['FOH', groupedStaff.foh],
-          ['BOH', groupedStaff.boh],
-        ] as const).map(([label, entries]) => (
-          <section key={label} className="space-y-2">
+        {groupedStaff.map(({ key, label, entries }) => (
+          <section key={key} className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</h3>
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
@@ -108,7 +117,7 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                       </>
                     ) : (
                       <>
-                        <span className="text-slate-500">{getDepartmentLabel(employee?.primary_department ?? 'foh', departmentDefinitions)}</span>
+                        <span className="text-slate-500">{getDepartmentLabel(employee?.primary_department ?? 'unassigned', departmentDefinitions)}</span>
                         <span className="text-slate-500">Clock-in only</span>
                       </>
                     )}

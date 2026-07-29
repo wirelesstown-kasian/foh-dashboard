@@ -94,17 +94,16 @@ export function getRoleDotStyle(roleKey: string, definitions: RoleDefinition[] =
 }
 
 export function employeeMatchesScheduleDepartment(employee: Employee, department: ScheduleDepartment) {
-  const primaryDepartment = employee.primary_department ?? 'foh'
+  const primaryDepartment = employee.primary_department?.trim()
   return primaryDepartment === 'hybrid' || primaryDepartment === department
 }
 
 export function getFallbackScheduleDepartment(employee: Employee): ScheduleDepartment {
-  const primaryDepartment = employee.primary_department ?? 'foh'
-  return primaryDepartment === 'boh' ? 'boh' : 'foh'
+  return employee.primary_department?.trim() ?? 'foh'
 }
 
 export function getPrimaryDepartmentBadge(primaryDepartment: PrimaryDepartment | undefined, definitions: DepartmentDefinition[]) {
-  return getDepartmentLabel(primaryDepartment ?? 'foh', definitions)
+  return getDepartmentLabel(primaryDepartment ?? 'unassigned', definitions)
 }
 
 export function sortDefinitionsByOrder<T extends { display_order: number; label: string }>(definitions: T[]) {

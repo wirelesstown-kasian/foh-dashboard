@@ -1,7 +1,7 @@
 export type EmployeeRole = string
 export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
 export type SessionPhase = 'register_open' | 'pre_shift' | 'operation' | 'closing' | 'complete'
-export type ScheduleDepartment = 'foh' | 'boh'
+export type ScheduleDepartment = string
 export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
 export type TaskCompletionStatus = 'complete' | 'incomplete'
 export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
