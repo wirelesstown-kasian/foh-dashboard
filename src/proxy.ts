@@ -17,6 +17,10 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(session ? getHomePathForRole(session.role) : '/admin', request.url))
   }
 
+  if (pathname === '/') {
+    return NextResponse.next()
+  }
+
   if (session || hasAdminSession) {
     return NextResponse.next()
   }
