@@ -5,7 +5,7 @@ import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, useScheduledDepartmentIds, useTaskCompletions } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns, useScheduledDepartmentIds, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -38,6 +38,8 @@ type WageDetailRow = {
   tips: number
   baseWages: number
   guaranteeTopUp: number
+  commission: number
+  deductions: number
   totalEarnings: number
 }
 
@@ -47,6 +49,8 @@ type WageSummaryRow = {
   tips: number
   baseWages: number
   guaranteeTopUp: number
+  commission: number
+  deductions: number
   totalEarnings: number
   tipRate: number | null
   effectiveRate: number | null
@@ -174,6 +178,8 @@ function getDailyWageDetail({
     tips,
     baseWages,
     guaranteeTopUp,
+    commission: 0,
+    deductions: 0,
     totalEarnings: baseWages + tips + guaranteeTopUp,
   }
 }
@@ -182,10 +188,11 @@ export default function WageReportPage() {
   const employees = useEmployees()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
+  const { payrollRuns } = usePayrollRuns()
   const { completions } = useTaskCompletions()
   const { roleDefinitions } = useAppSettings()
 
-  const [department, setDepartment] = useState<ReportDepartment>('foh')
+  const [department, setDepartment] = useState<ReportDepartment>('all')
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
@@ -205,10 +212,11 @@ export default function WageReportPage() {
   const scheduledDeptIds = useScheduledDepartmentIds(startDate, endDate)
   const filteredEmployees = useMemo(
     () => employees.filter(employee => {
-      const dept = employee.primary_department ?? 'foh'
-      if (dept === 'hybrid') {
+      if (department === 'all') return true
+      const dept = employee.primary_department ?? ''
+      if (dept === 'hybrid' || dept === 'foh' || dept === 'boh') {
         const scheduled = scheduledDeptIds.get(department)
-        return scheduled && scheduled.size > 0 ? scheduled.has(employee.id) : true
+        return scheduled && scheduled.size > 0 ? scheduled.has(employee.id) : isEmployeeInDepartment(employee, department)
       }
       return isEmployeeInDepartment(employee, department)
     }),
@@ -293,6 +301,20 @@ export default function WageReportPage() {
     return new Map(scored.map((item, idx) => [item.empId, { ...item, overallRank: idx + 1, staffCount: scored.length }]))
   }, [completions, clockRecords, employees, eodReports, filteredEmployees, monthStart, monthEnd])
 
+  const matchingPayrollRun = useMemo(() => {
+    const exactDepartment = payrollRuns.find(run => (
+      run.start_date === startDate &&
+      run.end_date === endDate &&
+      run.department === department
+    ))
+    if (exactDepartment) return exactDepartment
+    return payrollRuns.find(run => (
+      run.start_date === startDate &&
+      run.end_date === endDate &&
+      run.department === 'all'
+    )) ?? null
+  }, [department, endDate, payrollRuns, startDate])
+
   const detailRowsByEmployeeId = useMemo(() => {
     const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
     const reportByDate = new Map(rangeReports.map(report => [report.session_date, report]))
@@ -346,6 +368,45 @@ export default function WageReportPage() {
   }, [clockRecords, employees, eodReports, filteredEmployees, endDate, startDate])
 
   const rows = useMemo(() => {
+    if (matchingPayrollRun?.payroll_run_items?.length) {
+      return matchingPayrollRun.payroll_run_items
+        .filter(item => department === 'all' || item.department === department)
+        .map(item => {
+          const existingEmployee = employees.find(employee => employee.id === item.employee_id)
+          const emp: Employee = existingEmployee ?? {
+            id: item.employee_id ?? item.id,
+            name: item.employee_name,
+            phone: null,
+            email: null,
+            role: item.role ?? 'staff',
+            primary_department: item.department,
+            schedule_departments: [item.department],
+            hourly_wage: null,
+            guaranteed_hourly: null,
+            tip_pool_hourly_rate: null,
+            payment_method: item.payment_method,
+            birth_date: null,
+            login_enabled: false,
+            is_active: true,
+            created_at: item.created_at,
+          }
+          return {
+            emp,
+            hours: Number(item.hours ?? 0),
+            tips: Number(item.tips ?? 0),
+            baseWages: Number(item.base_wages ?? 0),
+            guaranteeTopUp: Number(item.guarantee_top_up ?? 0),
+            commission: Number(item.commission ?? 0),
+            deductions: Number(item.deductions ?? 0),
+            totalEarnings: Number(item.payout_amount ?? item.net_pay ?? 0),
+            tipRate: Number(item.hours ?? 0) > 0 ? Number(item.tips ?? 0) / Number(item.hours ?? 0) : null,
+            effectiveRate: Number(item.hours ?? 0) > 0 ? Number(item.payout_amount ?? item.net_pay ?? 0) / Number(item.hours ?? 0) : null,
+            hasAutoClockOut: item.has_auto_clock_out,
+            hasOpenClock: item.has_open_clock,
+          }
+        })
+    }
+
     return filteredEmployees
       .map(emp => {
         const detailRows = detailRowsByEmployeeId.get(emp.id) ?? []
@@ -364,6 +425,8 @@ export default function WageReportPage() {
           tips,
           baseWages,
           guaranteeTopUp,
+          commission: 0,
+          deductions: 0,
           totalEarnings,
           tipRate: hours > 0 ? tips / hours : null,
           effectiveRate: hours > 0 ? totalEarnings / hours : null,
@@ -372,7 +435,7 @@ export default function WageReportPage() {
         }
       })
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
-  }, [clockRecords, detailRowsByEmployeeId, filteredEmployees, endDate, startDate])
+  }, [clockRecords, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, matchingPayrollRun, startDate])
 
   const buildWageReportHtml = (row: WageSummaryRow) => {
     const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
@@ -383,6 +446,7 @@ export default function WageReportPage() {
         <div class="card"><strong>Hours</strong><div class="metric">${row.hours.toFixed(2)} hrs</div></div>
         <div class="card"><strong>Tips</strong><div class="metric">${formatCurrency(row.tips)}</div></div>
         ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div class="metric">${formatCurrency(row.baseWages)}</div></div>` : ''}
+        ${view === 'earnings' ? `<div class="card"><strong>Deductions</strong><div class="metric">${formatCurrency(row.deductions)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Total Earnings</strong><div class="metric">${formatCurrency(row.totalEarnings)}</div></div>` : ''}
       </div>
       <h3>Comp Summary</h3>
@@ -463,7 +527,7 @@ export default function WageReportPage() {
     <div className="p-6">
       <AdminSubpageHeader
         title="Wage Report"
-        subtitle="Compare verified hours, tips, wages, and guaranteed top-up."
+        subtitle={matchingPayrollRun ? 'Saved payroll worksheet data is driving this range.' : 'Compare verified hours, tips, wages, and guaranteed top-up.'}
         backHref="/reporting"
         backLabel="Back to Reporting"
       />
@@ -532,6 +596,8 @@ export default function WageReportPage() {
                 <>
                   <TableHead className="text-right">Base Wages</TableHead>
                   <TableHead className="text-right">Guaranteed Top-Up</TableHead>
+                  <TableHead className="text-right">Commission</TableHead>
+                  <TableHead className="text-right">Deductions</TableHead>
                   <TableHead className="text-right">Total Earnings</TableHead>
                 </>
               )}
@@ -565,6 +631,8 @@ export default function WageReportPage() {
                   <>
                     <TableCell className="text-right">{formatCurrency(row.baseWages)}</TableCell>
                     <TableCell className="text-right text-violet-700">{formatCurrency(row.guaranteeTopUp)}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(row.commission)}</TableCell>
+                    <TableCell className="text-right text-red-700">{formatCurrency(row.deductions)}</TableCell>
                     <TableCell className="text-right font-bold">{formatCurrency(row.totalEarnings)}</TableCell>
                   </>
                 )}
@@ -572,7 +640,7 @@ export default function WageReportPage() {
             ))}
             {displayedRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={view === 'earnings' ? 10 : 7} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
+                <TableCell colSpan={view === 'earnings' ? 12 : 7} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -596,6 +664,8 @@ export default function WageReportPage() {
                   <>
                     <TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.baseWages, 0))}</TableCell>
                     <TableCell className="text-right font-semibold text-violet-700">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0))}</TableCell>
+                    <TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.commission, 0))}</TableCell>
+                    <TableCell className="text-right font-semibold text-red-700">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.deductions, 0))}</TableCell>
                     <TableCell className="text-right font-bold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.totalEarnings, 0))}</TableCell>
                   </>
                 )}

@@ -105,6 +105,74 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true })
   }
 
+  const { data: payrollRuns, error: payrollError } = await supabaseAdmin
+    .from('payroll_runs')
+    .select('*, payroll_run_items(*)')
+    .eq('start_date', start)
+    .eq('end_date', end)
+    .order('created_at', { ascending: false })
+
+  if (!payrollError) {
+    const payrollItem = ((payrollRuns ?? []) as Array<{
+      memo: string | null
+      payroll_run_items?: Array<{
+        employee_id: string | null
+        employee_name: string
+        hours: number
+        tips: number
+        base_wages: number
+        guarantee_top_up: number
+        commission: number
+        deductions: number
+        payout_amount: number
+        payment_method: string
+        has_auto_clock_out: boolean
+        has_open_clock: boolean
+        memo: string | null
+      }>
+    }>)
+      .flatMap(run => (run.payroll_run_items ?? []).map(item => ({ ...item, runMemo: run.memo })))
+      .find(item => item.employee_id === employee_id)
+
+    if (payrollItem) {
+      const hours = Number(payrollItem.hours ?? 0)
+      const tips = Number(payrollItem.tips ?? 0)
+      const payout = Number(payrollItem.payout_amount ?? 0)
+      const html = renderEmailShell(logoUrl, `
+        <h2 style="color:#1a1a1a">Payroll Worksheet Report — ${label}</h2>
+        <p>Hi ${employee.name},</p>
+        ${(payrollItem.has_auto_clock_out || payrollItem.has_open_clock) ? `
+          <div style="margin:0 0 16px;padding:12px 14px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:12px">
+            Clock warning: one or more shifts in this payroll worksheet need review.
+          </div>
+        ` : ''}
+        <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
+          <tr><td><strong>Period</strong></td><td>${label}</td></tr>
+          <tr><td><strong>Paid By</strong></td><td>${String(payrollItem.payment_method).toUpperCase()}</td></tr>
+          <tr><td><strong>Hours Worked</strong></td><td>${hours.toFixed(2)} hrs</td></tr>
+          <tr><td><strong>Tips Earned</strong></td><td>${formatCurrency(tips)}</td></tr>
+          <tr><td><strong>Base Wages</strong></td><td>${formatCurrency(Number(payrollItem.base_wages ?? 0))}</td></tr>
+          <tr><td><strong>Guaranteed Top-Up</strong></td><td>${formatCurrency(Number(payrollItem.guarantee_top_up ?? 0))}</td></tr>
+          <tr><td><strong>Commission</strong></td><td>${formatCurrency(Number(payrollItem.commission ?? 0))}</td></tr>
+          <tr><td><strong>Deductions</strong></td><td>${formatCurrency(Number(payrollItem.deductions ?? 0))}</td></tr>
+          <tr style="background:#eef7ff"><td><strong>Payout</strong></td><td><strong>${formatCurrency(payout)}</strong></td></tr>
+        </table>
+        ${(payrollItem.memo || payrollItem.runMemo) ? `<p style="margin-top:16px"><strong>Memo:</strong> ${payrollItem.memo ?? payrollItem.runMemo}</p>` : ''}
+      `, 520)
+
+      await sendEmail({
+        resendKey,
+        to: employee.email,
+        subject: `Payroll Worksheet Report — ${label}`,
+        html,
+        fromName: emailSettings.from_name,
+        fromEmail: emailSettings.from_email,
+        replyTo: emailSettings.reply_to,
+      })
+      return NextResponse.json({ success: true })
+    }
+  }
+
   // Fallback: rebuild report server-side (legacy path)
   const { data: reports, error: reportsError } = await supabaseAdmin
     .from('eod_reports')

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, EodReport, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { Employee, EodReport, PayrollRun, PayrollRunItem, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withPaymentMethod, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const REPORTING_REFRESH_EVENT = 'reporting-data-refresh'
 
@@ -19,11 +19,11 @@ export function useEmployees() {
     let mounted = true
     void (async () => {
       const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
-      const res = initial.error && isMissingTipPoolRateColumn(initial.error)
+      const res = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error))
         ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
         : initial
       if (!mounted) return
-      setEmployees(withTipPoolHourlyRate(res.data ?? []) as Employee[])
+      setEmployees(withPaymentMethod(withTipPoolHourlyRate(res.data ?? [])) as Employee[])
     })()
     return () => {
       mounted = false
@@ -161,4 +161,33 @@ export function useClockRecords() {
   }, [])
 
   return { clockRecords, setClockRecords }
+}
+
+export function usePayrollRuns() {
+  const [payrollRuns, setPayrollRuns] = useState<(PayrollRun & { payroll_run_items?: PayrollRunItem[] })[]>([])
+
+  useEffect(() => {
+    let mounted = true
+
+    const load = async () => {
+      const res = await supabase
+        .from('payroll_runs')
+        .select('*, payroll_run_items(*)')
+        .order('pay_date', { ascending: false })
+      if (!mounted) return
+      setPayrollRuns((res.data ?? []) as (PayrollRun & { payroll_run_items?: PayrollRunItem[] })[])
+    }
+
+    void load()
+    const handleRefresh = () => {
+      void load()
+    }
+    window.addEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
+    return () => {
+      mounted = false
+      window.removeEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
+    }
+  }, [])
+
+  return { payrollRuns, setPayrollRuns }
 }

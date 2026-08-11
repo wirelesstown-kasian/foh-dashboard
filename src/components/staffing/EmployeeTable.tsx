@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
-import { Employee, EmployeeRole } from '@/lib/types'
+import { Employee, EmployeeRole, PaymentMethod } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -43,6 +43,7 @@ interface FormState {
   hourly_wage: string
   guaranteed_hourly: string
   tip_pool_hourly_rate: string
+  payment_method: PaymentMethod | ''
   birth_date: string
   pin: string
   login_enabled: 'enabled' | 'disabled'
@@ -55,13 +56,21 @@ interface PayFormState {
   guaranteed_hourly: string
   tip_cap_enabled: boolean
   tip_pool_hourly_rate: string
+  payment_method: PaymentMethod | ''
 }
 
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 type DepartmentFilter = string
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'server', schedule_departments: ['server'], hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
-const EMPTY_PAY_FORM: PayFormState = { hourly_wage: '', guaranteed_enabled: false, guaranteed_hourly: '', tip_cap_enabled: false, tip_pool_hourly_rate: '' }
+const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'server', schedule_departments: ['server'], hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', payment_method: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
+const EMPTY_PAY_FORM: PayFormState = { hourly_wage: '', guaranteed_enabled: false, guaranteed_hourly: '', tip_cap_enabled: false, tip_pool_hourly_rate: '', payment_method: '' }
+
+function getPaymentMethodLabel(paymentMethod: PaymentMethod | null | undefined) {
+  if (paymentMethod === 'ach') return 'ACH'
+  if (paymentMethod === 'check') return 'Check'
+  if (paymentMethod === 'cash') return 'Cash'
+  return 'Select'
+}
 
 function formatPay(value: number | null) {
   return value !== null ? `$${value.toFixed(2)}` : '—'
@@ -162,6 +171,7 @@ export function EmployeeTable() {
       hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
+      payment_method: emp.payment_method ?? '',
       birth_date: emp.birth_date ?? '',
       pin: emp.pin_code ?? '',
       login_enabled: emp.login_enabled ? 'enabled' : 'disabled',
@@ -178,6 +188,7 @@ export function EmployeeTable() {
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       tip_cap_enabled: emp.tip_pool_hourly_rate !== null,
       tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
+      payment_method: emp.payment_method ?? '',
     })
     setPaySaveError(null)
     setPayDialogOpen(true)
@@ -187,6 +198,10 @@ export function EmployeeTable() {
     if (!form.name.trim()) return
     if (form.schedule_departments.length === 0) {
       setSaveError('Select at least one schedule department')
+      return
+    }
+    if (!form.payment_method) {
+      setSaveError('Select cash, check, or ACH payment method')
       return
     }
     if (!editTarget && !/^\d{4}$/.test(form.pin)) return
@@ -232,6 +247,10 @@ export function EmployeeTable() {
 
   const handlePaySave = async () => {
     if (!payTarget) return
+    if (!payForm.payment_method) {
+      setPaySaveError('Select cash, check, or ACH payment method')
+      return
+    }
     setPaySaving(true)
     setPaySaveError(null)
     try {
@@ -253,6 +272,7 @@ export function EmployeeTable() {
           hourly_wage: payForm.hourly_wage,
           guaranteed_hourly: payForm.guaranteed_enabled ? payForm.guaranteed_hourly : '',
           tip_pool_hourly_rate: payForm.tip_cap_enabled ? payForm.tip_pool_hourly_rate : '',
+          payment_method: payForm.payment_method,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -301,7 +321,7 @@ export function EmployeeTable() {
     editTarget
       ? form.pin === '' || /^\d{4}$/.test(form.pin)
       : /^\d{4}$/.test(form.pin)
-  )
+  ) && Boolean(form.payment_method)
 
   const toggleScheduleDepartment = (department: string) => {
     setForm(currentForm => {
@@ -393,6 +413,7 @@ export function EmployeeTable() {
               <TableHead>Hourly Wage</TableHead>
               <TableHead>Guaranteed / Hr</TableHead>
               <TableHead>Tip Cap / Hr</TableHead>
+              <TableHead>Paid By</TableHead>
               <TableHead>Birthday</TableHead>
               <TableHead>PIN</TableHead>
               <TableHead>App Login</TableHead>
@@ -422,6 +443,11 @@ export function EmployeeTable() {
                 <TableCell>{emp.guaranteed_hourly !== null ? `${formatPay(emp.guaranteed_hourly)} on` : 'Off'}</TableCell>
                 <TableCell>{emp.tip_pool_hourly_rate !== null ? `${formatPay(emp.tip_pool_hourly_rate)} on` : 'Off'}</TableCell>
                 <TableCell>
+                  <Badge variant={emp.payment_method ? 'outline' : 'destructive'}>
+                    {getPaymentMethodLabel(emp.payment_method)}
+                  </Badge>
+                </TableCell>
+                <TableCell>
                   {emp.birth_date ? format(new Date(emp.birth_date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
                 </TableCell>
                 <TableCell>
@@ -449,7 +475,7 @@ export function EmployeeTable() {
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
                   No employees found
                 </TableCell>
               </TableRow>
@@ -531,6 +557,19 @@ export function EmployeeTable() {
               Enable app login for people who should sign into the web app with email and password. Managers who sign in this way also unlock Admin Board access.
             </p>
             <div>
+              <Label>Paid By *</Label>
+              <Select value={form.payment_method || undefined} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
+                <SelectTrigger>
+                  <span className={form.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(form.payment_method || null)}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="check">Check</SelectItem>
+                  <SelectItem value="ach">ACH</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>Role</Label>
               <Select value={form.role} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
                 <SelectTrigger>
@@ -592,6 +631,20 @@ export function EmployeeTable() {
           </DialogHeader>
 
           <div className="space-y-4">
+            <div>
+              <Label>Paid By *</Label>
+              <Select value={payForm.payment_method || undefined} onValueChange={(v: string | null) => v && setPayForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
+                <SelectTrigger>
+                  <span className={payForm.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(payForm.payment_method || null)}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="check">Check</SelectItem>
+                  <SelectItem value="ach">ACH</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">Required before saving staffing and payroll details.</p>
+            </div>
             <div>
               <Label>Hourly Wage</Label>
               <Input

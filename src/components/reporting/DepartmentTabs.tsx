@@ -12,12 +12,26 @@ interface DepartmentTabsProps {
 
 export function DepartmentTabs({ department, onChange }: DepartmentTabsProps) {
   const { departmentDefinitions } = useAppSettings()
+  const tabs = [
+    { key: 'all', label: 'All' },
+    ...(departmentDefinitions.length > 0
+      ? departmentDefinitions.map(definition => ({ key: definition.key, label: definition.label }))
+      : [
+          { key: 'manager', label: 'Manager' },
+          { key: 'server', label: 'Server' },
+          { key: 'cook', label: 'Cook' },
+          { key: 'kitchen', label: 'Kitchen' },
+        ]),
+  ]
 
   return (
     <Tabs value={department} onValueChange={(value: string | null) => value && onChange(value as ReportDepartment)}>
-      <TabsList className="mb-4">
-        <TabsTrigger value="foh">{getDepartmentLabel('foh', departmentDefinitions)}</TabsTrigger>
-        <TabsTrigger value="boh">{getDepartmentLabel('boh', departmentDefinitions)}</TabsTrigger>
+      <TabsList className="mb-4 flex h-auto flex-wrap">
+        {tabs.map(tab => (
+          <TabsTrigger key={tab.key} value={tab.key}>
+            {tab.key === 'all' ? 'All' : getDepartmentLabel(tab.key, departmentDefinitions)}
+          </TabsTrigger>
+        ))}
       </TabsList>
     </Tabs>
   )

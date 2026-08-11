@@ -3,6 +3,7 @@ export type TaskType = 'pre_shift' | 'operation' | 'closing' | 'custom'
 export type SessionPhase = 'register_open' | 'pre_shift' | 'operation' | 'closing' | 'complete'
 export type ScheduleDepartment = string
 export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
+export type PaymentMethod = 'cash' | 'check' | 'ach'
 export type TaskCompletionStatus = 'complete' | 'incomplete'
 export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
 export type ReviewAttributionStatus = 'auto_match' | 'ai_estimate' | 'manual' | 'unassigned'
@@ -22,6 +23,7 @@ export interface Employee {
   hourly_wage: number | null
   guaranteed_hourly: number | null
   tip_pool_hourly_rate: number | null
+  payment_method?: PaymentMethod | null
   birth_date: string | null
   login_enabled?: boolean
   is_active: boolean
@@ -151,6 +153,49 @@ export interface CashBalanceEntry {
   description: string
   created_at: string
   updated_at: string
+}
+
+export interface PayrollRun {
+  id: string
+  department: string
+  start_date: string
+  end_date: string
+  pay_date: string
+  memo: string | null
+  total_cash: number
+  total_check: number
+  total_ach: number
+  total_gross: number
+  total_deductions: number
+  total_net: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollRunItem {
+  id: string
+  run_id: string
+  employee_id: string | null
+  employee_name: string
+  role: string | null
+  department: string
+  payment_method: PaymentMethod
+  hours: number
+  tips: number
+  base_wages: number
+  guarantee_top_up: number
+  commission: number
+  deductions: number
+  gross_pay: number
+  net_pay: number
+  payout_amount: number
+  cash_rounding: number
+  has_auto_clock_out: boolean
+  has_open_clock: boolean
+  memo: string | null
+  display_order: number
+  created_at: string
+  employee?: Employee | null
 }
 
 export interface GoogleReview {

@@ -12,7 +12,7 @@ import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format, startOfMonth } from 'date-fns'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withPaymentMethod, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
@@ -47,12 +47,12 @@ export default function DashboardPage() {
       const monthStart = format(startOfMonth(businessDate), 'yyyy-MM-dd')
       const loadEmployees = async () => {
         const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true)
-        const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+        const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error))
           ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true)
           : initial
         return {
           ...result,
-          data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+          data: withPaymentMethod(withTipPoolHourlyRate(result.data ?? [])) as Employee[],
         }
       }
 

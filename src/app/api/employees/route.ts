@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { hashPin, verifyPin } from '@/lib/pin'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { EmployeeRole } from '@/lib/types'
+import { EmployeeRole, PaymentMethod } from '@/lib/types'
 import { isValidPin } from '@/lib/validation'
 import { hashPassword } from '@/lib/password'
 import { getAppSettings } from '@/lib/appSettings'
@@ -11,8 +11,10 @@ import {
   EMPLOYEE_PUBLIC_SELECT,
   EMPLOYEE_PUBLIC_SELECT_FALLBACK,
   EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS,
+  isMissingPaymentMethodColumn,
   isMissingScheduleDepartmentsColumn,
   isMissingTipPoolRateColumn,
+  withPaymentMethod,
   withScheduleDepartments,
   withTipPoolHourlyRate,
 } from '@/lib/employeeSelect'
@@ -59,9 +61,20 @@ async function getValidScheduleDepartments(scheduleDepartments: unknown) {
   return null
 }
 
+function normalizePaymentMethod(paymentMethod: unknown): PaymentMethod | null {
+  if (paymentMethod !== 'cash' && paymentMethod !== 'check' && paymentMethod !== 'ach') return null
+  return paymentMethod
+}
+
 function withoutTipPoolHourlyRate<T extends { tip_pool_hourly_rate?: unknown }>(payload: T) {
   const fallbackPayload: Partial<T> = { ...payload }
   delete fallbackPayload.tip_pool_hourly_rate
+  return fallbackPayload
+}
+
+function withoutPaymentMethod<T extends { payment_method?: unknown }>(payload: T) {
+  const fallbackPayload: Partial<T> = { ...payload }
+  delete fallbackPayload.payment_method
   return fallbackPayload
 }
 
@@ -186,6 +199,11 @@ async function writeEmployeeWithOptionalFallback(
       continue
     }
 
+    if (isMissingPaymentMethodColumn(result.error) && 'payment_method' in nextPayload) {
+      nextPayload = withoutPaymentMethod(nextPayload)
+      continue
+    }
+
     return result.error
   }
 
@@ -235,11 +253,21 @@ export async function GET() {
     error = fallbackResult.error
   }
 
+  if (error && isMissingPaymentMethodColumn(error)) {
+    const fallbackResult = await supabaseAdmin
+      .from('employees')
+      .select(EMPLOYEE_PUBLIC_SELECT_FALLBACK)
+      .eq('is_active', true)
+      .order('name')
+    data = fallbackResult.data as unknown[] | null
+    error = fallbackResult.error
+  }
+
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ employees: withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[])) })
+  return NextResponse.json({ employees: withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[]))) })
 }
 
 export async function POST(req: NextRequest) {
@@ -247,7 +275,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
+  const { name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, payment_method, login_enabled, login_password } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
@@ -286,6 +314,10 @@ export async function POST(req: NextRequest) {
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
     return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
   }
+  const paymentMethod = normalizePaymentMethod(payment_method)
+  if (!paymentMethod) {
+    return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
+  }
 
   try {
     const duplicate = await findDuplicatePin(pin)
@@ -308,6 +340,7 @@ export async function POST(req: NextRequest) {
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    payment_method: paymentMethod,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     login_enabled: login_enabled === true,
     login_password_hash: loginPasswordHash,
@@ -329,7 +362,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, login_enabled, login_password } = await req.json()
+  const { id, name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, payment_method, login_enabled, login_password } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -369,6 +402,10 @@ export async function PATCH(req: NextRequest) {
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
     return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
   }
+  const paymentMethod = normalizePaymentMethod(payment_method)
+  if (!paymentMethod) {
+    return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
+  }
 
   const update: {
     name: string
@@ -380,6 +417,7 @@ export async function PATCH(req: NextRequest) {
     hourly_wage: number | null
     guaranteed_hourly: number | null
     tip_pool_hourly_rate: number | null
+    payment_method: PaymentMethod
     birth_date: string | null
     login_enabled: boolean
     pin_hash?: string
@@ -395,6 +433,7 @@ export async function PATCH(req: NextRequest) {
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    payment_method: paymentMethod,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     login_enabled: login_enabled === true,
   }

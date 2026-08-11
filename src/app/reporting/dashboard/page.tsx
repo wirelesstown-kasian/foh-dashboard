@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEmployees, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -376,6 +376,7 @@ function MixBar({ label, value, total, color }: { label: string; value: number; 
 export default function ReportingDashboardPage() {
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
+  const { payrollRuns } = usePayrollRuns()
   const employees = useEmployees()
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
@@ -435,8 +436,18 @@ export default function ReportingDashboardPage() {
     () => cashEntries.filter(entry => entry.entry_date >= previousStartDate && entry.entry_date <= previousEndDate),
     [cashEntries, previousEndDate, previousStartDate]
   )
+  const currentPayrollRuns = useMemo(
+    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate),
+    [endDate, payrollRuns, startDate]
+  )
+  const previousPayrollRuns = useMemo(
+    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate),
+    [payrollRuns, previousEndDate, previousStartDate]
+  )
+  const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
+  const hasPreviousSavedPayroll = previousPayrollRuns.length > 0
 
-  const currentWageSpend = useMemo(() => (
+  const estimatedCurrentWageSpend = useMemo(() => (
     clockRecords
       .filter(record => record.session_date >= startDate && record.session_date <= endDate)
       .reduce((sum, record) => {
@@ -445,7 +456,7 @@ export default function ReportingDashboardPage() {
       }, 0)
   ), [clockRecords, employeeById, endDate, startDate])
 
-  const previousWageSpend = useMemo(() => (
+  const estimatedPreviousWageSpend = useMemo(() => (
     clockRecords
       .filter(record => record.session_date >= previousStartDate && record.session_date <= previousEndDate)
       .reduce((sum, record) => {
@@ -453,6 +464,21 @@ export default function ReportingDashboardPage() {
         return sum + getEffectiveClockHours(record) * Number(employee?.hourly_wage ?? 0)
       }, 0)
   ), [clockRecords, employeeById, previousEndDate, previousStartDate])
+  const currentWageSpend = hasCurrentSavedPayroll
+    ? currentPayrollRuns.reduce((sum, run) => sum + Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0), 0)
+    : estimatedCurrentWageSpend
+  const previousWageSpend = hasPreviousSavedPayroll
+    ? previousPayrollRuns.reduce((sum, run) => sum + Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0), 0)
+    : estimatedPreviousWageSpend
+  const payrollByDepartment = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const run of currentPayrollRuns) {
+      for (const item of run.payroll_run_items ?? []) {
+        map.set(item.department, (map.get(item.department) ?? 0) + Number(item.payout_amount ?? 0))
+      }
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1])
+  }, [currentPayrollRuns])
 
   const currentTotals = useMemo(
     () => sumReports(currentReports, currentCashEntries, currentWageSpend),
@@ -507,6 +533,14 @@ export default function ReportingDashboardPage() {
     [closedDays, currentDates, period, reportsByDate]
   )
   const wagesSeries = useMemo(() => {
+    if (hasCurrentSavedPayroll) {
+      return currentPayrollRuns.map(run => ({
+        label: run.pay_date,
+        date: run.pay_date,
+        value: Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0),
+        closed: false,
+      }))
+    }
     const rangeLength = currentDates.length
     const bucketMap = new Map<string, SeriesPoint>()
     for (const date of currentDates) {
@@ -528,7 +562,7 @@ export default function ReportingDashboardPage() {
       bucketMap.set(bucketKey, current)
     }
     return [...bucketMap.values()]
-  }, [clockRecords, closedDays, currentDates, employeeById, period])
+  }, [clockRecords, closedDays, currentDates, currentPayrollRuns, employeeById, hasCurrentSavedPayroll, period])
   const cashFlowSeries = useMemo(() => {
     const rangeLength = currentDates.length
     const bucketMap = new Map<string, SeriesPoint>()
@@ -695,6 +729,30 @@ export default function ReportingDashboardPage() {
             icon={card.icon}
           />
         ))}
+      </div>
+
+      <div className="mt-5 rounded-xl border bg-white p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Payroll By Department</p>
+            <h2 className="text-lg font-semibold text-slate-950">{hasCurrentSavedPayroll ? 'Saved payroll payouts' : 'Estimated from approved clock hours'}</h2>
+          </div>
+          <Badge variant="outline">{hasCurrentSavedPayroll ? 'Worksheet' : 'Estimate'}</Badge>
+        </div>
+        {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
+          <div className="grid gap-3 md:grid-cols-4">
+            {payrollByDepartment.map(([dept, amount]) => (
+              <div key={dept} className="rounded-lg border bg-slate-50 p-3">
+                <div className="text-xs font-medium uppercase text-slate-500">{dept}</div>
+                <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(amount)}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Save a wage worksheet in this date range to show exact cash, check, and ACH payroll by department.
+          </p>
+        )}
       </div>
     </div>
   )
