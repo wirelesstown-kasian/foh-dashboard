@@ -387,95 +387,97 @@ export default function WageWorksheetPage() {
       )}
 
       {step === 'setup' ? (
-        <div className="max-w-6xl overflow-hidden rounded-xl border bg-white shadow-sm">
-          <div className="border-b bg-slate-950 px-6 py-5 text-white">
+        <div className="max-w-7xl overflow-hidden rounded-xl border bg-white shadow-sm">
+          <div className="border-b bg-slate-950 px-5 py-4 text-white">
             <p className="text-xs font-semibold uppercase text-slate-300">Worksheet Setup</p>
             <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold">Create Payroll Worksheet</h2>
+                <h2 className="text-xl font-semibold">Create Payroll Worksheet</h2>
                 <p className="mt-1 text-sm text-slate-300">Choose department, payroll type, pay date, and the period to load.</p>
               </div>
-              <div className="rounded-lg border border-white/20 px-3 py-2 text-right">
+              <div className="rounded-lg border border-white/20 px-3 py-1.5 text-right">
                 <div className="text-xs uppercase text-slate-300">Selected Period</div>
                 <div className="text-sm font-semibold">{startDate} to {endDate}</div>
               </div>
             </div>
           </div>
 
-          <div className="p-6">
-            <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-              <div className="space-y-4">
-                <div className="rounded-xl border bg-white p-5">
-                  <div className="mb-4 flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">1</div>
-                    <div>
-                      <h3 className="font-semibold text-slate-950">Department</h3>
-                      <p className="text-sm text-muted-foreground">Choose the staff group for this worksheet.</p>
+          <div className="p-5">
+            <div className="grid gap-5 xl:grid-cols-[1.5fr_0.5fr]">
+              <div className="space-y-3">
+                <div className="grid gap-3 lg:grid-cols-3">
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="mb-3 flex items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">1</div>
+                      <div>
+                        <h3 className="font-semibold text-slate-950">Department</h3>
+                        <p className="text-xs text-muted-foreground">Choose staff group.</p>
+                      </div>
+                    </div>
+                    <div className="grid gap-3">
+                      <div>
+                        <Label>Department</Label>
+                        <Select value={department} onValueChange={(value: string | null) => value && handleDepartmentChange(value)}>
+                          <SelectTrigger><span>{departmentOptions.find(option => option.key === department)?.label ?? department}</span></SelectTrigger>
+                          <SelectContent>
+                            {departmentOptions.map(option => (
+                              <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Payroll Type</Label>
+                        <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
+                          <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="weekly">Weekly</SelectItem>
+                            <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                   </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <Label>Department</Label>
-                      <Select value={department} onValueChange={(value: string | null) => value && handleDepartmentChange(value)}>
-                        <SelectTrigger><span>{departmentOptions.find(option => option.key === department)?.label ?? department}</span></SelectTrigger>
-                        <SelectContent>
-                          {departmentOptions.map(option => (
-                            <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="mb-3 flex items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">2</div>
+                      <div>
+                        <h3 className="font-semibold text-slate-950">Pay Date</h3>
+                        <p className="text-xs text-muted-foreground">Generates period.</p>
+                      </div>
                     </div>
                     <div>
-                      <Label>Payroll Type</Label>
-                      <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
-                        <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="weekly">Weekly</SelectItem>
-                          <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label>Pay Date</Label>
+                      <Input type="date" value={payDate} onChange={event => handlePayDateChange(event.target.value)} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border bg-white p-4">
+                    <div className="mb-3 flex items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">3</div>
+                      <div>
+                        <h3 className="font-semibold text-slate-950">Pay Period Confirm</h3>
+                        <p className="text-xs text-muted-foreground">Review or adjust range.</p>
+                      </div>
+                    </div>
+                    <div className="grid gap-3">
+                      <div>
+                        <Label>Pay Range Start</Label>
+                        <Input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} />
+                      </div>
+                      <div>
+                        <Label>Pay Range End</Label>
+                        <Input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} />
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-xl border bg-white p-5">
-                  <div className="mb-4 flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">2</div>
-                    <div>
-                      <h3 className="font-semibold text-slate-950">Pay Date</h3>
-                      <p className="text-sm text-muted-foreground">Changing pay date generates the expected payroll period.</p>
-                    </div>
-                  </div>
-                  <div className="max-w-sm">
-                    <Label>Pay Date</Label>
-                    <Input type="date" value={payDate} onChange={event => handlePayDateChange(event.target.value)} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border bg-white p-5">
-                  <div className="mb-4 flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">3</div>
-                    <div>
-                      <h3 className="font-semibold text-slate-950">Pay Period Confirm</h3>
-                      <p className="text-sm text-muted-foreground">Review the generated range or adjust it manually.</p>
-                    </div>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <Label>Pay Range Start</Label>
-                      <Input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} />
-                    </div>
-                    <div>
-                      <Label>Pay Range End</Label>
-                      <Input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border bg-white p-5">
+                <div className="rounded-xl border bg-white p-4">
                   <Label>Payroll Memo</Label>
                   <Textarea
-                    className="min-h-28"
+                    className="min-h-20"
                     value={memo}
                     onChange={event => setMemo(event.target.value)}
                     placeholder="Special attention, payroll notes, or outside reporting reminders"
@@ -483,43 +485,43 @@ export default function WageWorksheetPage() {
                 </div>
               </div>
 
-              <div className="rounded-xl border bg-slate-50 p-5 lg:sticky lg:top-4 lg:self-start">
-                <div className="space-y-4">
+              <div className="rounded-xl border bg-slate-50 p-4 xl:sticky xl:top-4 xl:self-start">
+                <div className="space-y-3">
                   <div>
                     <p className="text-xs font-semibold uppercase text-slate-500">Period Rule</p>
-                    <p className="mt-1 text-lg font-semibold text-slate-950">
+                    <p className="mt-1 text-base font-semibold text-slate-950">
                       {payrollCycle === 'weekly' ? 'Previous Mon-Sun week' : '1-15 or 16-end of month'}
                     </p>
-                    <p className="mt-1 text-sm text-slate-600">
+                    <p className="mt-1 text-xs text-slate-600">
                       Changing the pay date updates the range. Managers can still edit the start and end dates.
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-lg border bg-white p-3">
+                  <div className="grid gap-2 text-sm">
+                    <div className="rounded-lg border bg-white p-2.5">
                       <div className="text-xs uppercase text-slate-400">Department</div>
                       <div className="mt-1 font-semibold text-slate-900">{departmentOptions.find(option => option.key === department)?.label ?? department}</div>
                     </div>
-                    <div className="rounded-lg border bg-white p-3">
+                    <div className="rounded-lg border bg-white p-2.5">
                       <div className="text-xs uppercase text-slate-400">Pay Type</div>
                       <div className="mt-1 font-semibold text-slate-900">{payrollCycleLabel(payrollCycle)}</div>
                     </div>
-                    <div className="rounded-lg border bg-white p-3">
+                    <div className="rounded-lg border bg-white p-2.5">
                       <div className="text-xs uppercase text-slate-400">Pay Date</div>
                       <div className="mt-1 font-semibold text-slate-900">{payDate || 'Select date'}</div>
                     </div>
-                    <div className="rounded-lg border bg-white p-3">
+                    <div className="rounded-lg border bg-white p-2.5">
                       <div className="text-xs uppercase text-slate-400">Range</div>
                       <div className="mt-1 font-semibold text-slate-900">{startDate && endDate ? `${startDate} to ${endDate}` : 'Select range'}</div>
                     </div>
                   </div>
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
                     Server department defaults to weekly payroll. All other departments default to semi-monthly payroll.
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
               <p className="text-sm text-muted-foreground">Rows with zero recorded hours are skipped unless added manually.</p>
               <Button className="min-w-32" onClick={buildWorksheet} disabled={!startDate || !endDate || !payDate}>Next</Button>
             </div>
@@ -653,22 +655,22 @@ export default function WageWorksheetPage() {
       )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-5xl">
           <DialogHeader>
             <DialogTitle>Payout Summary</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="min-w-0 rounded-xl border bg-emerald-50 p-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="min-w-0 rounded-xl border bg-emerald-50 p-5">
               <p className="text-xs font-semibold uppercase text-emerald-700">Cash</p>
-              <p className="mt-1 break-words text-2xl font-bold leading-tight text-emerald-950 sm:text-3xl">{formatCurrency(totals.cash)}</p>
+              <p className="mt-1 break-words text-[clamp(1.35rem,2.4vw,2rem)] font-bold leading-tight text-emerald-950">{formatCurrency(totals.cash)}</p>
             </div>
-            <div className="min-w-0 rounded-xl border bg-slate-50 p-4">
+            <div className="min-w-0 rounded-xl border bg-slate-50 p-5">
               <p className="text-xs font-semibold uppercase text-slate-500">Check</p>
-              <p className="mt-1 break-words text-2xl font-bold leading-tight text-slate-950 sm:text-3xl">{formatCurrency(totals.check)}</p>
+              <p className="mt-1 break-words text-[clamp(1.35rem,2.4vw,2rem)] font-bold leading-tight text-slate-950">{formatCurrency(totals.check)}</p>
             </div>
-            <div className="min-w-0 rounded-xl border bg-blue-50 p-4">
+            <div className="min-w-0 rounded-xl border bg-blue-50 p-5">
               <p className="text-xs font-semibold uppercase text-blue-700">ACH</p>
-              <p className="mt-1 break-words text-2xl font-bold leading-tight text-blue-950 sm:text-3xl">{formatCurrency(totals.ach)}</p>
+              <p className="mt-1 break-words text-[clamp(1.35rem,2.4vw,2rem)] font-bold leading-tight text-blue-950">{formatCurrency(totals.ach)}</p>
             </div>
           </div>
           <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 text-sm sm:grid-cols-3">

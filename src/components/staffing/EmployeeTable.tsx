@@ -448,7 +448,7 @@ export function EmployeeTable() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={v => { if (!v) setDialogOpen(false) }}>
-        <DialogContent className="flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-4xl flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
           </DialogHeader>
@@ -582,20 +582,24 @@ export function EmployeeTable() {
 
             <div>
               <Label>Hourly Wage</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.hourly_wage}
-                onChange={e => setForm(f => ({ ...f, hourly_wage: e.target.value }))}
-                placeholder="0.00"
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">$</span>
+                <Input
+                  className="pl-7"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.hourly_wage}
+                  onChange={e => setForm(f => ({ ...f, hourly_wage: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </div>
             </div>
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <Label>PIN</Label>
                 <div className="flex items-center gap-2">
-                  {editTarget?.pin_code && !resetPinMode && (
+                  {editTarget && !resetPinMode && (
                     <Button type="button" variant="outline" size="sm" onClick={() => setShowPin(value => !value)}>
                       {showPin ? 'Hide PIN' : 'Reveal PIN'}
                     </Button>
@@ -609,7 +613,7 @@ export function EmployeeTable() {
               </div>
               {editTarget && !resetPinMode ? (
                 <div className="rounded-lg border bg-slate-50 px-3 py-2 font-mono text-sm tracking-widest text-slate-700">
-                  {editTarget.pin_code ? (showPin ? editTarget.pin_code : '••••') : 'Current PIN hidden'}
+                  {showPin ? (editTarget.pin_code ?? 'PIN not available; reset to set a visible PIN') : '••••'}
                 </div>
               ) : (
                 <div className="flex gap-2">
