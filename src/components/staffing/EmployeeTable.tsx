@@ -105,9 +105,9 @@ function ToggleRow({
   children: ReactNode
 }) {
   return (
-    <div className="rounded-lg border bg-background px-3 py-3">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+    <div className="min-w-0 rounded-lg border bg-background px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <Label className="text-sm font-medium">{label}</Label>
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         </div>
@@ -128,7 +128,7 @@ function ToggleRow({
           <span className="sr-only">{checked ? `Disable ${label}` : `Enable ${label}`}</span>
         </button>
       </div>
-      {checked && <div className="mt-3">{children}</div>}
+      {checked && <div className="mt-3 min-w-0 space-y-1">{children}</div>}
     </div>
   )
 }
@@ -143,6 +143,7 @@ export function EmployeeTable() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [resetPinMode, setResetPinMode] = useState(false)
+  const [showPin, setShowPin] = useState(false)
   const [filterRole, setFilterRole] = useState<string>('all')
   const [filterDepartment, setFilterDepartment] = useState<DepartmentFilter>('all')
   const [sortBy, setSortBy] = useState<SortOption>('name_asc')
@@ -166,6 +167,7 @@ export function EmployeeTable() {
     const firstDepartment = departmentDefinitions.find(department => department.key === 'server')?.key ?? departmentDefinitions[0]?.key ?? 'server'
     setEditTarget(null)
     setResetPinMode(true)
+    setShowPin(false)
     setForm({ ...EMPTY_FORM, primary_department: firstDepartment, schedule_departments: [firstDepartment] })
     setDialogOpen(true)
   }
@@ -195,6 +197,7 @@ export function EmployeeTable() {
       login_password: '',
     })
     setResetPinMode(false)
+    setShowPin(false)
     setDialogOpen(true)
   }
 
@@ -445,7 +448,7 @@ export function EmployeeTable() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={v => { if (!v) setDialogOpen(false) }}>
-        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-4xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
           </DialogHeader>
@@ -527,7 +530,7 @@ export function EmployeeTable() {
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 lg:grid-cols-3">
               <ToggleRow
                 checked={form.tip_cap_enabled}
                 onCheckedChange={checked => setForm(f => ({ ...f, tip_cap_enabled: checked, tip_pool_hourly_rate: checked ? f.tip_pool_hourly_rate : '' }))}
@@ -591,26 +594,38 @@ export function EmployeeTable() {
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <Label>PIN</Label>
-                {editTarget && !resetPinMode && (
-                  <Button type="button" variant="outline" size="sm" onClick={() => { setResetPinMode(true); setForm(f => ({ ...f, pin: '' })) }}>
-                    Reset PIN
-                  </Button>
-                )}
+                <div className="flex items-center gap-2">
+                  {editTarget?.pin_code && !resetPinMode && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowPin(value => !value)}>
+                      {showPin ? 'Hide PIN' : 'Reveal PIN'}
+                    </Button>
+                  )}
+                  {editTarget && !resetPinMode && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => { setResetPinMode(true); setShowPin(false); setForm(f => ({ ...f, pin: '' })) }}>
+                      Reset PIN
+                    </Button>
+                  )}
+                </div>
               </div>
               {editTarget && !resetPinMode ? (
                 <div className="rounded-lg border bg-slate-50 px-3 py-2 font-mono text-sm tracking-widest text-slate-700">
-                  {editTarget.pin_code ?? 'Current PIN hidden'}
+                  {editTarget.pin_code ? (showPin ? editTarget.pin_code : '••••') : 'Current PIN hidden'}
                 </div>
               ) : (
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={form.pin}
-                  onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-                  placeholder="1234"
-                  className="tracking-widest text-center font-mono"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    type={showPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={form.pin}
+                    onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                    placeholder="1234"
+                    className="font-mono text-center tracking-widest"
+                  />
+                  <Button type="button" variant="outline" onClick={() => setShowPin(value => !value)}>
+                    {showPin ? 'Hide' : 'Show'}
+                  </Button>
+                </div>
               )}
             </div>
             {saveError && (

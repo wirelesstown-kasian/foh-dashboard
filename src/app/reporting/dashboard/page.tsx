@@ -782,7 +782,12 @@ export default function ReportingDashboardPage() {
             <MixBar label="Credit Card" value={currentTotals.card} total={mixTotal} color="#2563eb" />
             <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316" />
           </div>
-          <div className="mt-5 grid grid-cols-2 gap-3">
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border bg-emerald-50 p-3">
+              <div className="text-xs font-medium uppercase text-emerald-700">Tip Out</div>
+              <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(currentTotals.tips)}</div>
+              <div className="mt-0.5 text-[11px] text-emerald-700">Current range</div>
+            </div>
             <div className="rounded-lg border bg-violet-50 p-3">
               <div className="text-xs font-medium uppercase text-violet-700">Payroll</div>
               <div className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(currentTotals.wages)}</div>

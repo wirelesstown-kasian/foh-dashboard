@@ -403,48 +403,76 @@ export default function WageWorksheetPage() {
           </div>
 
           <div className="p-6">
-            <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-              <div className="space-y-5">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <Label>Department</Label>
-                    <Select value={department} onValueChange={(value: string | null) => value && handleDepartmentChange(value)}>
-                      <SelectTrigger><span>{departmentOptions.find(option => option.key === department)?.label ?? department}</span></SelectTrigger>
-                      <SelectContent>
-                        {departmentOptions.map(option => (
-                          <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
+              <div className="space-y-4">
+                <div className="rounded-xl border bg-white p-5">
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">1</div>
+                    <div>
+                      <h3 className="font-semibold text-slate-950">Department</h3>
+                      <p className="text-sm text-muted-foreground">Choose the staff group for this worksheet.</p>
+                    </div>
                   </div>
-                  <div>
-                    <Label>Payroll Type</Label>
-                    <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
-                      <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="weekly">Weekly</SelectItem>
-                        <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label>Department</Label>
+                      <Select value={department} onValueChange={(value: string | null) => value && handleDepartmentChange(value)}>
+                        <SelectTrigger><span>{departmentOptions.find(option => option.key === department)?.label ?? department}</span></SelectTrigger>
+                        <SelectContent>
+                          {departmentOptions.map(option => (
+                            <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Payroll Type</Label>
+                      <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
+                        <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="weekly">Weekly</SelectItem>
+                          <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div>
+                <div className="rounded-xl border bg-white p-5">
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">2</div>
+                    <div>
+                      <h3 className="font-semibold text-slate-950">Pay Date</h3>
+                      <p className="text-sm text-muted-foreground">Changing pay date generates the expected payroll period.</p>
+                    </div>
+                  </div>
+                  <div className="max-w-sm">
                     <Label>Pay Date</Label>
                     <Input type="date" value={payDate} onChange={event => handlePayDateChange(event.target.value)} />
                   </div>
-                  <div>
-                    <Label>Pay Range Start</Label>
-                    <Input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} />
+                </div>
+
+                <div className="rounded-xl border bg-white p-5">
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-semibold text-white">3</div>
+                    <div>
+                      <h3 className="font-semibold text-slate-950">Pay Period Confirm</h3>
+                      <p className="text-sm text-muted-foreground">Review the generated range or adjust it manually.</p>
+                    </div>
                   </div>
-                  <div>
-                    <Label>Pay Range End</Label>
-                    <Input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label>Pay Range Start</Label>
+                      <Input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Pay Range End</Label>
+                      <Input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} />
+                    </div>
                   </div>
                 </div>
 
-                <div>
+                <div className="rounded-xl border bg-white p-5">
                   <Label>Payroll Memo</Label>
                   <Textarea
                     className="min-h-28"
@@ -455,7 +483,7 @@ export default function WageWorksheetPage() {
                 </div>
               </div>
 
-              <div className="rounded-xl border bg-slate-50 p-5">
+              <div className="rounded-xl border bg-slate-50 p-5 lg:sticky lg:top-4 lg:self-start">
                 <div className="space-y-4">
                   <div>
                     <p className="text-xs font-semibold uppercase text-slate-500">Period Rule</p>
@@ -625,17 +653,37 @@ export default function WageWorksheetPage() {
       )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl">
           <DialogHeader>
             <DialogTitle>Payout Summary</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-xl border p-4"><p className="text-xs uppercase text-muted-foreground">Cash</p><p className="text-2xl font-bold">{formatCurrency(totals.cash)}</p></div>
-            <div className="rounded-xl border p-4"><p className="text-xs uppercase text-muted-foreground">Check</p><p className="text-2xl font-bold">{formatCurrency(totals.check)}</p></div>
-            <div className="rounded-xl border p-4"><p className="text-xs uppercase text-muted-foreground">ACH</p><p className="text-2xl font-bold">{formatCurrency(totals.ach)}</p></div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="min-w-0 rounded-xl border bg-emerald-50 p-4">
+              <p className="text-xs font-semibold uppercase text-emerald-700">Cash</p>
+              <p className="mt-1 break-words text-2xl font-bold leading-tight text-emerald-950 sm:text-3xl">{formatCurrency(totals.cash)}</p>
+            </div>
+            <div className="min-w-0 rounded-xl border bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase text-slate-500">Check</p>
+              <p className="mt-1 break-words text-2xl font-bold leading-tight text-slate-950 sm:text-3xl">{formatCurrency(totals.check)}</p>
+            </div>
+            <div className="min-w-0 rounded-xl border bg-blue-50 p-4">
+              <p className="text-xs font-semibold uppercase text-blue-700">ACH</p>
+              <p className="mt-1 break-words text-2xl font-bold leading-tight text-blue-950 sm:text-3xl">{formatCurrency(totals.ach)}</p>
+            </div>
           </div>
-          <div className="rounded-xl border bg-slate-50 p-4 text-sm">
-            Gross {formatCurrency(totals.gross)} - deductions {formatCurrency(totals.deductions)} = net {formatCurrency(totals.net)}.
+          <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 text-sm sm:grid-cols-3">
+            <div>
+              <div className="text-xs uppercase text-muted-foreground">Gross</div>
+              <div className="mt-1 font-semibold text-slate-950">{formatCurrency(totals.gross)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-muted-foreground">Deductions</div>
+              <div className="mt-1 font-semibold text-red-700">{formatCurrency(totals.deductions)}</div>
+            </div>
+            <div>
+              <div className="text-xs uppercase text-muted-foreground">Net</div>
+              <div className="mt-1 font-semibold text-slate-950">{formatCurrency(totals.net)}</div>
+            </div>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => printSummary({ rows, totals, startDate, endDate, payDate, department, memo })}>Print Summary</Button>
