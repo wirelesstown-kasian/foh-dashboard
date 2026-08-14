@@ -12,15 +12,21 @@ export function notifyReportingDataChanged() {
   window.dispatchEvent(new Event(REPORTING_REFRESH_EVENT))
 }
 
-export function useEmployees() {
+export function useEmployees({ includeArchived = false }: { includeArchived?: boolean } = {}) {
   const [employees, setEmployees] = useState<Employee[]>([])
 
   useEffect(() => {
     let mounted = true
     void (async () => {
-      const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
+      let query = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).order('name')
+      if (!includeArchived) query = query.eq('is_active', true)
+      const initial = await query
       const res = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error))
-        ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
+        ? await (() => {
+            let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).order('name')
+            if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
+            return fallbackQuery
+          })()
         : initial
       if (!mounted) return
       setEmployees(withPaymentMethod(withTipPoolHourlyRate(res.data ?? [])) as Employee[])
@@ -28,7 +34,7 @@ export function useEmployees() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [includeArchived])
 
   return employees
 }

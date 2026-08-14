@@ -499,10 +499,13 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
 
-  const { error } = await supabaseAdmin.from('employees').update({ is_active: false }).eq('id', id)
+  const { error } = await supabaseAdmin
+    .from('employees')
+    .update({ is_active: false, login_enabled: false, login_password_hash: null })
+    .eq('id', id)
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, archived: true })
 }

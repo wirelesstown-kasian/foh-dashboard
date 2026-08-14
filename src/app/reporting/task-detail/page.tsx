@@ -34,7 +34,7 @@ const STATUS_ORDER: Record<TaskSummaryRow['status'], number> = {
 }
 
 export default function TaskDetailPage() {
-  const employees = useEmployees()
+  const employees = useEmployees({ includeArchived: true })
   const { completions, setCompletions } = useTaskCompletions()
   const tasks = useTasks() as (Task & { category?: { type?: string } })[]
   const initialParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null

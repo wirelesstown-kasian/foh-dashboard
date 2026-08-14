@@ -16,7 +16,7 @@ import { PerformanceReportDialog } from '@/components/reporting/PerformanceRepor
 import { buildPerformanceReportHtml, buildPerformanceRows } from '@/lib/performanceReporting'
 
 export default function TaskPerformancePage() {
-  const employees = useEmployees()
+  const employees = useEmployees({ includeArchived: true })
   const { completions } = useTaskCompletions()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()

@@ -150,7 +150,7 @@ function isFiniteCurrencyInput(value: string) {
 
 export default function EodHistoryPage() {
   const { eodReports } = useEodReports()
-  const employees = useEmployees()
+  const employees = useEmployees({ includeArchived: true })
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')

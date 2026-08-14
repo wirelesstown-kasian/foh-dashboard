@@ -73,7 +73,7 @@ function getClockRecordEmployeeName(record: ShiftClock, employees: Employee[]) {
 }
 
 export default function ClockRecordsPage() {
-  const employees = useEmployees()
+  const employees = useEmployees({ includeArchived: true })
   const { clockRecords, setClockRecords } = useClockRecords()
 
   const [department, setDepartment] = useState<ReportDepartment>('foh')

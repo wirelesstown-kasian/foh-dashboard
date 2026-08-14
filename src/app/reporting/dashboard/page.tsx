@@ -377,7 +377,7 @@ export default function ReportingDashboardPage() {
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
   const { payrollRuns } = usePayrollRuns()
-  const employees = useEmployees()
+  const employees = useEmployees({ includeArchived: true })
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')

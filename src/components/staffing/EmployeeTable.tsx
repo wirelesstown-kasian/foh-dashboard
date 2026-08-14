@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Plus, Pencil, Trash2, Gift, CircleDollarSign } from 'lucide-react'
+import { Archive, Plus, Pencil, Gift, CircleDollarSign } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
 import { getRoleColorTheme, getRoleLabel, getScheduleDepartmentBadges } from '@/lib/organization'
@@ -288,8 +288,8 @@ export function EmployeeTable() {
     }
   }
 
-  const handleDelete = async (emp: Employee) => {
-    if (!confirm(`Remove ${emp.name}?`)) return
+  const handleArchive = async (emp: Employee) => {
+    if (!confirm(`Archive ${emp.name}? Financial history will be kept.`)) return
     await fetch(`/api/employees?id=${encodeURIComponent(emp.id)}`, { method: 'DELETE' })
     await load()
   }
@@ -469,8 +469,8 @@ export function EmployeeTable() {
                       <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openEdit(emp)} title="Edit employee">
                         <Pencil className="w-4 h-4" />
                       </Button>
-                      <Button size="icon-sm" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDelete(emp)} title="Delete employee">
-                        <Trash2 className="w-4 h-4" />
+                      <Button size="icon-sm" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleArchive(emp)} title="Archive employee">
+                        <Archive className="w-4 h-4" />
                       </Button>
                     </div>
                   </TableCell>

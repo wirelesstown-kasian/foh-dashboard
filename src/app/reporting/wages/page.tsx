@@ -185,7 +185,7 @@ function getDailyWageDetail({
 }
 
 export default function WageReportPage() {
-  const employees = useEmployees()
+  const employees = useEmployees({ includeArchived: true })
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
   const { payrollRuns } = usePayrollRuns()
