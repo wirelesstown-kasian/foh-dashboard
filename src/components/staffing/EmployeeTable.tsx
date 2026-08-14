@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Archive, Plus, Pencil, Gift } from 'lucide-react'
+import { Archive, Plus, Pencil, Gift, Check, ChevronDown } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
 import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
@@ -34,7 +34,8 @@ import { useAppSettings } from '@/components/useAppSettings'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 
 interface FormState {
-  name: string
+  first_name: string
+  last_name: string
   phone: string
   email: string
   address: string
@@ -59,7 +60,8 @@ type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 type DepartmentFilter = string
 
 const EMPTY_FORM: FormState = {
-  name: '',
+  first_name: '',
+  last_name: '',
   phone: '',
   email: '',
   address: '',
@@ -89,6 +91,26 @@ function getPaymentMethodLabel(paymentMethod: PaymentMethod | null | undefined) 
 
 function formatPay(value: number | null) {
   return value !== null ? `$${value.toFixed(2)}` : '—'
+}
+
+function splitEmployeeName(name: string) {
+  const parts = name.trim().split(/\s+/)
+  return {
+    first_name: parts[0] ?? '',
+    last_name: parts.slice(1).join(' '),
+  }
+}
+
+function getFullName(form: Pick<FormState, 'first_name' | 'last_name'>) {
+  return [form.first_name, form.last_name].map(value => value.trim()).filter(Boolean).join(' ')
+}
+
+function getDepartmentSummary(selectedDepartments: string[], departmentDefinitions: { key: string; label: string }[]) {
+  if (selectedDepartments.length === 0) return 'Select departments'
+  if (selectedDepartments.length === 1) {
+    return departmentDefinitions.find(department => department.key === selectedDepartments[0])?.label ?? selectedDepartments[0]
+  }
+  return `${selectedDepartments.length} departments`
 }
 
 function ToggleRow({
@@ -143,7 +165,7 @@ export function EmployeeTable() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [resetPinMode, setResetPinMode] = useState(false)
-  const [showPin, setShowPin] = useState(false)
+  const [departmentDropdownOpen, setDepartmentDropdownOpen] = useState(false)
   const [filterRole, setFilterRole] = useState<string>('all')
   const [filterDepartment, setFilterDepartment] = useState<DepartmentFilter>('all')
   const [sortBy, setSortBy] = useState<SortOption>('name_asc')
@@ -167,16 +189,18 @@ export function EmployeeTable() {
     const firstDepartment = departmentDefinitions.find(department => department.key === 'server')?.key ?? departmentDefinitions[0]?.key ?? 'server'
     setEditTarget(null)
     setResetPinMode(true)
-    setShowPin(false)
+    setDepartmentDropdownOpen(false)
     setForm({ ...EMPTY_FORM, primary_department: firstDepartment, schedule_departments: [firstDepartment] })
     setDialogOpen(true)
   }
 
   const openEdit = (emp: Employee) => {
     const scheduleDepartments = getEmployeeScheduleDepartments(emp)
+    const nameParts = splitEmployeeName(emp.name)
     setEditTarget(emp)
     setForm({
-      name: emp.name,
+      first_name: nameParts.first_name,
+      last_name: nameParts.last_name,
       phone: emp.phone ?? '',
       email: emp.email ?? '',
       address: emp.address ?? '',
@@ -197,12 +221,13 @@ export function EmployeeTable() {
       login_password: '',
     })
     setResetPinMode(false)
-    setShowPin(false)
+    setDepartmentDropdownOpen(false)
     setDialogOpen(true)
   }
 
   const handleSave = async () => {
-    if (!form.name.trim()) return
+    const name = getFullName(form)
+    if (!name) return
     if (form.schedule_departments.length === 0) {
       setSaveError('Select at least one schedule department')
       return
@@ -237,6 +262,7 @@ export function EmployeeTable() {
           body: JSON.stringify({
             id: editTarget.id,
             ...form,
+            name,
             primary_department: form.schedule_departments[0] ?? form.primary_department,
             guaranteed_hourly: form.guaranteed_enabled ? form.guaranteed_hourly : '',
             tip_pool_hourly_rate: form.tip_cap_enabled ? form.tip_pool_hourly_rate : '',
@@ -252,6 +278,7 @@ export function EmployeeTable() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...form,
+            name,
             primary_department: form.schedule_departments[0] ?? form.primary_department,
             guaranteed_hourly: form.guaranteed_enabled ? form.guaranteed_hourly : '',
             tip_pool_hourly_rate: form.tip_cap_enabled ? form.tip_pool_hourly_rate : '',
@@ -297,9 +324,10 @@ export function EmployeeTable() {
         return a.name.localeCompare(b.name)
     }
   })
-  const canSaveEmployee = Boolean(form.name.trim()) &&
+  const canSaveEmployee = Boolean(getFullName(form)) &&
     (!editTarget || !resetPinMode || /^\d{4}$/.test(form.pin)) &&
     (Boolean(editTarget) || /^\d{4}$/.test(form.pin)) &&
+    form.schedule_departments.length > 0 &&
     Boolean(form.payment_method) &&
     (!form.tip_cap_enabled || Boolean(form.tip_pool_hourly_rate.trim())) &&
     (!form.guaranteed_enabled || Boolean(form.guaranteed_hourly.trim())) &&
@@ -447,7 +475,7 @@ export function EmployeeTable() {
         </Table>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={v => { if (!v) setDialogOpen(false) }}>
+      <Dialog open={dialogOpen} onOpenChange={v => { if (!v) { setDialogOpen(false); setDepartmentDropdownOpen(false) } }}>
         <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1.5rem)] !max-w-6xl flex-col overflow-hidden p-6">
           <DialogHeader>
             <DialogTitle>{editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
@@ -456,8 +484,12 @@ export function EmployeeTable() {
           <div className="space-y-4 overflow-y-auto pr-1">
             <div className="grid gap-3 md:grid-cols-2">
               <div>
-                <Label>Name *</Label>
-                <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
+                <Label>First Name *</Label>
+                <Input value={form.first_name} onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))} placeholder="First name" />
+              </div>
+              <div>
+                <Label>Last Name</Label>
+                <Input value={form.last_name} onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))} placeholder="Last name" />
               </div>
               <div>
                 <Label>Phone Number</Label>
@@ -476,38 +508,46 @@ export function EmployeeTable() {
                 <Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Street, city, state" />
               </div>
             </div>
-            <div>
-              <Label>Schedule Departments</Label>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {departmentDefinitions.map(definition => {
-                  const checked = form.schedule_departments.includes(definition.key)
-                  return (
-                    <button
-                      key={definition.key}
-                      type="button"
-                      onClick={() => toggleScheduleDepartment(definition.key)}
-                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
-                        checked
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
-                      }`}
-                    >
-                      <span className={`flex h-4 w-4 items-center justify-center rounded border text-[10px] ${
-                        checked ? 'border-white bg-white text-slate-900' : 'border-slate-300 bg-white text-transparent'
-                      }`}>
-                        x
-                      </span>
-                      <span className="font-medium">{definition.label}</span>
-                    </button>
-                  )
-                })}
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="relative">
+                <Label>Department *</Label>
+                <button
+                  type="button"
+                  className="flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2.5 py-1 text-left text-sm"
+                  onClick={() => setDepartmentDropdownOpen(open => !open)}
+                >
+                  <span className={form.schedule_departments.length === 0 ? 'text-muted-foreground' : ''}>
+                    {getDepartmentSummary(form.schedule_departments, departmentDefinitions)}
+                  </span>
+                  <ChevronDown className="size-4 text-muted-foreground" />
+                </button>
+                {departmentDropdownOpen && (
+                  <div className="absolute z-50 mt-1 w-full rounded-lg border bg-popover p-1.5 text-sm shadow-md">
+                    {departmentDefinitions.map(definition => {
+                      const checked = form.schedule_departments.includes(definition.key)
+                      return (
+                        <button
+                          key={definition.key}
+                          type="button"
+                          onClick={() => toggleScheduleDepartment(definition.key)}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                        >
+                          <span className={`flex size-4 items-center justify-center rounded border ${
+                            checked ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 text-transparent'
+                          }`}>
+                            <Check className="size-3" />
+                          </span>
+                          <span>{definition.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Role</Label>
                 <Select value={form.role} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <span>{getRoleLabel(form.role, roleDefinitions)}</span>
                   </SelectTrigger>
                   <SelectContent>
@@ -520,7 +560,7 @@ export function EmployeeTable() {
               <div>
                 <Label>Paid By *</Label>
                 <Select value={form.payment_method || undefined} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <span className={form.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(form.payment_method || null)}</span>
                   </SelectTrigger>
                   <SelectContent>
@@ -601,13 +641,8 @@ export function EmployeeTable() {
               <div className="mb-2 flex items-center justify-between gap-3">
                 <Label>PIN</Label>
                 <div className="flex items-center gap-2">
-                  {editTarget && !resetPinMode && editTarget.pin_code && (
-                    <Button type="button" variant="outline" size="sm" onClick={() => setShowPin(value => !value)}>
-                      {showPin ? 'Hide PIN' : 'Reveal PIN'}
-                    </Button>
-                  )}
                   {editTarget && !resetPinMode && (
-                    <Button type="button" variant="outline" size="sm" onClick={() => { setResetPinMode(true); setShowPin(false); setForm(f => ({ ...f, pin: '' })) }}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => { setResetPinMode(true); setForm(f => ({ ...f, pin: '' })) }}>
                       Reset PIN
                     </Button>
                   )}
@@ -617,23 +652,18 @@ export function EmployeeTable() {
                 <div className={`rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-700 ${
                   editTarget.pin_code ? 'font-mono tracking-widest' : ''
                 }`}>
-                  {editTarget.pin_code ? (showPin ? editTarget.pin_code : '••••') : 'PIN was saved before visible PIN tracking. Reset PIN to make it visible here.'}
+                  {editTarget.pin_code ? editTarget.pin_code : 'PIN was saved before visible PIN tracking. Reset PIN to make it visible here.'}
                 </div>
               ) : (
-                <div className="flex gap-2">
-                  <Input
-                    type={showPin ? 'text' : 'password'}
-                    inputMode="numeric"
-                    maxLength={4}
-                    value={form.pin}
-                    onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-                    placeholder="1234"
-                    className="font-mono text-center tracking-widest"
-                  />
-                  <Button type="button" variant="outline" onClick={() => setShowPin(value => !value)}>
-                    {showPin ? 'Hide' : 'Show'}
-                  </Button>
-                </div>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={form.pin}
+                  onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                  placeholder="1234"
+                  className="font-mono text-center tracking-widest"
+                />
               )}
             </div>
             {saveError && (

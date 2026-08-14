@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { ArrowLeft } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
 import { useClockRecords, useEmployees, useEodReports, notifyReportingDataChanged } from '@/components/reporting/useReportingData'
 import { supabase } from '@/lib/supabase'
@@ -249,6 +250,11 @@ export default function WageWorksheetPage() {
     setEndDate(nextRange.endDate)
   }
 
+  const returnToSetup = () => {
+    setStep('setup')
+    setMessage(null)
+  }
+
   const buildWorksheet = () => {
     const nextRows = buildPayrollDraftRows({
       employees,
@@ -373,7 +379,7 @@ export default function WageWorksheetPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4">
       {message && (
         <div className="mb-4 rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</div>
       )}
@@ -520,33 +526,42 @@ export default function WageWorksheetPage() {
           </div>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4">
-            <div className="rounded-xl border bg-white p-4">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button variant="outline" size="sm" onClick={returnToSetup}>
+              <ArrowLeft className="size-4" /> Back
+            </Button>
+            <div className="text-right text-xs text-muted-foreground">
+              {departmentOptions.find(option => option.key === department)?.label ?? department} | {startDate} to {endDate} | Pay date {payDate}
+            </div>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-4">
+            <div className="rounded-lg border bg-white p-3">
               <p className="text-xs font-medium uppercase text-muted-foreground">Cash Total</p>
-              <p className="mt-1 text-2xl font-bold">{formatCurrency(totals.cash)}</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(totals.cash)}</p>
             </div>
-            <div className="rounded-xl border bg-white p-4">
+            <div className="rounded-lg border bg-white p-3">
               <p className="text-xs font-medium uppercase text-muted-foreground">Check Total</p>
-              <p className="mt-1 text-2xl font-bold">{formatCurrency(totals.check)}</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(totals.check)}</p>
             </div>
-            <div className="rounded-xl border bg-white p-4">
+            <div className="rounded-lg border bg-white p-3">
               <p className="text-xs font-medium uppercase text-muted-foreground">ACH Total</p>
-              <p className="mt-1 text-2xl font-bold">{formatCurrency(totals.ach)}</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(totals.ach)}</p>
             </div>
-            <div className="rounded-xl border bg-white p-4">
+            <div className="rounded-lg border bg-white p-3">
               <p className="text-xs font-medium uppercase text-muted-foreground">Deductions</p>
-              <p className="mt-1 text-2xl font-bold text-red-700">{formatCurrency(totals.deductions)}</p>
+              <p className="mt-0.5 text-xl font-bold text-red-700">{formatCurrency(totals.deductions)}</p>
             </div>
           </div>
 
           {hasClockFlags && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               One or more employees have auto-clock-out or open/pending clock records. Review Clock In Records before final payroll.
             </div>
           )}
 
-          <div className="flex flex-wrap items-end gap-2 rounded-xl border bg-white p-3">
+          <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-white p-2">
             <div className="min-w-64">
               <Label>Add Employee</Label>
               <Select value={employeeToAdd || undefined} onValueChange={(value: string | null) => value && setEmployeeToAdd(value)}>
@@ -559,7 +574,6 @@ export default function WageWorksheetPage() {
               </Select>
             </div>
             <Button variant="outline" onClick={addEmployee} disabled={!employeeToAdd}>Add</Button>
-            <Button variant="outline" onClick={() => setStep('setup')}>Back</Button>
             <Button
               onClick={() => setConfirmOpen(true)}
               disabled={rows.length === 0 || missingPaymentRows.length > 0}
@@ -568,22 +582,22 @@ export default function WageWorksheetPage() {
             </Button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border bg-white">
-            <Table>
+          <div className="overflow-x-auto rounded-lg border bg-white">
+            <Table className="text-xs">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Paid By</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Hours</TableHead>
-                  <TableHead className="text-right">Tips</TableHead>
-                  <TableHead className="text-right">Base</TableHead>
-                  <TableHead className="text-right">Top-Up</TableHead>
-                  <TableHead className="text-right">Commission</TableHead>
-                  <TableHead className="text-right">Deductions</TableHead>
-                  <TableHead className="text-right">Payout</TableHead>
-                  <TableHead>Memo</TableHead>
-                  <TableHead />
+                  <TableHead className="h-8 py-1">Paid By</TableHead>
+                  <TableHead className="h-8 py-1">Name</TableHead>
+                  <TableHead className="h-8 py-1">Status</TableHead>
+                  <TableHead className="h-8 py-1 text-right">Hours</TableHead>
+                  <TableHead className="h-8 py-1 text-right">Tips</TableHead>
+                  <TableHead className="h-8 py-1 text-right">Base</TableHead>
+                  <TableHead className="h-8 py-1 text-right">Top-Up</TableHead>
+                  <TableHead className="h-8 py-1 text-right">Commission</TableHead>
+                  <TableHead className="h-8 py-1 text-right">Deductions</TableHead>
+                  <TableHead className="h-8 py-1 text-right">Payout</TableHead>
+                  <TableHead className="h-8 py-1">Memo</TableHead>
+                  <TableHead className="h-8 py-1" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -593,9 +607,9 @@ export default function WageWorksheetPage() {
 
                   return (
                   <TableRow key={row.employee_id}>
-                    <TableCell>
+                    <TableCell className="p-1">
                       <Select value={row.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(row.employee_id, { payment_method: value as PaymentMethod })}>
-                        <SelectTrigger className="w-28"><span>{paymentMethodLabel(row.payment_method)}</span></SelectTrigger>
+                        <SelectTrigger className="h-7 w-24"><span>{paymentMethodLabel(row.payment_method)}</span></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
                           <SelectItem value="check">Check</SelectItem>
@@ -603,8 +617,8 @@ export default function WageWorksheetPage() {
                         </SelectContent>
                       </Select>
                     </TableCell>
-                    <TableCell className="font-medium">{row.employee_name}</TableCell>
-                    <TableCell>
+                    <TableCell className="p-1 font-medium">{row.employee_name}</TableCell>
+                    <TableCell className="p-1">
                       {row.has_open_clock ? (
                         <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Review</Badge>
                       ) : row.has_auto_clock_out ? (
@@ -613,30 +627,30 @@ export default function WageWorksheetPage() {
                         <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">OK</Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Input className="w-20 text-right" type="number" step="0.01" value={row.hours} onChange={event => {
+                    <TableCell className="p-1 text-right">
+                      <Input className="h-7 w-16 text-right" type="number" step="0.01" value={row.hours} onChange={event => {
                         const hours = normalizeMoney(event.target.value)
                         updateRow(row.employee_id, { hours })
                       }} />
                     </TableCell>
-                    <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.tips} onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell>
-                      <Input className="w-24 text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
-                      <div className="mt-1 text-right text-[11px] text-muted-foreground">
+                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.tips} onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="p-1">
+                      <Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
+                      <div className="mt-0.5 text-right text-[10px] leading-none text-muted-foreground">
                         {formatCurrency(hourlyRate)}/hr
                       </div>
                     </TableCell>
-                    <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.guarantee_top_up} onChange={event => updateRow(row.employee_id, { guarantee_top_up: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.commission} onChange={event => updateRow(row.employee_id, { commission: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.deductions} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell className="text-right font-semibold">
+                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.guarantee_top_up} onChange={event => updateRow(row.employee_id, { guarantee_top_up: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.commission} onChange={event => updateRow(row.employee_id, { commission: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.deductions} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="p-1 text-right font-semibold">
                       {formatCurrency(row.payout_amount)}
                       {row.payment_method === 'cash' && row.cash_rounding > 0 && (
-                        <div className="text-[11px] text-muted-foreground">rounded {formatCurrency(row.cash_rounding)}</div>
+                        <div className="text-[10px] leading-none text-muted-foreground">rounded {formatCurrency(row.cash_rounding)}</div>
                       )}
                     </TableCell>
-                    <TableCell><Input className="w-48" value={row.memo} onChange={event => updateRow(row.employee_id, { memo: event.target.value })} /></TableCell>
-                    <TableCell><Button variant="ghost" size="sm" onClick={() => removeRow(row.employee_id)}>Remove</Button></TableCell>
+                    <TableCell className="p-1"><Input className="h-7 w-40" value={row.memo} onChange={event => updateRow(row.employee_id, { memo: event.target.value })} /></TableCell>
+                    <TableCell className="p-1"><Button variant="ghost" size="sm" onClick={() => removeRow(row.employee_id)}>Remove</Button></TableCell>
                   </TableRow>
                   )
                 })}
