@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { addDays, addMonths, addWeeks, endOfMonth, endOfWeek, format, parseISO, startOfMonth, startOfWeek } from 'date-fns'
+import { addDays, addWeeks, endOfMonth, endOfWeek, format, parseISO, startOfMonth, startOfWeek } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,31 +33,37 @@ function getPayrollCycleForDepartment(department: string): PayrollCycle {
   return department === 'server' ? 'weekly' : 'semi_monthly'
 }
 
-function getPreviousPayrollRange(cycle: PayrollCycle, baseDate = new Date()) {
+function getPayrollRangeFromPayDate(cycle: PayrollCycle, payDate: string) {
+  const date = parseISO(payDate)
+
   if (cycle === 'weekly') {
-    const previousWeek = addWeeks(baseDate, -1)
+    const previousWeek = addWeeks(date, -1)
     return {
       startDate: format(startOfWeek(previousWeek, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
       endDate: format(endOfWeek(previousWeek, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
     }
   }
 
-  if (baseDate.getDate() <= 15) {
-    const previousMonth = addMonths(startOfMonth(baseDate), -1)
+  if (date.getDate() <= 15) {
     return {
-      startDate: format(new Date(previousMonth.getFullYear(), previousMonth.getMonth(), 16), 'yyyy-MM-dd'),
-      endDate: format(endOfMonth(previousMonth), 'yyyy-MM-dd'),
+      startDate: format(startOfMonth(date), 'yyyy-MM-dd'),
+      endDate: format(new Date(date.getFullYear(), date.getMonth(), 15), 'yyyy-MM-dd'),
     }
   }
 
   return {
-    startDate: format(new Date(baseDate.getFullYear(), baseDate.getMonth(), 1), 'yyyy-MM-dd'),
-    endDate: format(new Date(baseDate.getFullYear(), baseDate.getMonth(), 15), 'yyyy-MM-dd'),
+    startDate: format(new Date(date.getFullYear(), date.getMonth(), 16), 'yyyy-MM-dd'),
+    endDate: format(endOfMonth(date), 'yyyy-MM-dd'),
   }
 }
 
-function getNextFridayAfter(endDate: string) {
-  let nextDate = addDays(parseISO(endDate), 1)
+function getDefaultPayDate(cycle: PayrollCycle) {
+  const today = new Date()
+  if (cycle === 'semi_monthly') {
+    return format(today.getDate() <= 15 ? new Date(today.getFullYear(), today.getMonth(), 15) : endOfMonth(today), 'yyyy-MM-dd')
+  }
+
+  let nextDate = today
   while (nextDate.getDay() !== 5) {
     nextDate = addDays(nextDate, 1)
   }
@@ -65,10 +71,11 @@ function getNextFridayAfter(endDate: string) {
 }
 
 function getDefaultPayrollPeriod(cycle: PayrollCycle) {
-  const range = getPreviousPayrollRange(cycle)
+  const payDate = getDefaultPayDate(cycle)
+  const range = getPayrollRangeFromPayDate(cycle, payDate)
   return {
     ...range,
-    payDate: getNextFridayAfter(range.endDate),
+    payDate,
   }
 }
 
@@ -235,6 +242,14 @@ export default function WageWorksheetPage() {
     applyPayrollPeriod(cycle)
   }
 
+  const handlePayDateChange = (value: string) => {
+    setPayDate(value)
+    if (!value) return
+    const nextRange = getPayrollRangeFromPayDate(payrollCycle, value)
+    setStartDate(nextRange.startDate)
+    setEndDate(nextRange.endDate)
+  }
+
   const buildWorksheet = () => {
     const nextRows = buildPayrollDraftRows({
       employees,
@@ -372,57 +387,114 @@ export default function WageWorksheetPage() {
       )}
 
       {step === 'setup' ? (
-        <div className="max-w-5xl rounded-xl border bg-white p-6 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div>
-              <Label>Department</Label>
-              <Select value={department} onValueChange={(value: string | null) => value && handleDepartmentChange(value)}>
-                <SelectTrigger><span>{departmentOptions.find(option => option.key === department)?.label ?? department}</span></SelectTrigger>
-                <SelectContent>
-                  {departmentOptions.map(option => (
-                    <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Payroll Type</Label>
-              <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
-                <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Pay Date</Label>
-              <Input value={payDate} readOnly />
-            </div>
-            <div>
-              <Label>Period</Label>
-              <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                Previous {payrollCycleLabel(payrollCycle).toLowerCase()} period
+        <div className="max-w-6xl overflow-hidden rounded-xl border bg-white shadow-sm">
+          <div className="border-b bg-slate-950 px-6 py-5 text-white">
+            <p className="text-xs font-semibold uppercase text-slate-300">Worksheet Setup</p>
+            <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-semibold">Create Payroll Worksheet</h2>
+                <p className="mt-1 text-sm text-slate-300">Choose department, payroll type, pay date, and the period to load.</p>
+              </div>
+              <div className="rounded-lg border border-white/20 px-3 py-2 text-right">
+                <div className="text-xs uppercase text-slate-300">Selected Period</div>
+                <div className="text-sm font-semibold">{startDate} to {endDate}</div>
               </div>
             </div>
-            <div>
-              <Label>Pay Range Start</Label>
-              <Input value={startDate} readOnly />
+          </div>
+
+          <div className="p-6">
+            <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="space-y-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <Label>Department</Label>
+                    <Select value={department} onValueChange={(value: string | null) => value && handleDepartmentChange(value)}>
+                      <SelectTrigger><span>{departmentOptions.find(option => option.key === department)?.label ?? department}</span></SelectTrigger>
+                      <SelectContent>
+                        {departmentOptions.map(option => (
+                          <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Payroll Type</Label>
+                    <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
+                      <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <Label>Pay Date</Label>
+                    <Input type="date" value={payDate} onChange={event => handlePayDateChange(event.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Pay Range Start</Label>
+                    <Input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Pay Range End</Label>
+                    <Input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} />
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Payroll Memo</Label>
+                  <Textarea
+                    className="min-h-28"
+                    value={memo}
+                    onChange={event => setMemo(event.target.value)}
+                    placeholder="Special attention, payroll notes, or outside reporting reminders"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border bg-slate-50 p-5">
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-slate-500">Period Rule</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-950">
+                      {payrollCycle === 'weekly' ? 'Previous Mon-Sun week' : '1-15 or 16-end of month'}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Changing the pay date updates the range. Managers can still edit the start and end dates.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg border bg-white p-3">
+                      <div className="text-xs uppercase text-slate-400">Department</div>
+                      <div className="mt-1 font-semibold text-slate-900">{departmentOptions.find(option => option.key === department)?.label ?? department}</div>
+                    </div>
+                    <div className="rounded-lg border bg-white p-3">
+                      <div className="text-xs uppercase text-slate-400">Pay Type</div>
+                      <div className="mt-1 font-semibold text-slate-900">{payrollCycleLabel(payrollCycle)}</div>
+                    </div>
+                    <div className="rounded-lg border bg-white p-3">
+                      <div className="text-xs uppercase text-slate-400">Pay Date</div>
+                      <div className="mt-1 font-semibold text-slate-900">{payDate || 'Select date'}</div>
+                    </div>
+                    <div className="rounded-lg border bg-white p-3">
+                      <div className="text-xs uppercase text-slate-400">Range</div>
+                      <div className="mt-1 font-semibold text-slate-900">{startDate && endDate ? `${startDate} to ${endDate}` : 'Select range'}</div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                    Server department defaults to weekly payroll. All other departments default to semi-monthly payroll.
+                  </div>
+                </div>
+              </div>
             </div>
-            <div>
-              <Label>Pay Range End</Label>
-              <Input value={endDate} readOnly />
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+              <p className="text-sm text-muted-foreground">Rows with zero recorded hours are skipped unless added manually.</p>
+              <Button className="min-w-32" onClick={buildWorksheet} disabled={!startDate || !endDate || !payDate}>Next</Button>
             </div>
-          </div>
-          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Server department defaults to weekly payroll. All other departments default to semi-monthly payroll, with pay dates generated from the selected period.
-          </div>
-          <div className="mt-4">
-            <Label>Payroll Memo</Label>
-            <Textarea value={memo} onChange={event => setMemo(event.target.value)} placeholder="Special attention, payroll notes, or outside reporting reminders" />
-          </div>
-          <div className="mt-5 flex justify-end">
-            <Button onClick={buildWorksheet} disabled={!startDate || !endDate || !payDate}>Next</Button>
           </div>
         </div>
       ) : (
