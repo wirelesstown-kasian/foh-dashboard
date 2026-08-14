@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getSupabaseAdminConfigError, supabaseAdmin } from '@/lib/supabaseAdmin'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { CLOCK_PHOTO_BUCKET } from '@/lib/clockUtils'
 
@@ -15,6 +15,9 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const configError = getSupabaseAdminConfigError()
+  if (configError) return NextResponse.json({ error: configError }, { status: 500 })
+
   if (!(await requireAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

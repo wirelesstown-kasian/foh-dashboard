@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { verifyPin } from '@/lib/pin'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getSupabaseAdminConfigError, supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { CLOCK_PHOTO_BUCKET, calculateClockHours, dataUrlToArrayBuffer, getSessionCutoffIso } from '@/lib/clockUtils'
 import { ShiftClock } from '@/lib/types'
 
 export const runtime = 'nodejs'
+
+function getAdminConfigResponse() {
+  const error = getSupabaseAdminConfigError()
+  return error ? NextResponse.json({ error }, { status: 500 }) : null
+}
 
 async function requireAdmin() {
   const cookieStore = await cookies()
@@ -233,6 +238,9 @@ async function upsertClockTaskCompletion(taskId: string | null | undefined, empl
 }
 
 export async function GET(req: NextRequest) {
+  const configResponse = getAdminConfigResponse()
+  if (configResponse) return configResponse
+
   const includePhotos = req.nextUrl.searchParams.get('include_photos') === '1'
   const sessionDate = req.nextUrl.searchParams.get('session_date')
   const startDate = req.nextUrl.searchParams.get('start_date')
@@ -265,6 +273,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const configResponse = getAdminConfigResponse()
+  if (configResponse) return configResponse
+
   await processOverdueClockRecords()
 
   const payload = await req.json() as {
@@ -375,6 +386,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const configResponse = getAdminConfigResponse()
+  if (configResponse) return configResponse
+
   if (!(await requireAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -454,6 +468,9 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const configResponse = getAdminConfigResponse()
+  if (configResponse) return configResponse
+
   if (!(await requireAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
