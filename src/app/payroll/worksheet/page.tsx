@@ -176,7 +176,23 @@ export default function WageWorksheetPage() {
   const updateRow = (employeeId: string, patch: Partial<PayrollDraftRow>) => {
     setRows(currentRows => sortPayrollRows(currentRows.map(row => {
       if (row.employee_id !== employeeId) return row
+      const employee = employees.find(item => item.id === employeeId)
+      const hourlyRate = Number(employee?.hourly_wage ?? 0)
+      const guaranteedRate = Number(employee?.guaranteed_hourly ?? 0)
       const next = { ...row, ...patch }
+
+      if (patch.hours !== undefined && patch.base_wages === undefined) {
+        next.base_wages = normalizeMoney(next.hours * hourlyRate)
+      }
+
+      if (
+        patch.guarantee_top_up === undefined &&
+        (patch.hours !== undefined || patch.tips !== undefined || patch.base_wages !== undefined)
+      ) {
+        const guaranteeTarget = normalizeMoney(next.hours * guaranteedRate)
+        next.guarantee_top_up = normalizeMoney(Math.max(0, guaranteeTarget - (next.base_wages + next.tips)))
+      }
+
       return { ...next, ...calculatePayrollAmounts(next) }
     })))
   }
@@ -381,7 +397,11 @@ export default function WageWorksheetPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map(row => (
+                {rows.map(row => {
+                  const employee = employees.find(item => item.id === row.employee_id)
+                  const hourlyRate = Number(employee?.hourly_wage ?? 0)
+
+                  return (
                   <TableRow key={row.employee_id}>
                     <TableCell>
                       <Select value={row.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(row.employee_id, { payment_method: value as PaymentMethod })}>
@@ -410,7 +430,12 @@ export default function WageWorksheetPage() {
                       }} />
                     </TableCell>
                     <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.tips} onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell>
+                      <Input className="w-24 text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
+                      <div className="mt-1 text-right text-[11px] text-muted-foreground">
+                        {formatCurrency(hourlyRate)}/hr
+                      </div>
+                    </TableCell>
                     <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.guarantee_top_up} onChange={event => updateRow(row.employee_id, { guarantee_top_up: normalizeMoney(event.target.value) })} /></TableCell>
                     <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.commission} onChange={event => updateRow(row.employee_id, { commission: normalizeMoney(event.target.value) })} /></TableCell>
                     <TableCell><Input className="w-24 text-right" type="number" step="0.01" value={row.deductions} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
@@ -423,7 +448,8 @@ export default function WageWorksheetPage() {
                     <TableCell><Input className="w-48" value={row.memo} onChange={event => updateRow(row.employee_id, { memo: event.target.value })} /></TableCell>
                     <TableCell><Button variant="ghost" size="sm" onClick={() => removeRow(row.employee_id)}>Remove</Button></TableCell>
                   </TableRow>
-                ))}
+                  )
+                })}
               </TableBody>
             </Table>
           </div>
