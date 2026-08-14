@@ -343,25 +343,21 @@ export function EmployeeTable() {
       <div className="flex items-center justify-between mb-4">
         <div />
         <div className="flex flex-wrap items-center justify-end gap-3">
-          <div className="inline-flex h-8 overflow-hidden rounded-lg border bg-background">
-            {[
-              { key: 'all', label: 'All' },
-              ...departmentDefinitions.map(department => ({ key: department.key, label: department.label })),
-            ].map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setFilterDepartment(key)}
-                className={`px-3 text-sm font-medium transition-colors ${
-                  filterDepartment === key
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <Select value={filterDepartment} onValueChange={(v: string | null) => v && setFilterDepartment(v)}>
+            <SelectTrigger className="w-36">
+              <span className={filterDepartment === 'all' ? 'text-muted-foreground' : ''}>
+                {filterDepartment === 'all'
+                  ? 'All Dept.'
+                  : departmentDefinitions.find(department => department.key === filterDepartment)?.label ?? filterDepartment}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Departments</SelectItem>
+              {departmentDefinitions.map(department => (
+                <SelectItem key={department.key} value={department.key}>{department.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={filterRole} onValueChange={(v: string | null) => v && setFilterRole(v)}>
             <SelectTrigger className="w-36">
               <span className={filterRole === 'all' ? 'text-muted-foreground' : ''}>
@@ -402,77 +398,85 @@ export function EmployeeTable() {
       {loading ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : (
-        <Table>
+        <Table className="min-w-[1080px] table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Phone</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Department</TableHead>
-              <TableHead>Hourly Wage</TableHead>
-              <TableHead>Guaranteed / Hr</TableHead>
-              <TableHead>Tip Cap / Hr</TableHead>
-              <TableHead>Paid By</TableHead>
-              <TableHead>Birthday</TableHead>
-              <TableHead>PIN</TableHead>
-              <TableHead>App Login</TableHead>
-              <TableHead className="w-28 min-w-28 text-right">Actions</TableHead>
+              <TableHead className="w-32">Name</TableHead>
+              <TableHead className="w-24">Role</TableHead>
+              <TableHead className="w-28">Phone</TableHead>
+              <TableHead className="w-36">Email</TableHead>
+              <TableHead className="w-24">Dept.</TableHead>
+              <TableHead className="w-24">Hourly</TableHead>
+              <TableHead className="w-28">Guaranteed</TableHead>
+              <TableHead className="w-24">Tip Cap</TableHead>
+              <TableHead className="w-20">Paid</TableHead>
+              <TableHead className="w-28">Birthday</TableHead>
+              <TableHead className="w-16">PIN</TableHead>
+              <TableHead className="w-20">Login</TableHead>
+              <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sorted.map(emp => (
-              <TableRow key={emp.id}>
-                <TableCell className="font-medium">
-                  <span className="flex items-center gap-2">
-                    {emp.name}
-                    {isBirthdayToday(emp.birth_date) && (
-                      <Gift className="w-4 h-4 text-pink-500" />
-                    )}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={getRoleColorTheme(emp.role, roleDefinitions).badgeStyle}>
-                    {getRoleLabel(emp.role, roleDefinitions)}
-                  </span>
-                </TableCell>
-                <TableCell>{emp.phone ?? '—'}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{emp.email ?? '—'}</TableCell>
-                <TableCell>{getScheduleDepartmentBadges(emp, departmentDefinitions)}</TableCell>
-                <TableCell>{formatPay(emp.hourly_wage)}</TableCell>
-                <TableCell>{emp.guaranteed_hourly !== null ? `${formatPay(emp.guaranteed_hourly)} on` : 'Off'}</TableCell>
-                <TableCell>{emp.tip_pool_hourly_rate !== null ? `${formatPay(emp.tip_pool_hourly_rate)} on` : 'Off'}</TableCell>
-                <TableCell>
-                  <Badge variant={emp.payment_method ? 'outline' : 'destructive'}>
-                    {getPaymentMethodLabel(emp.payment_method)}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  {emp.birth_date ? format(new Date(emp.birth_date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline">••••</Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={emp.login_enabled ? 'default' : 'outline'}>
-                    {emp.login_enabled ? 'Enabled' : 'Disabled'}
-                  </Badge>
-                </TableCell>
-                <TableCell className="w-28 min-w-28 pr-2">
-                  <div className="grid grid-cols-3 justify-end gap-1">
-                    <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openPayStructure(emp)} title="Pay structure">
-                      <CircleDollarSign className="w-4 h-4" />
-                    </Button>
-                    <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openEdit(emp)} title="Edit employee">
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button size="icon-sm" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDelete(emp)} title="Delete employee">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+            {sorted.map(emp => {
+              const scheduleDepartments = getScheduleDepartmentBadges(emp, departmentDefinitions)
+
+              return (
+                <TableRow key={emp.id}>
+                  <TableCell className="font-medium">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate">{emp.name}</span>
+                      {isBirthdayToday(emp.birth_date) && (
+                        <Gift className="w-4 h-4 shrink-0 text-pink-500" />
+                      )}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={getRoleColorTheme(emp.role, roleDefinitions).badgeStyle}>
+                      {getRoleLabel(emp.role, roleDefinitions)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="truncate">{emp.phone ?? '—'}</TableCell>
+                  <TableCell className="truncate text-xs text-muted-foreground">{emp.email ?? '—'}</TableCell>
+                  <TableCell className="max-w-24">
+                    <span className="block truncate text-xs" title={scheduleDepartments}>
+                      {scheduleDepartments}
+                    </span>
+                  </TableCell>
+                  <TableCell>{formatPay(emp.hourly_wage)}</TableCell>
+                  <TableCell>{emp.guaranteed_hourly !== null ? `${formatPay(emp.guaranteed_hourly)} on` : 'Off'}</TableCell>
+                  <TableCell>{emp.tip_pool_hourly_rate !== null ? `${formatPay(emp.tip_pool_hourly_rate)} on` : 'Off'}</TableCell>
+                  <TableCell>
+                    <Badge variant={emp.payment_method ? 'outline' : 'destructive'}>
+                      {getPaymentMethodLabel(emp.payment_method)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {emp.birth_date ? format(new Date(emp.birth_date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">••••</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={emp.login_enabled ? 'default' : 'outline'}>
+                      {emp.login_enabled ? 'Enabled' : 'Disabled'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="w-24 pr-2">
+                    <div className="grid grid-cols-3 justify-end gap-1">
+                      <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openPayStructure(emp)} title="Pay structure">
+                        <CircleDollarSign className="w-4 h-4" />
+                      </Button>
+                      <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openEdit(emp)} title="Edit employee">
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button size="icon-sm" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleDelete(emp)} title="Delete employee">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
             {sorted.length === 0 && (
               <TableRow>
                 <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
