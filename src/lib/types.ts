@@ -15,6 +15,7 @@ export interface Employee {
   name: string
   phone: string | null
   email: string | null
+  address?: string | null
   pin_hash?: string
   pin_code?: string | null
   role: EmployeeRole
@@ -23,6 +24,8 @@ export interface Employee {
   hourly_wage: number | null
   guaranteed_hourly: number | null
   tip_pool_hourly_rate: number | null
+  commission_enabled?: boolean
+  commission_note?: string | null
   payment_method?: PaymentMethod | null
   birth_date: string | null
   login_enabled?: boolean

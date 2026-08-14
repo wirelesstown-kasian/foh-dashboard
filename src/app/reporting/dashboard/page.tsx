@@ -489,17 +489,22 @@ export default function ReportingDashboardPage() {
       const monthEnd = toDateKey(endOfMonth(monthDate))
       const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
       const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd)
+      const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
       const savedPayroll = monthPayrollRuns.reduce((sum, run) => sum + getPayrollRunTotal(run), 0)
       const estimatedPayroll = getEstimatedWageSpendForRange(clockRecords, employeeById, monthStart, monthEnd)
+      const revenue = monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0)
+      const tipOut = monthReports.reduce((sum, report) => sum + Number(report.tip_total ?? 0), 0)
 
       return {
         key: format(monthDate, 'yyyy-MM'),
         label: format(monthDate, 'MMM'),
-        revenue: monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0),
+        hasData: monthReports.length > 0 || monthPayrollRuns.length > 0 || monthClockRecords.length > 0,
+        revenue,
+        tipOut,
         payroll: monthPayrollRuns.length > 0 ? savedPayroll : estimatedPayroll,
         source: monthPayrollRuns.length > 0 ? 'Worksheet' : 'Estimate',
       }
-    })
+    }).filter(month => month.hasData)
   }, [clockRecords, employeeById, eodReports, payrollRuns])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
@@ -706,28 +711,38 @@ export default function ReportingDashboardPage() {
             <p className="text-xs font-medium uppercase text-muted-foreground">Current Year Monthly Overview</p>
             <h2 className="text-lg font-semibold text-slate-950">{format(new Date(), 'yyyy')} revenue and payroll</h2>
           </div>
-          <Badge variant="outline">Rev / Payroll</Badge>
+          <Badge variant="outline">Rev / Tips / Payroll</Badge>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {yearlyMonthlyOverview.map(month => (
-            <div key={month.key} className="rounded-lg border bg-slate-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-slate-900">{month.label}</span>
-                <span className="text-[10px] uppercase text-slate-400">{month.source}</span>
-              </div>
-              <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <div className="text-slate-400">Rev</div>
-                  <div className="font-semibold text-slate-900">{formatCurrency(month.revenue)}</div>
+        {yearlyMonthlyOverview.length > 0 ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {yearlyMonthlyOverview.map(month => (
+              <div key={month.key} className="rounded-lg border bg-slate-50 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-slate-900">{month.label}</span>
+                  <span className="text-[10px] uppercase text-slate-400">{month.source}</span>
                 </div>
-                <div>
-                  <div className="text-slate-400">Payroll</div>
-                  <div className="font-semibold text-violet-700">{formatCurrency(month.payroll)}</div>
+                <div className="mt-1 grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <div className="text-slate-400">Rev</div>
+                    <div className="font-semibold text-slate-900">{formatCurrency(month.revenue)}</div>
+                  </div>
+                  <div>
+                    <div className="text-slate-400">Tip Out</div>
+                    <div className="font-semibold text-emerald-700">{formatCurrency(month.tipOut)}</div>
+                  </div>
+                  <div>
+                    <div className="text-slate-400">Payroll</div>
+                    <div className="font-semibold text-violet-700">{formatCurrency(month.payroll)}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border bg-slate-50 px-3 py-3 text-sm text-muted-foreground">
+            No current-year dashboard data is available yet.
+          </div>
+        )}
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]">

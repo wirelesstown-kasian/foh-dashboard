@@ -11,9 +11,11 @@ import {
   EMPLOYEE_PUBLIC_SELECT,
   EMPLOYEE_PUBLIC_SELECT_FALLBACK,
   EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS,
+  isMissingAddressColumn,
   isMissingPaymentMethodColumn,
   isMissingScheduleDepartmentsColumn,
   isMissingTipPoolRateColumn,
+  withStaffingProfileFields,
   withPaymentMethod,
   withScheduleDepartments,
   withTipPoolHourlyRate,
@@ -87,6 +89,14 @@ function withoutScheduleDepartments<T extends { schedule_departments?: unknown }
 function withoutPinCode<T extends { pin_code?: unknown }>(payload: T) {
   const fallbackPayload: Partial<T> = { ...payload }
   delete fallbackPayload.pin_code
+  return fallbackPayload
+}
+
+function withoutStaffingProfileFields<T extends { address?: unknown; commission_enabled?: unknown; commission_note?: unknown }>(payload: T) {
+  const fallbackPayload: Partial<T> = { ...payload }
+  delete fallbackPayload.address
+  delete fallbackPayload.commission_enabled
+  delete fallbackPayload.commission_note
   return fallbackPayload
 }
 
@@ -204,6 +214,13 @@ async function writeEmployeeWithOptionalFallback(
       continue
     }
 
+    if (isMissingAddressColumn(result.error) && (
+      'address' in nextPayload || 'commission_enabled' in nextPayload || 'commission_note' in nextPayload
+    )) {
+      nextPayload = withoutStaffingProfileFields(nextPayload)
+      continue
+    }
+
     return result.error
   }
 
@@ -263,11 +280,21 @@ export async function GET() {
     error = fallbackResult.error
   }
 
+  if (error && isMissingAddressColumn(error)) {
+    const fallbackResult = await supabaseAdmin
+      .from('employees')
+      .select(EMPLOYEE_PUBLIC_SELECT_FALLBACK)
+      .eq('is_active', true)
+      .order('name')
+    data = fallbackResult.data as unknown[] | null
+    error = fallbackResult.error
+  }
+
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ employees: withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[]))) })
+  return NextResponse.json({ employees: withStaffingProfileFields(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[])))) })
 }
 
 export async function POST(req: NextRequest) {
@@ -275,7 +302,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, payment_method, login_enabled, login_password } = await req.json()
+  const { name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
@@ -318,6 +345,9 @@ export async function POST(req: NextRequest) {
   if (!paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
+  if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
+    return NextResponse.json({ error: 'Commission note is required when commission is enabled' }, { status: 400 })
+  }
 
   try {
     const duplicate = await findDuplicatePin(pin)
@@ -334,12 +364,15 @@ export async function POST(req: NextRequest) {
     name: name.trim(),
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null,
+    address: typeof address === 'string' && address.trim() ? address.trim() : null,
     role,
     primary_department: primaryDepartment,
     schedule_departments: normalizedScheduleDepartments,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    commission_enabled: commission_enabled === true,
+    commission_note: commission_enabled === true && typeof commission_note === 'string' && commission_note.trim() ? commission_note.trim() : null,
     payment_method: paymentMethod,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     login_enabled: login_enabled === true,
@@ -362,7 +395,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, payment_method, login_enabled, login_password } = await req.json()
+  const { id, name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -406,17 +439,23 @@ export async function PATCH(req: NextRequest) {
   if (!paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
+  if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
+    return NextResponse.json({ error: 'Commission note is required when commission is enabled' }, { status: 400 })
+  }
 
   const update: {
     name: string
     phone: string | null
     email: string | null
+    address: string | null
     role: EmployeeRole
     primary_department: string
     schedule_departments: string[]
     hourly_wage: number | null
     guaranteed_hourly: number | null
     tip_pool_hourly_rate: number | null
+    commission_enabled: boolean
+    commission_note: string | null
     payment_method: PaymentMethod
     birth_date: string | null
     login_enabled: boolean
@@ -427,12 +466,15 @@ export async function PATCH(req: NextRequest) {
     name: name.trim(),
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
     email: typeof email === 'string' && email.trim() ? email.trim().toLowerCase() : null,
+    address: typeof address === 'string' && address.trim() ? address.trim() : null,
     role,
     primary_department: primaryDepartment,
     schedule_departments: normalizedScheduleDepartments,
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    commission_enabled: commission_enabled === true,
+    commission_note: commission_enabled === true && typeof commission_note === 'string' && commission_note.trim() ? commission_note.trim() : null,
     payment_method: paymentMethod,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     login_enabled: login_enabled === true,

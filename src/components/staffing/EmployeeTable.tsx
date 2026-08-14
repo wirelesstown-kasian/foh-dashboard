@@ -26,10 +26,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Archive, Plus, Pencil, Gift, CircleDollarSign } from 'lucide-react'
+import { Archive, Plus, Pencil, Gift } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
-import { getRoleColorTheme, getRoleLabel, getScheduleDepartmentBadges } from '@/lib/organization'
+import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 import { useAppSettings } from '@/components/useAppSettings'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 
@@ -37,12 +37,17 @@ interface FormState {
   name: string
   phone: string
   email: string
+  address: string
   role: EmployeeRole
   primary_department: string
   schedule_departments: string[]
   hourly_wage: string
+  tip_cap_enabled: boolean
   guaranteed_hourly: string
+  guaranteed_enabled: boolean
   tip_pool_hourly_rate: string
+  commission_enabled: boolean
+  commission_note: string
   payment_method: PaymentMethod | ''
   birth_date: string
   pin: string
@@ -50,20 +55,30 @@ interface FormState {
   login_password: string
 }
 
-interface PayFormState {
-  hourly_wage: string
-  guaranteed_enabled: boolean
-  guaranteed_hourly: string
-  tip_cap_enabled: boolean
-  tip_pool_hourly_rate: string
-  payment_method: PaymentMethod | ''
-}
-
 type SortOption = 'name_asc' | 'name_desc' | 'role' | 'birthday' | 'newest'
 type DepartmentFilter = string
 
-const EMPTY_FORM: FormState = { name: '', phone: '', email: '', role: 'server', primary_department: 'server', schedule_departments: ['server'], hourly_wage: '', guaranteed_hourly: '', tip_pool_hourly_rate: '', payment_method: '', birth_date: '', pin: '', login_enabled: 'disabled', login_password: '' }
-const EMPTY_PAY_FORM: PayFormState = { hourly_wage: '', guaranteed_enabled: false, guaranteed_hourly: '', tip_cap_enabled: false, tip_pool_hourly_rate: '', payment_method: '' }
+const EMPTY_FORM: FormState = {
+  name: '',
+  phone: '',
+  email: '',
+  address: '',
+  role: 'server',
+  primary_department: 'server',
+  schedule_departments: ['server'],
+  hourly_wage: '',
+  tip_cap_enabled: false,
+  guaranteed_hourly: '',
+  guaranteed_enabled: false,
+  tip_pool_hourly_rate: '',
+  commission_enabled: false,
+  commission_note: '',
+  payment_method: '',
+  birth_date: '',
+  pin: '',
+  login_enabled: 'disabled',
+  login_password: '',
+}
 
 function getPaymentMethodLabel(paymentMethod: PaymentMethod | null | undefined) {
   if (paymentMethod === 'ach') return 'ACH'
@@ -123,15 +138,11 @@ export function EmployeeTable() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [payDialogOpen, setPayDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Employee | null>(null)
-  const [payTarget, setPayTarget] = useState<Employee | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
-  const [payForm, setPayForm] = useState<PayFormState>(EMPTY_PAY_FORM)
   const [saving, setSaving] = useState(false)
-  const [paySaving, setPaySaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [paySaveError, setPaySaveError] = useState<string | null>(null)
+  const [resetPinMode, setResetPinMode] = useState(false)
   const [filterRole, setFilterRole] = useState<string>('all')
   const [filterDepartment, setFilterDepartment] = useState<DepartmentFilter>('all')
   const [sortBy, setSortBy] = useState<SortOption>('name_asc')
@@ -154,6 +165,7 @@ export function EmployeeTable() {
   const openAdd = () => {
     const firstDepartment = departmentDefinitions.find(department => department.key === 'server')?.key ?? departmentDefinitions[0]?.key ?? 'server'
     setEditTarget(null)
+    setResetPinMode(true)
     setForm({ ...EMPTY_FORM, primary_department: firstDepartment, schedule_departments: [firstDepartment] })
     setDialogOpen(true)
   }
@@ -165,33 +177,25 @@ export function EmployeeTable() {
       name: emp.name,
       phone: emp.phone ?? '',
       email: emp.email ?? '',
+      address: emp.address ?? '',
       role: emp.role,
       primary_department: scheduleDepartments[0] ?? emp.primary_department ?? 'foh',
       schedule_departments: scheduleDepartments,
       hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
+      tip_cap_enabled: emp.tip_pool_hourly_rate !== null,
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
+      guaranteed_enabled: emp.guaranteed_hourly !== null,
       tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
+      commission_enabled: emp.commission_enabled === true,
+      commission_note: emp.commission_note ?? '',
       payment_method: emp.payment_method ?? '',
       birth_date: emp.birth_date ?? '',
-      pin: emp.pin_code ?? '',
+      pin: '',
       login_enabled: emp.login_enabled ? 'enabled' : 'disabled',
       login_password: '',
     })
+    setResetPinMode(false)
     setDialogOpen(true)
-  }
-
-  const openPayStructure = (emp: Employee) => {
-    setPayTarget(emp)
-    setPayForm({
-      hourly_wage: emp.hourly_wage?.toFixed(2) ?? '',
-      guaranteed_enabled: emp.guaranteed_hourly !== null,
-      guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
-      tip_cap_enabled: emp.tip_pool_hourly_rate !== null,
-      tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
-      payment_method: emp.payment_method ?? '',
-    })
-    setPaySaveError(null)
-    setPayDialogOpen(true)
   }
 
   const handleSave = async () => {
@@ -204,8 +208,19 @@ export function EmployeeTable() {
       setSaveError('Select cash, check, or ACH payment method')
       return
     }
-    if (!editTarget && !/^\d{4}$/.test(form.pin)) return
-    if (editTarget && form.pin && !/^\d{4}$/.test(form.pin)) {
+    if (form.tip_cap_enabled && !form.tip_pool_hourly_rate.trim()) {
+      setSaveError('Tip cap amount is required when Tip Cap is on')
+      return
+    }
+    if (form.guaranteed_enabled && !form.guaranteed_hourly.trim()) {
+      setSaveError('Guaranteed pay amount is required when Guaranteed Pay is on')
+      return
+    }
+    if (form.commission_enabled && !form.commission_note.trim()) {
+      setSaveError('Commission note is required when Commission is on')
+      return
+    }
+    if ((!editTarget || resetPinMode) && !/^\d{4}$/.test(form.pin)) {
       setSaveError('PIN must be 4 digits')
       return
     }
@@ -220,6 +235,9 @@ export function EmployeeTable() {
             id: editTarget.id,
             ...form,
             primary_department: form.schedule_departments[0] ?? form.primary_department,
+            guaranteed_hourly: form.guaranteed_enabled ? form.guaranteed_hourly : '',
+            tip_pool_hourly_rate: form.tip_cap_enabled ? form.tip_pool_hourly_rate : '',
+            pin: resetPinMode ? form.pin : '',
             login_enabled: form.login_enabled === 'enabled',
           }),
         })
@@ -232,6 +250,8 @@ export function EmployeeTable() {
           body: JSON.stringify({
             ...form,
             primary_department: form.schedule_departments[0] ?? form.primary_department,
+            guaranteed_hourly: form.guaranteed_enabled ? form.guaranteed_hourly : '',
+            tip_pool_hourly_rate: form.tip_cap_enabled ? form.tip_pool_hourly_rate : '',
             login_enabled: form.login_enabled === 'enabled',
           }),
         })
@@ -242,49 +262,6 @@ export function EmployeeTable() {
       setDialogOpen(false)
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handlePaySave = async () => {
-    if (!payTarget) return
-    if (!payForm.payment_method) {
-      setPaySaveError('Select cash, check, or ACH payment method')
-      return
-    }
-    setPaySaving(true)
-    setPaySaveError(null)
-    try {
-      const res = await fetch('/api/employees', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: payTarget.id,
-          name: payTarget.name,
-          phone: payTarget.phone ?? '',
-          email: payTarget.email ?? '',
-          role: payTarget.role,
-          primary_department: getEmployeeScheduleDepartments(payTarget)[0] ?? payTarget.primary_department ?? 'foh',
-          schedule_departments: getEmployeeScheduleDepartments(payTarget),
-          birth_date: payTarget.birth_date ?? '',
-          pin: '',
-          login_enabled: payTarget.login_enabled === true,
-          login_password: '',
-          hourly_wage: payForm.hourly_wage,
-          guaranteed_hourly: payForm.guaranteed_enabled ? payForm.guaranteed_hourly : '',
-          tip_pool_hourly_rate: payForm.tip_cap_enabled ? payForm.tip_pool_hourly_rate : '',
-          payment_method: payForm.payment_method,
-        }),
-      })
-      const data = (await res.json().catch(() => ({}))) as { error?: string }
-      if (!res.ok) {
-        setPaySaveError(data.error ?? 'Failed to update pay structure')
-        return
-      }
-      await load()
-      setPayDialogOpen(false)
-      setPayTarget(null)
-    } finally {
-      setPaySaving(false)
     }
   }
 
@@ -317,11 +294,13 @@ export function EmployeeTable() {
         return a.name.localeCompare(b.name)
     }
   })
-  const canSaveEmployee = Boolean(form.name.trim()) && (
-    editTarget
-      ? form.pin === '' || /^\d{4}$/.test(form.pin)
-      : /^\d{4}$/.test(form.pin)
-  ) && Boolean(form.payment_method)
+  const canSaveEmployee = Boolean(form.name.trim()) &&
+    (!editTarget || !resetPinMode || /^\d{4}$/.test(form.pin)) &&
+    (Boolean(editTarget) || /^\d{4}$/.test(form.pin)) &&
+    Boolean(form.payment_method) &&
+    (!form.tip_cap_enabled || Boolean(form.tip_pool_hourly_rate.trim())) &&
+    (!form.guaranteed_enabled || Boolean(form.guaranteed_hourly.trim())) &&
+    (!form.commission_enabled || Boolean(form.commission_note.trim()))
 
   const toggleScheduleDepartment = (department: string) => {
     setForm(currentForm => {
@@ -398,29 +377,23 @@ export function EmployeeTable() {
       {loading ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : (
-        <Table className="min-w-[1080px] table-fixed">
+        <Table className="min-w-[900px] table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-32">Name</TableHead>
               <TableHead className="w-24">Role</TableHead>
               <TableHead className="w-28">Phone</TableHead>
               <TableHead className="w-36">Email</TableHead>
-              <TableHead className="w-24">Dept.</TableHead>
               <TableHead className="w-24">Hourly</TableHead>
               <TableHead className="w-28">Guaranteed</TableHead>
               <TableHead className="w-24">Tip Cap</TableHead>
-              <TableHead className="w-20">Paid</TableHead>
+              <TableHead className="w-20">Payroll</TableHead>
               <TableHead className="w-28">Birthday</TableHead>
-              <TableHead className="w-16">PIN</TableHead>
-              <TableHead className="w-20">Login</TableHead>
-              <TableHead className="w-24 text-right">Actions</TableHead>
+              <TableHead className="w-20 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sorted.map(emp => {
-              const scheduleDepartments = getScheduleDepartmentBadges(emp, departmentDefinitions)
-
-              return (
+            {sorted.map(emp => (
                 <TableRow key={emp.id}>
                   <TableCell className="font-medium">
                     <span className="flex min-w-0 items-center gap-2">
@@ -437,11 +410,6 @@ export function EmployeeTable() {
                   </TableCell>
                   <TableCell className="truncate">{emp.phone ?? '—'}</TableCell>
                   <TableCell className="truncate text-xs text-muted-foreground">{emp.email ?? '—'}</TableCell>
-                  <TableCell className="max-w-24">
-                    <span className="block truncate text-xs" title={scheduleDepartments}>
-                      {scheduleDepartments}
-                    </span>
-                  </TableCell>
                   <TableCell>{formatPay(emp.hourly_wage)}</TableCell>
                   <TableCell>{emp.guaranteed_hourly !== null ? `${formatPay(emp.guaranteed_hourly)} on` : 'Off'}</TableCell>
                   <TableCell>{emp.tip_pool_hourly_rate !== null ? `${formatPay(emp.tip_pool_hourly_rate)} on` : 'Off'}</TableCell>
@@ -453,19 +421,8 @@ export function EmployeeTable() {
                   <TableCell>
                     {emp.birth_date ? format(new Date(emp.birth_date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
                   </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">••••</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={emp.login_enabled ? 'default' : 'outline'}>
-                      {emp.login_enabled ? 'Enabled' : 'Disabled'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="w-24 pr-2">
-                    <div className="grid grid-cols-3 justify-end gap-1">
-                      <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openPayStructure(emp)} title="Pay structure">
-                        <CircleDollarSign className="w-4 h-4" />
-                      </Button>
+                  <TableCell className="w-20 pr-2">
+                    <div className="grid grid-cols-2 justify-end gap-1">
                       <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openEdit(emp)} title="Edit employee">
                         <Pencil className="w-4 h-4" />
                       </Button>
@@ -475,11 +432,10 @@ export function EmployeeTable() {
                     </div>
                   </TableCell>
                 </TableRow>
-              )
-            })}
+            ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No employees found
                 </TableCell>
               </TableRow>
@@ -489,7 +445,7 @@ export function EmployeeTable() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={v => { if (!v) setDialogOpen(false) }}>
-        <DialogContent className="flex max-h-[90vh] max-w-md flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
           </DialogHeader>
@@ -500,12 +456,20 @@ export function EmployeeTable() {
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
             </div>
             <div>
-              <Label>Phone</Label>
+              <Label>Phone Number</Label>
               <Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="(555) 000-0000" />
             </div>
             <div>
               <Label>Email</Label>
               <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@email.com" />
+            </div>
+            <div>
+              <Label>Address</Label>
+              <Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Street, city, state" />
+            </div>
+            <div>
+              <Label>Birthday</Label>
+              <Input type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))} />
             </div>
             <div>
               <Label>Schedule Departments</Label>
@@ -536,77 +500,117 @@ export function EmployeeTable() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>App Login</Label>
-                <Select value={form.login_enabled} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, login_enabled: v as 'enabled' | 'disabled' }))}>
+                <Label>Role</Label>
+                <Select value={form.role} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
                   <SelectTrigger>
-                    <span>{form.login_enabled === 'enabled' ? 'Enabled' : 'Disabled'}</span>
+                    <span>{getRoleLabel(form.role, roleDefinitions)}</span>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="disabled">Disabled</SelectItem>
-                    <SelectItem value="enabled">Enabled</SelectItem>
+                    {roleDefinitions.map(r => (
+                      <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label>{editTarget ? 'Reset Login Password' : 'Login Password'}</Label>
-                <Input
-                  type="password"
-                  value={form.login_password}
-                  onChange={e => setForm(f => ({ ...f, login_password: e.target.value }))}
-                  placeholder={editTarget ? 'Leave blank to keep current' : 'At least 8 chars'}
-                />
+                <Label>Paid By *</Label>
+                <Select value={form.payment_method || undefined} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
+                  <SelectTrigger>
+                    <span className={form.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(form.payment_method || null)}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="check">Check</SelectItem>
+                    <SelectItem value="ach">ACH</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Enable app login for people who should sign into the web app with email and password. Managers who sign in this way also unlock Admin Board access.
-            </p>
-            <div>
-              <Label>Paid By *</Label>
-              <Select value={form.payment_method || undefined} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
-                <SelectTrigger>
-                  <span className={form.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(form.payment_method || null)}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="check">Check</SelectItem>
-                  <SelectItem value="ach">ACH</SelectItem>
-                </SelectContent>
-              </Select>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <ToggleRow
+                checked={form.tip_cap_enabled}
+                onCheckedChange={checked => setForm(f => ({ ...f, tip_cap_enabled: checked, tip_pool_hourly_rate: checked ? f.tip_pool_hourly_rate : '' }))}
+                label="Tip Cap"
+                description="Cap tip payout per hour."
+              >
+                <Label>Dollar Amount *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.tip_pool_hourly_rate}
+                  onChange={e => setForm(f => ({ ...f, tip_pool_hourly_rate: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </ToggleRow>
+
+              <ToggleRow
+                checked={form.guaranteed_enabled}
+                onCheckedChange={checked => setForm(f => ({ ...f, guaranteed_enabled: checked, guaranteed_hourly: checked ? f.guaranteed_hourly : '' }))}
+                label="Guaranteed Pay"
+                description="Minimum hourly target."
+              >
+                <Label>Dollar Amount *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.guaranteed_hourly}
+                  onChange={e => setForm(f => ({ ...f, guaranteed_hourly: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </ToggleRow>
+
+              <ToggleRow
+                checked={form.commission_enabled}
+                onCheckedChange={checked => setForm(f => ({ ...f, commission_enabled: checked, commission_note: checked ? f.commission_note : '' }))}
+                label="Commission"
+                description="Requires a note."
+              >
+                <Label>Commission Note *</Label>
+                <Input
+                  value={form.commission_note}
+                  onChange={e => setForm(f => ({ ...f, commission_note: e.target.value }))}
+                  placeholder="Commission detail"
+                />
+              </ToggleRow>
             </div>
+
             <div>
-              <Label>Role</Label>
-              <Select value={form.role} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
-                <SelectTrigger>
-                  <span>{getRoleLabel(form.role, roleDefinitions)}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  {roleDefinitions.map(r => (
-                    <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Birth Date</Label>
-              <Input type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))} />
-            </div>
-            <div>
-              <Label>{editTarget ? 'PIN (4 digits)' : 'PIN * (4 digits)'}</Label>
+              <Label>Hourly Wage</Label>
               <Input
-                type="text"
-                inputMode="numeric"
-                maxLength={4}
-                value={form.pin}
-                onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-                placeholder="1234"
-                className="tracking-widest text-center font-mono"
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.hourly_wage}
+                onChange={e => setForm(f => ({ ...f, hourly_wage: e.target.value }))}
+                placeholder="0.00"
               />
-              {editTarget && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {editTarget.pin_code
-                    ? 'This PIN is used for clock-in and must be unique.'
-                    : 'This employee was saved before visible PINs. Enter a 4-digit PIN to keep it visible going forward.'}
-                </p>
+            </div>
+            <div>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <Label>PIN</Label>
+                {editTarget && !resetPinMode && (
+                  <Button type="button" variant="outline" size="sm" onClick={() => { setResetPinMode(true); setForm(f => ({ ...f, pin: '' })) }}>
+                    Reset PIN
+                  </Button>
+                )}
+              </div>
+              {editTarget && !resetPinMode ? (
+                <div className="rounded-lg border bg-slate-50 px-3 py-2 font-mono text-sm tracking-widest text-slate-700">
+                  {editTarget.pin_code ?? 'Current PIN hidden'}
+                </div>
+              ) : (
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={form.pin}
+                  onChange={e => setForm(f => ({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                  placeholder="1234"
+                  className="tracking-widest text-center font-mono"
+                />
               )}
             </div>
             {saveError && (
@@ -628,88 +632,6 @@ export function EmployeeTable() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={payDialogOpen} onOpenChange={v => { if (!v) setPayDialogOpen(false) }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Pay Structure{payTarget ? ` - ${payTarget.name}` : ''}</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <Label>Paid By *</Label>
-              <Select value={payForm.payment_method || undefined} onValueChange={(v: string | null) => v && setPayForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
-                <SelectTrigger>
-                  <span className={payForm.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(payForm.payment_method || null)}</span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="check">Check</SelectItem>
-                  <SelectItem value="ach">ACH</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="mt-1 text-xs text-muted-foreground">Required before saving staffing and payroll details.</p>
-            </div>
-            <div>
-              <Label>Hourly Wage</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={payForm.hourly_wage}
-                onChange={e => setPayForm(f => ({ ...f, hourly_wage: e.target.value }))}
-                placeholder="0.00"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">Base hourly wage used for wage and earnings reports.</p>
-            </div>
-
-            <ToggleRow
-              checked={payForm.guaranteed_enabled}
-              onCheckedChange={checked => setPayForm(f => ({ ...f, guaranteed_enabled: checked }))}
-              label="Guaranteed Pay"
-              description="Minimum hourly pay target for tip-share earnings. When off, no guaranteed top-up is calculated."
-            >
-              <Label>Guaranteed / Hr</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={payForm.guaranteed_hourly}
-                onChange={e => setPayForm(f => ({ ...f, guaranteed_hourly: e.target.value }))}
-                placeholder="0.00"
-              />
-            </ToggleRow>
-
-            <ToggleRow
-              checked={payForm.tip_cap_enabled}
-              onCheckedChange={checked => setPayForm(f => ({ ...f, tip_cap_enabled: checked }))}
-              label="Tip Cap"
-              description="Maximum tip-share payout per worked hour. When off, tips are shared by hours without a ceiling."
-            >
-              <Label>Tip Cap / Hr</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={payForm.tip_pool_hourly_rate}
-                onChange={e => setPayForm(f => ({ ...f, tip_pool_hourly_rate: e.target.value }))}
-                placeholder="0.00"
-              />
-            </ToggleRow>
-
-            {paySaveError && (
-              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-                {paySaveError}
-              </p>
-            )}
-            <div className="flex gap-2 pt-2">
-              <Button variant="outline" className="flex-1" onClick={() => { setPayDialogOpen(false); setPaySaveError(null) }}>Cancel</Button>
-              <Button className="flex-1" onClick={handlePaySave} disabled={paySaving}>
-                {paySaving ? 'Saving…' : 'Save Pay Structure'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

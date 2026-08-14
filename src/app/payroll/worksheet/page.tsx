@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { addWeeks, endOfWeek, format, startOfWeek } from 'date-fns'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { addDays, addMonths, addWeeks, endOfMonth, endOfWeek, format, parseISO, startOfMonth, startOfWeek } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAppSettings } from '@/components/useAppSettings'
 import { useClockRecords, useEmployees, useEodReports, notifyReportingDataChanged } from '@/components/reporting/useReportingData'
 import { supabase } from '@/lib/supabase'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { formatCurrency } from '@/lib/reporting'
 import {
   PayrollDraftRow,
@@ -26,17 +27,53 @@ import {
 import { PaymentMethod } from '@/lib/types'
 
 type Step = 'setup' | 'worksheet'
+type PayrollCycle = 'weekly' | 'semi_monthly'
 
-function defaultWeekStart() {
-  return format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+function getPayrollCycleForDepartment(department: string): PayrollCycle {
+  return department === 'server' ? 'weekly' : 'semi_monthly'
 }
 
-function defaultWeekEnd() {
-  return format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+function getPreviousPayrollRange(cycle: PayrollCycle, baseDate = new Date()) {
+  if (cycle === 'weekly') {
+    const previousWeek = addWeeks(baseDate, -1)
+    return {
+      startDate: format(startOfWeek(previousWeek, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+      endDate: format(endOfWeek(previousWeek, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+    }
+  }
+
+  if (baseDate.getDate() <= 15) {
+    const previousMonth = addMonths(startOfMonth(baseDate), -1)
+    return {
+      startDate: format(new Date(previousMonth.getFullYear(), previousMonth.getMonth(), 16), 'yyyy-MM-dd'),
+      endDate: format(endOfMonth(previousMonth), 'yyyy-MM-dd'),
+    }
+  }
+
+  return {
+    startDate: format(new Date(baseDate.getFullYear(), baseDate.getMonth(), 1), 'yyyy-MM-dd'),
+    endDate: format(new Date(baseDate.getFullYear(), baseDate.getMonth(), 15), 'yyyy-MM-dd'),
+  }
 }
 
-function nextFriday() {
-  return format(addWeeks(endOfWeek(new Date(), { weekStartsOn: 1 }), 1), 'yyyy-MM-dd')
+function getNextFridayAfter(endDate: string) {
+  let nextDate = addDays(parseISO(endDate), 1)
+  while (nextDate.getDay() !== 5) {
+    nextDate = addDays(nextDate, 1)
+  }
+  return format(nextDate, 'yyyy-MM-dd')
+}
+
+function getDefaultPayrollPeriod(cycle: PayrollCycle) {
+  const range = getPreviousPayrollRange(cycle)
+  return {
+    ...range,
+    payDate: getNextFridayAfter(range.endDate),
+  }
+}
+
+function payrollCycleLabel(cycle: PayrollCycle) {
+  return cycle === 'weekly' ? 'Weekly' : 'Semi-monthly'
 }
 
 function sortPayrollRows(rows: PayrollDraftRow[]) {
@@ -130,17 +167,35 @@ export default function WageWorksheetPage() {
   const { clockRecords } = useClockRecords()
   const { eodReports } = useEodReports()
   const { departmentDefinitions } = useAppSettings()
+  const initialPayrollCycle = getPayrollCycleForDepartment('all')
+  const initialPayrollPeriod = getDefaultPayrollPeriod(initialPayrollCycle)
   const [step, setStep] = useState<Step>('setup')
   const [department, setDepartment] = useState('all')
-  const [startDate, setStartDate] = useState(defaultWeekStart)
-  const [endDate, setEndDate] = useState(defaultWeekEnd)
-  const [payDate, setPayDate] = useState(nextFriday)
+  const [payrollCycle, setPayrollCycle] = useState<PayrollCycle>(initialPayrollCycle)
+  const [startDate, setStartDate] = useState(initialPayrollPeriod.startDate)
+  const [endDate, setEndDate] = useState(initialPayrollPeriod.endDate)
+  const [payDate, setPayDate] = useState(initialPayrollPeriod.payDate)
   const [memo, setMemo] = useState('')
   const [rows, setRows] = useState<PayrollDraftRow[]>([])
   const [employeeToAdd, setEmployeeToAdd] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const stepRef = useRef(step)
+
+  useEffect(() => {
+    stepRef.current = step
+  }, [step])
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (stepRef.current === 'worksheet') {
+        setStep('setup')
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   const departmentOptions = useMemo(() => [
     { key: 'all', label: 'All' },
@@ -157,7 +212,28 @@ export default function WageWorksheetPage() {
   const totals = useMemo(() => getPayrollTotals(rows), [rows])
   const missingPaymentRows = rows.filter(row => !row.payment_method)
   const hasClockFlags = rows.some(row => row.has_auto_clock_out || row.has_open_clock)
-  const availableEmployees = employees.filter(employee => !rows.some(row => row.employee_id === employee.id))
+  const availableEmployees = employees.filter(employee => {
+    if (rows.some(row => row.employee_id === employee.id)) return false
+    return department === 'all' || getEmployeeScheduleDepartments(employee).includes(department)
+  })
+
+  const applyPayrollPeriod = (cycle: PayrollCycle) => {
+    const nextPeriod = getDefaultPayrollPeriod(cycle)
+    setPayrollCycle(cycle)
+    setStartDate(nextPeriod.startDate)
+    setEndDate(nextPeriod.endDate)
+    setPayDate(nextPeriod.payDate)
+  }
+
+  const handleDepartmentChange = (value: string) => {
+    setDepartment(value)
+    setEmployeeToAdd('')
+    applyPayrollPeriod(getPayrollCycleForDepartment(value))
+  }
+
+  const handlePayrollCycleChange = (cycle: PayrollCycle) => {
+    applyPayrollPeriod(cycle)
+  }
 
   const buildWorksheet = () => {
     const nextRows = buildPayrollDraftRows({
@@ -167,9 +243,10 @@ export default function WageWorksheetPage() {
       department,
       startDate,
       endDate,
-    })
+    }).filter(row => row.hours > 0)
     setRows(sortPayrollRows(nextRows))
     setStep('worksheet')
+    window.history.pushState({ wageWorksheetStep: 'worksheet' }, '', window.location.href)
     setMessage(null)
   }
 
@@ -208,7 +285,7 @@ export default function WageWorksheetPage() {
       employees: [employee],
       clockRecords,
       eodReports,
-      department: 'all',
+      department,
       startDate,
       endDate,
     })
@@ -295,11 +372,11 @@ export default function WageWorksheetPage() {
       )}
 
       {step === 'setup' ? (
-        <div className="max-w-3xl rounded-xl border bg-white p-5 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-2">
+        <div className="max-w-5xl rounded-xl border bg-white p-6 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-3">
             <div>
               <Label>Department</Label>
-              <Select value={department} onValueChange={(value: string | null) => value && setDepartment(value)}>
+              <Select value={department} onValueChange={(value: string | null) => value && handleDepartmentChange(value)}>
                 <SelectTrigger><span>{departmentOptions.find(option => option.key === department)?.label ?? department}</span></SelectTrigger>
                 <SelectContent>
                   {departmentOptions.map(option => (
@@ -309,17 +386,36 @@ export default function WageWorksheetPage() {
               </Select>
             </div>
             <div>
+              <Label>Payroll Type</Label>
+              <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
+                <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>Pay Date</Label>
-              <Input type="date" value={payDate} onChange={event => setPayDate(event.target.value)} />
+              <Input value={payDate} readOnly />
+            </div>
+            <div>
+              <Label>Period</Label>
+              <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                Previous {payrollCycleLabel(payrollCycle).toLowerCase()} period
+              </div>
             </div>
             <div>
               <Label>Pay Range Start</Label>
-              <Input type="date" value={startDate} onChange={event => setStartDate(event.target.value)} />
+              <Input value={startDate} readOnly />
             </div>
             <div>
               <Label>Pay Range End</Label>
-              <Input type="date" value={endDate} onChange={event => setEndDate(event.target.value)} />
+              <Input value={endDate} readOnly />
             </div>
+          </div>
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Server department defaults to weekly payroll. All other departments default to semi-monthly payroll, with pay dates generated from the selected period.
           </div>
           <div className="mt-4">
             <Label>Payroll Memo</Label>
