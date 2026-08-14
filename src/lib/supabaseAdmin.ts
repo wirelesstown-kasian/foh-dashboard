@@ -1,23 +1,30 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseAdminKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  ?? process.env.SUPABASE_SECRET_KEY
-  ?? process.env.SUPABASE_SERVICE_KEY
-  ?? process.env.SUPABASE_SERVICE_ROLE
-  ?? null
+const supabaseAdminKeyCandidates = [
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  process.env.SUPABASE_SECRET_KEY,
+  process.env.SUPABASE_SERVICE_KEY,
+  process.env.SUPABASE_SERVICE_ROLE,
+].filter((value): value is string => Boolean(value?.trim()))
 
-export function getSupabaseAdminConfigError() {
-  if (!supabaseAdminKey) return 'Supabase service role key is missing'
-  if (supabaseAdminKey.startsWith('sb_publishable_')) {
-    return 'Supabase admin key is using a publishable key. Use a secret/service-role key for server clock writes.'
-  }
-  if (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY && supabaseAdminKey === process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return 'Supabase admin key matches the public anon key. Use a service-role key for server clock writes.'
-  }
-  return null
+function isPublicSupabaseKey(value: string) {
+  return (
+    value.startsWith('sb_publishable_') ||
+    Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY && value === process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  )
 }
 
-// Intentionally no anon key fallback — if SUPABASE_SERVICE_ROLE_KEY is missing
+const supabaseAdminKey = supabaseAdminKeyCandidates.find(value => !isPublicSupabaseKey(value)) ?? null
+
+export function getSupabaseAdminConfigError() {
+  if (supabaseAdminKey) return null
+  if (supabaseAdminKeyCandidates.some(isPublicSupabaseKey)) {
+    return 'Supabase admin key is using only public/publishable keys. Add a secret/service-role key for server clock writes.'
+  }
+  return 'Supabase service role key is missing'
+}
+
+// Intentionally no public-key fallback — if no secret/service-role key is present
 // at runtime, requests will fail with an authentication error rather than
 // silently bypassing RLS by using the public anon key.
 export const supabaseAdmin = createClient(
