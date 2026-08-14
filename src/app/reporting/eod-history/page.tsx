@@ -731,8 +731,8 @@ export default function EodHistoryPage() {
       <AdminSubpageHeader
         title="EOD History"
         subtitle="Store-wide financial history with consistent date controls."
-        backHref="/reporting"
-        backLabel="Back to Reporting"
+        backHref="/admin"
+        backLabel="Back to Admin Board"
         rightSlot={<Button onClick={openCreateDialog}>Add Manual Entry</Button>}
       />
       <div className="rounded-xl border bg-white p-5">

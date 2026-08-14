@@ -101,8 +101,8 @@ export default function TaskPerformancePage() {
       <AdminSubpageHeader
         title="Task Performance"
         subtitle="Score = Task Completion Rate (40%) + Tasks/Hr (35%) + Tips/Hr (25%) — shift-adjusted, fair for any schedule type."
-        backHref="/reporting"
-        backLabel="Back to Reporting"
+        backHref="/admin"
+        backLabel="Back to Admin Board"
       />
       <DepartmentTabs department={department} onChange={setDepartment} />
       <div className="rounded-xl border bg-white p-5">

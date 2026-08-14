@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
-import { CashBalanceEntry, EodReport } from '@/lib/types'
+import { CashBalanceEntry, Employee, EodReport, PayrollRun, ShiftClock } from '@/lib/types'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, ReceiptText, Truck, Wallet } from 'lucide-react'
 
@@ -137,6 +137,24 @@ function sumReports(reports: EodReport[], cashEntries: CashBalanceEntry[], wageS
   ), 0)
 
   return { ...base, wages: wageSpend, cashFlow }
+}
+
+function getPayrollRunTotal(run: Pick<PayrollRun, 'total_cash' | 'total_check' | 'total_ach'>) {
+  return Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0)
+}
+
+function getEstimatedWageSpendForRange(
+  records: ShiftClock[],
+  employeeById: Map<string, Employee>,
+  startDate: string,
+  endDate: string
+) {
+  return records
+    .filter(record => record.session_date >= startDate && record.session_date <= endDate)
+    .reduce((sum, record) => {
+      const employee = employeeById.get(record.employee_id)
+      return sum + getEffectiveClockHours(record) * Number(employee?.hourly_wage ?? 0)
+    }, 0)
 }
 
 function getMetricChange(current: number, previous: number) {
@@ -447,29 +465,42 @@ export default function ReportingDashboardPage() {
   const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
   const hasPreviousSavedPayroll = previousPayrollRuns.length > 0
 
-  const estimatedCurrentWageSpend = useMemo(() => (
-    clockRecords
-      .filter(record => record.session_date >= startDate && record.session_date <= endDate)
-      .reduce((sum, record) => {
-        const employee = employeeById.get(record.employee_id)
-        return sum + getEffectiveClockHours(record) * Number(employee?.hourly_wage ?? 0)
-      }, 0)
-  ), [clockRecords, employeeById, endDate, startDate])
+  const estimatedCurrentWageSpend = useMemo(
+    () => getEstimatedWageSpendForRange(clockRecords, employeeById, startDate, endDate),
+    [clockRecords, employeeById, endDate, startDate]
+  )
 
-  const estimatedPreviousWageSpend = useMemo(() => (
-    clockRecords
-      .filter(record => record.session_date >= previousStartDate && record.session_date <= previousEndDate)
-      .reduce((sum, record) => {
-        const employee = employeeById.get(record.employee_id)
-        return sum + getEffectiveClockHours(record) * Number(employee?.hourly_wage ?? 0)
-      }, 0)
-  ), [clockRecords, employeeById, previousEndDate, previousStartDate])
+  const estimatedPreviousWageSpend = useMemo(
+    () => getEstimatedWageSpendForRange(clockRecords, employeeById, previousStartDate, previousEndDate),
+    [clockRecords, employeeById, previousEndDate, previousStartDate]
+  )
   const currentWageSpend = hasCurrentSavedPayroll
-    ? currentPayrollRuns.reduce((sum, run) => sum + Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0), 0)
+    ? currentPayrollRuns.reduce((sum, run) => sum + getPayrollRunTotal(run), 0)
     : estimatedCurrentWageSpend
   const previousWageSpend = hasPreviousSavedPayroll
-    ? previousPayrollRuns.reduce((sum, run) => sum + Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0), 0)
+    ? previousPayrollRuns.reduce((sum, run) => sum + getPayrollRunTotal(run), 0)
     : estimatedPreviousWageSpend
+  const yearlyMonthlyOverview = useMemo(() => {
+    const yearStart = startOfYear(new Date())
+
+    return Array.from({ length: 12 }, (_, index) => {
+      const monthDate = addMonths(yearStart, index)
+      const monthStart = toDateKey(startOfMonth(monthDate))
+      const monthEnd = toDateKey(endOfMonth(monthDate))
+      const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
+      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd)
+      const savedPayroll = monthPayrollRuns.reduce((sum, run) => sum + getPayrollRunTotal(run), 0)
+      const estimatedPayroll = getEstimatedWageSpendForRange(clockRecords, employeeById, monthStart, monthEnd)
+
+      return {
+        key: format(monthDate, 'yyyy-MM'),
+        label: format(monthDate, 'MMM'),
+        revenue: monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0),
+        payroll: monthPayrollRuns.length > 0 ? savedPayroll : estimatedPayroll,
+        source: monthPayrollRuns.length > 0 ? 'Worksheet' : 'Estimate',
+      }
+    })
+  }, [clockRecords, employeeById, eodReports, payrollRuns])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
@@ -593,14 +624,15 @@ export default function ReportingDashboardPage() {
     { key: 'delivery' as const, label: 'Delivery Sales', value: currentTotals.delivery, previous: previousTotals.delivery, points: deliverySeries, color: '#f97316', icon: Truck },
   ]
   const mixTotal = currentTotals.cash + currentTotals.card + currentTotals.delivery
+  const payrollRatio = currentTotals.net > 0 ? (currentTotals.wages / currentTotals.net) * 100 : null
 
   return (
     <div className="p-6">
       <AdminSubpageHeader
         title="Reporting Dashboard"
         subtitle="Revenue trends, forecast pace, and operating signals."
-        backHref="/reporting"
-        backLabel="Back to Reporting"
+        backHref="/admin"
+        backLabel="Back to Admin Board"
       />
 
       <div className="mb-5 rounded-xl border bg-white p-4">
@@ -668,6 +700,36 @@ export default function ReportingDashboardPage() {
         </div>
       </div>
 
+      <div className="mb-5 rounded-xl border bg-white p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Current Year Monthly Overview</p>
+            <h2 className="text-lg font-semibold text-slate-950">{format(new Date(), 'yyyy')} revenue and payroll</h2>
+          </div>
+          <Badge variant="outline">Rev / Payroll</Badge>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {yearlyMonthlyOverview.map(month => (
+            <div key={month.key} className="rounded-lg border bg-slate-50 px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-slate-900">{month.label}</span>
+                <span className="text-[10px] uppercase text-slate-400">{month.source}</span>
+              </div>
+              <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <div className="text-slate-400">Rev</div>
+                  <div className="font-semibold text-slate-900">{formatCurrency(month.revenue)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-400">Payroll</div>
+                  <div className="font-semibold text-violet-700">{formatCurrency(month.payroll)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]">
         <div>
           <div className="mb-4 grid gap-4 md:grid-cols-3">
@@ -704,6 +766,18 @@ export default function ReportingDashboardPage() {
             <MixBar label="Cash" value={currentTotals.cash} total={mixTotal} color="#0f766e" />
             <MixBar label="Credit Card" value={currentTotals.card} total={mixTotal} color="#2563eb" />
             <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316" />
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-lg border bg-violet-50 p-3">
+              <div className="text-xs font-medium uppercase text-violet-700">Payroll</div>
+              <div className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(currentTotals.wages)}</div>
+              <div className="mt-0.5 text-[11px] text-violet-700">{hasCurrentSavedPayroll ? 'Saved worksheet' : 'Clock estimate'}</div>
+            </div>
+            <div className="rounded-lg border bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase text-slate-500">Payroll / Net</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{payrollRatio === null ? '—' : `${payrollRatio.toFixed(1)}%`}</div>
+              <div className="mt-0.5 text-[11px] text-slate-500">Current range</div>
+            </div>
           </div>
           <div className="mt-6 rounded-lg border bg-slate-50 p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-slate-900">

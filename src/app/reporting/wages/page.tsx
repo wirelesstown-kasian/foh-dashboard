@@ -528,8 +528,8 @@ export default function WageReportPage() {
       <AdminSubpageHeader
         title="Wage Report"
         subtitle={matchingPayrollRun ? 'Saved payroll worksheet data is driving this range.' : 'Compare verified hours, tips, wages, and guaranteed top-up.'}
-        backHref="/reporting"
-        backLabel="Back to Reporting"
+        backHref="/admin"
+        backLabel="Back to Admin Board"
       />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">

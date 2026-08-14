@@ -212,8 +212,8 @@ export default function TaskDetailPage() {
       <AdminSubpageHeader
         title="Task Detail"
         subtitle="Review each day’s task list with completed names and timestamps."
-        backHref="/reporting"
-        backLabel="Back to Reporting"
+        backHref="/admin"
+        backLabel="Back to Admin Board"
       />
       <DepartmentTabs department={department} onChange={setDepartment} />
       <div className="rounded-xl border bg-white p-5">

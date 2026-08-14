@@ -332,8 +332,8 @@ export default function ClockRecordsPage() {
       <AdminSubpageHeader
         title="Clock Records"
         subtitle="Modify verified times, review auto clock-outs, and open saved photos."
-        backHref="/reporting"
-        backLabel="Back to Reporting"
+        backHref="/admin"
+        backLabel="Back to Admin Board"
       />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
