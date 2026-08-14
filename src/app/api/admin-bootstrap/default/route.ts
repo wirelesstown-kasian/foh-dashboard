@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server'
 import { ensureDefaultAdmin, DEFAULT_ADMIN_NAME, DEFAULT_ADMIN_PIN } from '@/lib/adminBootstrap'
+import { getSupabaseAdminConfigError } from '@/lib/supabaseAdmin'
 
 export async function POST() {
+  const configError = getSupabaseAdminConfigError()
+  if (configError) {
+    return NextResponse.json({ error: `Supabase admin is not configured: ${configError}` }, { status: 500 })
+  }
+
   try {
     const result = await ensureDefaultAdmin()
     return NextResponse.json({

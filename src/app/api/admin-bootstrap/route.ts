@@ -3,13 +3,18 @@ import { cookies } from 'next/headers'
 import { ADMIN_SESSION_COOKIE, createAdminSessionValue } from '@/lib/adminSession'
 import { hasActiveManagers } from '@/lib/adminBootstrap'
 import { hashPin } from '@/lib/pin'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getSupabaseAdminConfigError, supabaseAdmin } from '@/lib/supabaseAdmin'
 
 function isMissingPinCodeColumn(error: { message?: string } | null | undefined) {
   return (error?.message?.toLowerCase() ?? '').includes('pin_code')
 }
 
 export async function GET() {
+  const configError = getSupabaseAdminConfigError()
+  if (configError) {
+    return NextResponse.json({ error: `Supabase admin is not configured: ${configError}` }, { status: 500 })
+  }
+
   try {
     return NextResponse.json({ needsSetup: !(await hasActiveManagers()) })
   } catch (error) {
@@ -18,6 +23,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const configError = getSupabaseAdminConfigError()
+  if (configError) {
+    return NextResponse.json({ error: `Supabase admin is not configured: ${configError}` }, { status: 500 })
+  }
+
   const { name, email, pin } = await req.json()
 
   if (typeof name !== 'string' || !name.trim()) {

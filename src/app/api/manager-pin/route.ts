@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
   const { data: managers, error } = await supabaseAdmin
     .from('employees')
-    .select('id, pin_hash')
+    .select('id, pin_hash, pin_code')
     .eq('role', 'manager')
     .eq('is_active', true)
 
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   }
 
   for (const manager of managers ?? []) {
-    if (await verifyPin(pin, manager.pin_hash)) {
+    if (manager.pin_code === pin || (manager.pin_hash && await verifyPin(pin, manager.pin_hash))) {
       return NextResponse.json({ success: true, managerId: manager.id })
     }
   }

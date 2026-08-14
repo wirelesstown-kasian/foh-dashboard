@@ -38,24 +38,43 @@ export function TabNav() {
   const [adminAvailable, setAdminAvailable] = useState(false)
   const [showPinModal, setShowPinModal] = useState(false)
   const [pinError, setPinError] = useState<string | null>(null)
+  const [adminAccessError, setAdminAccessError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
 
     void (async () => {
-      const [sessionRes, setupRes] = await Promise.all([
-        fetch('/api/admin-session', { cache: 'no-store' }),
-        fetch('/api/admin-bootstrap', { cache: 'no-store' }),
-      ])
+      let sessionRes: Response
+      let setupRes: Response
+      try {
+        ;[sessionRes, setupRes] = await Promise.all([
+          fetch('/api/admin-session', { cache: 'no-store' }),
+          fetch('/api/admin-bootstrap', { cache: 'no-store' }),
+        ])
+      } catch (error) {
+        if (mounted) {
+          setAdminAccessError(error instanceof Error ? `Admin API fetch failed: ${error.message}` : 'Admin API fetch failed')
+          setAdminAvailable(false)
+          setAdminNeedsSetup(false)
+          setAdminUnlocked(false)
+        }
+        return
+      }
 
       if (!mounted) return
 
       const sessionData = sessionRes.ok
         ? (await sessionRes.json()) as { authenticated?: boolean }
         : {}
-      const setupData = setupRes.ok
-        ? (await setupRes.json()) as { needsSetup?: boolean }
-        : {}
+      const setupData = (await setupRes.json().catch(() => ({}))) as { needsSetup?: boolean; error?: string }
+
+      if (!sessionRes.ok || !setupRes.ok) {
+        setAdminAccessError(setupData.error ?? 'Admin access check failed')
+        setAdminAvailable(false)
+        setAdminNeedsSetup(false)
+        setAdminUnlocked(false)
+        return
+      }
 
       if (setupData.needsSetup === true) {
         const createRes = await fetch('/api/admin-bootstrap/default', {
@@ -72,6 +91,7 @@ export function TabNav() {
         setAdminUnlocked(sessionData.authenticated === true)
         setAdminNeedsSetup(setupData.needsSetup === true)
         setAdminAvailable(setupData.needsSetup !== true)
+        setAdminAccessError(null)
       }
     })()
 
@@ -108,6 +128,11 @@ export function TabNav() {
   }
 
   const handleAdminClick = () => {
+    if (adminAccessError) {
+      setPinError(adminAccessError)
+      setShowPinModal(true)
+      return
+    }
     if (adminNeedsSetup) {
       router.push('/setup-admin')
       return
@@ -117,11 +142,18 @@ export function TabNav() {
   }
 
   const handlePinConfirm = async (pin: string) => {
-    const res = await fetch('/api/admin-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
-    })
+    let res: Response
+    try {
+      res = await fetch('/api/admin-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      })
+    } catch (error) {
+      const message = error instanceof Error ? `Admin API fetch failed: ${error.message}` : 'Admin API fetch failed'
+      setPinError(message)
+      throw new Error(message)
+    }
 
     if (res.ok) {
       setAdminUnlocked(true)
@@ -325,7 +357,7 @@ export function TabNav() {
       <PinModal
         open={showPinModal}
         title="Admin Board"
-        description="Enter admin PIN to unlock"
+        description={adminAccessError ? 'Admin access could not be checked.' : 'Enter admin PIN to unlock'}
         onConfirm={handlePinConfirm}
         onClose={() => { setShowPinModal(false); setPinError(null) }}
         error={pinError}
