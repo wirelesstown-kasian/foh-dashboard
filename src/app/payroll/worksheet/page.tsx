@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDays, addWeeks, endOfMonth, endOfWeek, format, parseISO, startOfMonth, startOfWeek } from 'date-fns'
-import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -375,13 +374,6 @@ export default function WageWorksheetPage() {
 
   return (
     <div className="p-6">
-      <AdminSubpageHeader
-        title="New Wage Worksheet"
-        subtitle="Build payroll from approved hours, tips, outside commission, deductions, and payment method."
-        backHref="/admin"
-        backLabel="Back to Admin Board"
-      />
-
       {message && (
         <div className="mb-4 rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</div>
       )}
@@ -655,22 +647,22 @@ export default function WageWorksheetPage() {
       )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-5xl">
+        <DialogContent className="w-[calc(100vw-2rem)] !max-w-4xl p-6">
           <DialogHeader>
             <DialogTitle>Payout Summary</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="min-w-0 rounded-xl border bg-emerald-50 p-5">
-              <p className="text-xs font-semibold uppercase text-emerald-700">Cash</p>
-              <p className="mt-1 break-words text-[clamp(1.35rem,2.4vw,2rem)] font-bold leading-tight text-emerald-950">{formatCurrency(totals.cash)}</p>
+          <div className="grid gap-3">
+            <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border bg-emerald-50 p-4">
+              <p className="text-sm font-semibold uppercase text-emerald-700">Cash</p>
+              <p className="text-right text-2xl font-bold leading-none text-emerald-950">{formatCurrency(totals.cash)}</p>
             </div>
-            <div className="min-w-0 rounded-xl border bg-slate-50 p-5">
-              <p className="text-xs font-semibold uppercase text-slate-500">Check</p>
-              <p className="mt-1 break-words text-[clamp(1.35rem,2.4vw,2rem)] font-bold leading-tight text-slate-950">{formatCurrency(totals.check)}</p>
+            <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border bg-slate-50 p-4">
+              <p className="text-sm font-semibold uppercase text-slate-500">Check</p>
+              <p className="text-right text-2xl font-bold leading-none text-slate-950">{formatCurrency(totals.check)}</p>
             </div>
-            <div className="min-w-0 rounded-xl border bg-blue-50 p-5">
-              <p className="text-xs font-semibold uppercase text-blue-700">ACH</p>
-              <p className="mt-1 break-words text-[clamp(1.35rem,2.4vw,2rem)] font-bold leading-tight text-blue-950">{formatCurrency(totals.ach)}</p>
+            <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border bg-blue-50 p-4">
+              <p className="text-sm font-semibold uppercase text-blue-700">ACH</p>
+              <p className="text-right text-2xl font-bold leading-none text-blue-950">{formatCurrency(totals.ach)}</p>
             </div>
           </div>
           <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 text-sm sm:grid-cols-3">

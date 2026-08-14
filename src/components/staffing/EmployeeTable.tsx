@@ -448,31 +448,33 @@ export function EmployeeTable() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={v => { if (!v) setDialogOpen(false) }}>
-        <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1.5rem)] !max-w-6xl flex-col overflow-hidden p-6">
           <DialogHeader>
             <DialogTitle>{editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 overflow-y-auto pr-1">
-            <div>
-              <Label>Name *</Label>
-              <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
-            </div>
-            <div>
-              <Label>Phone Number</Label>
-              <Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="(555) 000-0000" />
-            </div>
-            <div>
-              <Label>Email</Label>
-              <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@email.com" />
-            </div>
-            <div>
-              <Label>Address</Label>
-              <Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Street, city, state" />
-            </div>
-            <div>
-              <Label>Birthday</Label>
-              <Input type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))} />
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <Label>Name *</Label>
+                <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Full name" />
+              </div>
+              <div>
+                <Label>Phone Number</Label>
+                <Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="(555) 000-0000" />
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@email.com" />
+              </div>
+              <div>
+                <Label>Birthday</Label>
+                <Input type="date" value={form.birth_date} onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))} />
+              </div>
+              <div className="md:col-span-2">
+                <Label>Address</Label>
+                <Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Street, city, state" />
+              </div>
             </div>
             <div>
               <Label>Schedule Departments</Label>
@@ -530,7 +532,7 @@ export function EmployeeTable() {
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-3">
+            <div className="grid gap-3 xl:grid-cols-3">
               <ToggleRow
                 checked={form.tip_cap_enabled}
                 onCheckedChange={checked => setForm(f => ({ ...f, tip_cap_enabled: checked, tip_pool_hourly_rate: checked ? f.tip_pool_hourly_rate : '' }))}
@@ -599,7 +601,7 @@ export function EmployeeTable() {
               <div className="mb-2 flex items-center justify-between gap-3">
                 <Label>PIN</Label>
                 <div className="flex items-center gap-2">
-                  {editTarget && !resetPinMode && (
+                  {editTarget && !resetPinMode && editTarget.pin_code && (
                     <Button type="button" variant="outline" size="sm" onClick={() => setShowPin(value => !value)}>
                       {showPin ? 'Hide PIN' : 'Reveal PIN'}
                     </Button>
@@ -612,8 +614,10 @@ export function EmployeeTable() {
                 </div>
               </div>
               {editTarget && !resetPinMode ? (
-                <div className="rounded-lg border bg-slate-50 px-3 py-2 font-mono text-sm tracking-widest text-slate-700">
-                  {showPin ? (editTarget.pin_code ?? 'PIN not available; reset to set a visible PIN') : '••••'}
+                <div className={`rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-700 ${
+                  editTarget.pin_code ? 'font-mono tracking-widest' : ''
+                }`}>
+                  {editTarget.pin_code ? (showPin ? editTarget.pin_code : '••••') : 'PIN was saved before visible PIN tracking. Reset PIN to make it visible here.'}
                 </div>
               ) : (
                 <div className="flex gap-2">
