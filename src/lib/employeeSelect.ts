@@ -27,7 +27,22 @@ export function isMissingAddressColumn(error: { message?: string; code?: string 
   return message.includes('address') || message.includes('commission_enabled') || message.includes('commission_note') || message.includes('schema cache')
 }
 
-const LEGACY_SCHEDULE_DEPARTMENTS = new Set(['foh', 'boh', 'hybrid'])
+const LEGACY_SCHEDULE_DEPARTMENT_MAP: Record<string, string> = {
+  foh: 'server',
+  boh: 'cook',
+  hybrid: 'manager',
+}
+
+function normalizeStoredScheduleDepartments(scheduleDepartments: unknown) {
+  if (!Array.isArray(scheduleDepartments)) return []
+
+  return Array.from(new Set(
+    scheduleDepartments
+      .filter((department): department is string => typeof department === 'string' && department.trim().length > 0)
+      .map(department => department.trim())
+      .map(department => LEGACY_SCHEDULE_DEPARTMENT_MAP[department] ?? department)
+  ))
+}
 
 function getScheduleDepartmentFromRole(role: unknown) {
   if (typeof role !== 'string') return null
@@ -35,7 +50,8 @@ function getScheduleDepartmentFromRole(role: unknown) {
   if (role === 'prep' || role === 'dishwasher') return 'kitchen'
   if (role === 'food_runner' || role === 'runner') return 'server'
   if (role === 'busser') return 'server'
-  return role.trim() || null
+  if (role === 'manager' || role === 'server' || role === 'cook' || role === 'kitchen') return role
+  return null
 }
 
 export function withTipPoolHourlyRate<T extends object>(employees: T[]) {
@@ -66,14 +82,9 @@ export function withStaffingProfileFields<T extends object>(employees: T[]) {
 }
 
 export function getEmployeeScheduleDepartments(employee: { role?: unknown; primary_department?: string | null; schedule_departments?: unknown }) {
-  if (Array.isArray(employee.schedule_departments)) {
-    const departments = employee.schedule_departments
-      .filter((department): department is string => typeof department === 'string' && department.trim().length > 0)
-      .map(department => department.trim())
-    const uniqueDepartments = Array.from(new Set(departments))
-    if (uniqueDepartments.length > 0 && !uniqueDepartments.every(department => LEGACY_SCHEDULE_DEPARTMENTS.has(department))) {
-      return uniqueDepartments
-    }
+  const storedDepartments = normalizeStoredScheduleDepartments(employee.schedule_departments)
+  if (storedDepartments.length > 0) {
+    return storedDepartments
   }
 
   const roleDepartment = getScheduleDepartmentFromRole(employee.role)

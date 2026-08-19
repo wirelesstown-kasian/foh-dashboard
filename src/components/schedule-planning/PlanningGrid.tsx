@@ -322,14 +322,15 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
     const [empRes, schRes, draftWeekRes, draftRes, previousDraftOrderRes] = await Promise.all([
       loadEmployees(),
-      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
+      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, schedule_departments, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
       supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('display_order').order('date'),
       previousDraftOrderPromise,
     ])
     const activeEmployees = (empRes.data ?? []).filter(employee => employeeMatchesScheduleDepartment(employee, department))
     // schedules query is already filtered by department — no role-based filtering needed
-    const departmentSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
+    const departmentSchedules = ((schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>)
+      .filter(schedule => !schedule.employee || !schedule.employee.is_active || employeeMatchesScheduleDepartment(schedule.employee, department))
     const namesById = new Map<string, string>()
 
     for (const employee of activeEmployees) {
@@ -403,22 +404,14 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         display_order: draft.display_order ?? 0,
       }))
       nextDrafts = serverDrafts
-      setDrafts(serverDrafts)
-      setIsDirty(!matchesPublishedSchedule(serverDrafts, published))
       localStorage.setItem(key, JSON.stringify(serverDrafts))
     } else if (published.length > 0) {
       nextDrafts = published
-      setDrafts(published)
-      setIsDirty(false)
       localStorage.setItem(key, JSON.stringify(published))
     } else if (saved && isEditableWeek) {
       nextDrafts = JSON.parse(saved) as ShiftDraft[]
-      setDrafts(nextDrafts)
-      setIsDirty(!matchesPublishedSchedule(nextDrafts, published))
     } else {
       nextDrafts = published
-      setDrafts(published)
-      setIsDirty(false)
     }
 
     const autoShownIds = Array.from(new Set(nextDrafts.map(draft => draft.employee_id)))
@@ -465,9 +458,16 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       )
       .sort((a, b) => (draftOrderMap.get(a) ?? Infinity) - (draftOrderMap.get(b) ?? Infinity))
     const normalizedRowIds = Array.from(new Set(validRowIds))
-    const draftsWithMondayDefaults = ensureMondayOffDrafts(nextDrafts, normalizedRowIds)
+    const normalizedRowIdSet = new Set(normalizedRowIds)
+    const visibleDrafts = nextDrafts.filter(draft => normalizedRowIdSet.has(draft.employee_id))
+    const draftsWithMondayDefaults = ensureMondayOffDrafts(visibleDrafts, normalizedRowIds)
     setDrafts(draftsWithMondayDefaults)
     setDisplayedEmployeeIds(normalizedRowIds)
+    setIsDirty(
+      hasDepartmentServerDrafts || Boolean(saved && isEditableWeek)
+        ? !matchesPublishedSchedule(draftsWithMondayDefaults, published)
+        : false
+    )
     setLoading(false)
   }, [days, department, ensureMondayOffDrafts, isEditableWeek])
 
@@ -881,7 +881,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       const startDate = formatDate(days[0])
       const endDate = formatDate(days[6])
       const key = `${draftKey(days[0])}_${department}`
-      await saveServerDrafts(startDate, department, drafts, displayedEmployeeIds)
+      const displayedEmployeeIdSet = new Set(displayedEmployeeIds)
+      const publishDrafts = drafts.filter(draft => displayedEmployeeIdSet.has(draft.employee_id))
+      await saveServerDrafts(startDate, department, publishDrafts, displayedEmployeeIds)
 
       // Delete by department so each schedule tab can be published independently.
       const deleteResult = await supabase
@@ -892,7 +894,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         .eq('department', department)
       if (deleteResult.error) throw deleteResult.error
 
-      const shiftsToPublish = drafts.filter(d => !d.is_off)
+      const shiftsToPublish = publishDrafts.filter(d => !d.is_off)
       if (shiftsToPublish.length > 0) {
         const insertResult = await supabase.from('schedules').insert(
           shiftsToPublish.map(d => ({
@@ -960,10 +962,10 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         })
       }
 
-      await saveServerDrafts(startDate, department, drafts, displayedEmployeeIds).catch(error => {
+      await saveServerDrafts(startDate, department, publishDrafts, displayedEmployeeIds).catch(error => {
         console.error('Failed to persist planner snapshot after publish', error)
       })
-      localStorage.setItem(key, JSON.stringify(drafts))
+      localStorage.setItem(key, JSON.stringify(publishDrafts))
       localStorage.setItem(currentRowsKey, JSON.stringify(displayedEmployeeIds))
       await loadData()
       setIsDirty(false)

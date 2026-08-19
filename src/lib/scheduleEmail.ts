@@ -10,13 +10,24 @@ import {
 } from '@/lib/emailUtils'
 import { getEmailSettings } from '@/lib/appSettings'
 import type { ScheduleDepartment } from '@/lib/types'
+import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 
 type ScheduleEmailRow = {
   date: string
   start_time: string
   end_time: string
   department: ScheduleDepartment | null
-  employee: { id: string; name: string; email: string | null; role: string } | null
+  employee: ScheduleEmailEmployee | null
+}
+
+type ScheduleEmailEmployee = {
+  id: string
+  name: string
+  email: string | null
+  role: string
+  primary_department?: string | null
+  schedule_departments?: string[]
+  is_active?: boolean
 }
 
 function normalizeScheduleDepartment(department: string | null | undefined): ScheduleDepartment {
@@ -49,7 +60,7 @@ export async function sendWeeklyScheduleEmails({
 
   let schedulesQuery = supabaseAdmin
     .from('schedules')
-    .select('*, employee:employees(id, name, email, role)')
+    .select('*, employee:employees(id, name, email, role, primary_department, schedule_departments, is_active)')
     .gte('date', weekStart)
     .lte('date', weekEnd)
     .order('date')
@@ -74,10 +85,18 @@ export async function sendWeeklyScheduleEmails({
     shifts: Array<{ date: string; start_time: string; end_time: string }>
   }
   const empMap = new Map<string, EmpSchedule>()
-  const scheduleRows = schedules as ScheduleEmailRow[]
+  const scheduleRows = (schedules as ScheduleEmailRow[])
+    .filter((schedule): schedule is ScheduleEmailRow & { employee: ScheduleEmailEmployee } => {
+      if (!schedule.employee) return false
+      const scheduleDepartment = normalizeScheduleDepartment(schedule.department)
+      return schedule.employee.is_active === false || employeeMatchesScheduleDepartment(schedule.employee, scheduleDepartment)
+    })
+
+  if (scheduleRows.length === 0) {
+    return { success: true, sent: 0, message: `No ${department ? `${formatDepartmentLabel(department)} ` : ''}schedules to send` }
+  }
 
   for (const schedule of scheduleRows) {
-    if (!schedule.employee) continue
     const scheduleDepartment = normalizeScheduleDepartment(schedule.department)
     const employeeId = schedule.employee.id
     const key = `${scheduleDepartment}:${employeeId}`

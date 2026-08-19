@@ -50,13 +50,14 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
 
     const [empRes, schRes, draftRes] = await Promise.all([
       loadEmployees(),
-      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
+      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, schedule_departments, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_drafts').select('employee_id, display_order').eq('week_start', startDate).eq('department', department).order('display_order'),
     ])
 
     const activeEmployees = (empRes.data ?? []).filter(employee => employeeMatchesScheduleDepartment(employee, department))
     // schedules query is already filtered by department — no role-based filtering needed
-    const departmentSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
+    const departmentSchedules = ((schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>)
+      .filter(schedule => !schedule.employee || !schedule.employee.is_active || employeeMatchesScheduleDepartment(schedule.employee, department))
     const namesById = new Map<string, string>()
 
     for (const employee of activeEmployees) {
@@ -98,7 +99,6 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
 
     const mergedEmployees = [...activeEmployees, ...scheduledOnlyEmployees]
       .filter(employee => departmentSchedules.some(schedule => schedule.employee_id === employee.id))
-      .sort((a, b) => a.name.localeCompare(b.name))
     const storedRowOrder = Array.from(
       new Set(((draftRes.data ?? []) as Array<{ employee_id: string; display_order: number | null }>).map(row => row.employee_id))
     )

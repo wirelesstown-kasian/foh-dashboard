@@ -94,7 +94,7 @@ export function getRoleDotStyle(roleKey: string, definitions: RoleDefinition[] =
   }
 }
 
-export function employeeMatchesScheduleDepartment(employee: Employee, department: ScheduleDepartment) {
+export function employeeMatchesScheduleDepartment(employee: { role?: unknown; primary_department?: string | null; schedule_departments?: unknown }, department: ScheduleDepartment) {
   return getEmployeeScheduleDepartments(employee).includes(department)
 }
 
