@@ -7,6 +7,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { PinModal } from '@/components/layout/PinModal'
 import { GlobalTimeClock } from '@/components/layout/GlobalTimeClock'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   LayoutDashboard,
   Calendar,
@@ -211,16 +212,29 @@ export function TabNav() {
           <div className="ml-auto flex items-center gap-1 shrink-0">
             <GlobalTimeClock />
             {appUserName ? (
-              <button
-                onClick={handleLogout}
-                className="flex h-9 items-center gap-1.5 rounded-md px-2 text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-                aria-label={`Logout ${appUserName}`}
-                title={`Logout ${appUserName}`}
-              >
-                <UserRound className="h-4 w-4 text-amber-400" />
-                <span className="hidden max-w-20 truncate text-xs xs:inline">{appUserName}</span>
-                <LogOut className="h-3.5 w-3.5" />
-              </button>
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                      aria-label={`Signed in as ${appUserName}`}
+                      title={appUserName}
+                    />
+                  }
+                >
+                  <UserRound className="h-4 w-4 text-amber-400" />
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-48 bg-white text-slate-950">
+                  <div className="border-b pb-2 text-xs font-semibold text-slate-500">{appUserName}</div>
+                  <button
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </button>
+                </PopoverContent>
+              </Popover>
             ) : loginReady ? (
               <Link
                 href="/login"
@@ -328,16 +342,29 @@ export function TabNav() {
           <div className="ml-auto flex items-center gap-2">
             <GlobalTimeClock />
             {appUserName ? (
-              <button
-                onClick={handleLogout}
-                className="flex h-9 max-w-48 items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-2.5 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-700 hover:text-white"
-                aria-label={`Logout ${appUserName}`}
-                title={`Logout ${appUserName}`}
-              >
-                <UserRound className="h-4 w-4 shrink-0 text-amber-400" />
-                <span className="min-w-0 truncate">{appUserName}</span>
-                <LogOut className="h-4 w-4 shrink-0" />
-              </button>
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 transition-colors hover:bg-gray-700 hover:text-white"
+                      aria-label={`Signed in as ${appUserName}`}
+                      title={appUserName}
+                    />
+                  }
+                >
+                  <UserRound className="h-4 w-4 text-amber-400" />
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-52 bg-white text-slate-950">
+                  <div className="border-b pb-2 text-sm font-semibold text-slate-700">{appUserName}</div>
+                  <button
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </button>
+                </PopoverContent>
+              </Popover>
             ) : loginReady ? (
               <Link
                 href="/login"

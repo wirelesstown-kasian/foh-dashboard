@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { calculateClockHoursAfterBreak, getClockBreakMinutes, getEffectiveClockHours, getMealBreakState, getMealBreakThresholdHours, getVisibleManagerNote, isClockPending, shouldWarnMissingMealBreak } from '@/lib/clockUtils'
+import { calculateClockHoursAfterBreak, getClockBreakMinutes, getEffectiveClockHours, getMealBreakState, getMealBreakThresholdHours, getUnpaidBreakState, getVisibleManagerNote, isClockPending, shouldWarnMissingMealBreak } from '@/lib/clockUtils'
 import { Employee, ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleEmployee } from '@/lib/tipEligibility'
@@ -77,6 +77,25 @@ function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
     return relatedEmployee[0] ?? employees.find(employee => employee.id === record.employee_id) ?? null
   }
   return relatedEmployee ?? employees.find(employee => employee.id === record.employee_id) ?? null
+}
+
+function formatBreakSummary(record: ShiftClock) {
+  const mealBreak = getMealBreakState(record)
+  const regularBreak = getUnpaidBreakState(record)
+  const parts: string[] = []
+
+  if (mealBreak.startedAt) {
+    parts.push(mealBreak.endedAt
+      ? `Meal ${mealBreak.minutes} min`
+      : `Meal open since ${format(new Date(mealBreak.startedAt), 'p')}`)
+  }
+  if (regularBreak.startedAt) {
+    parts.push(regularBreak.endedAt
+      ? `Break ${regularBreak.minutes} min`
+      : `Break open since ${format(new Date(regularBreak.startedAt), 'p')}`)
+  }
+
+  return parts.length > 0 ? parts.join(' / ') : '—'
 }
 
 export default function ClockRecordsPage() {
@@ -442,7 +461,6 @@ export default function ClockRecordsPage() {
               const employee = getClockRecordEmployee(record, employees)
               const employeeName = employee?.name ?? 'Unknown Staff'
               const missingBreakWarning = shouldWarnMissingMealBreak(record, employee)
-              const breakState = getMealBreakState(record)
               const breakMinutes = getClockBreakMinutes(record)
               const workedHours = record.clock_out_at ? calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, breakMinutes) : 0
               return (
@@ -476,11 +494,7 @@ export default function ClockRecordsPage() {
                   <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
                   <TableCell className="text-right">{record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}</TableCell>
                   <TableCell className="text-right text-muted-foreground">
-                    {breakState.startedAt
-                      ? breakState.endedAt
-                        ? `${breakMinutes} min`
-                        : `Open since ${format(new Date(breakState.startedAt), 'p')}`
-                      : '—'}
+                    {formatBreakSummary(record)}
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">{workedHours.toFixed(2)}</TableCell>
                   <TableCell>
@@ -597,11 +611,7 @@ export default function ClockRecordsPage() {
                     <div>
                       <div className="text-xs font-medium uppercase text-muted-foreground">Break</div>
                       <div className="mt-1">
-                        {getMealBreakState(selectedClockRecord).startedAt
-                          ? getMealBreakState(selectedClockRecord).endedAt
-                            ? `${getClockBreakMinutes(selectedClockRecord)} min`
-                            : `Open since ${format(new Date(getMealBreakState(selectedClockRecord).startedAt!), 'p')}`
-                          : 'No break recorded'}
+                        {formatBreakSummary(selectedClockRecord) === '—' ? 'No break recorded' : formatBreakSummary(selectedClockRecord)}
                       </div>
                     </div>
                     <div>

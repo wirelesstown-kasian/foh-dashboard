@@ -6,6 +6,7 @@ export const BUSINESS_TIMEZONE = 'America/Chicago'
 export const DEFAULT_MEAL_BREAK_THRESHOLD_HOURS = 7.5
 export const MINIMUM_MEAL_BREAK_MINUTES = 30
 const MEAL_BREAK_TOKEN_PATTERN = /\s*\[meal_break_(?:started_at|ended_at|minutes)=[^\]]*\]/g
+const UNPAID_BREAK_TOKEN_PATTERN = /\s*\[unpaid_break_(?:started_at|ended_at|minutes)=[^\]]*\]/g
 
 function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
   const formatter = new Intl.DateTimeFormat('en-US', {
@@ -85,13 +86,32 @@ export function getMealBreakState(record: Pick<ShiftClock, 'manager_note' | 'bre
   }
 }
 
+export function getUnpaidBreakState(record: Pick<ShiftClock, 'manager_note'>) {
+  const note = record.manager_note ?? ''
+  const getToken = (key: string) => {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return note.match(new RegExp(`\\[unpaid_break_${escapedKey}=([^\\]]*)\\]`))?.[1] ?? null
+  }
+  const parsedMinutes = Number(getToken('minutes') ?? NaN)
+  return {
+    startedAt: getToken('started_at'),
+    endedAt: getToken('ended_at'),
+    minutes: Number.isFinite(parsedMinutes) ? parsedMinutes : 0,
+  }
+}
+
 export function isClockOnMealBreak(record: Pick<ShiftClock, 'manager_note' | 'break_started_at' | 'break_ended_at' | 'break_minutes'>) {
   const breakState = getMealBreakState(record)
   return Boolean(breakState.startedAt && !breakState.endedAt)
 }
 
+export function isClockOnUnpaidBreak(record: Pick<ShiftClock, 'manager_note'>) {
+  const breakState = getUnpaidBreakState(record)
+  return Boolean(breakState.startedAt && !breakState.endedAt)
+}
+
 export function getClockBreakMinutes(record: Pick<ShiftClock, 'manager_note' | 'break_started_at' | 'break_ended_at' | 'break_minutes'>) {
-  return getMealBreakState(record).minutes
+  return getMealBreakState(record).minutes + getUnpaidBreakState(record).minutes
 }
 
 export function getMealBreakThresholdHours(employee: Pick<Employee, 'meal_break_threshold_hours'> | null | undefined) {
@@ -124,8 +144,24 @@ export function setMealBreakManagerNote(
   return [baseNote, ...tokens].filter(Boolean).join(' ')
 }
 
+export function setUnpaidBreakManagerNote(
+  note: string | null | undefined,
+  state: { startedAt?: string | null; endedAt?: string | null; minutes?: number | null }
+) {
+  const baseNote = (note ?? '').replace(UNPAID_BREAK_TOKEN_PATTERN, '').trim()
+  const tokens = [
+    state.startedAt ? `[unpaid_break_started_at=${state.startedAt}]` : '',
+    state.endedAt ? `[unpaid_break_ended_at=${state.endedAt}]` : '',
+    typeof state.minutes === 'number' ? `[unpaid_break_minutes=${Math.max(0, Math.floor(state.minutes))}]` : '',
+  ].filter(Boolean)
+  return [baseNote, ...tokens].filter(Boolean).join(' ')
+}
+
 export function getVisibleManagerNote(note: string | null | undefined) {
-  return (note ?? '').replace(MEAL_BREAK_TOKEN_PATTERN, '').trim()
+  return (note ?? '')
+    .replace(MEAL_BREAK_TOKEN_PATTERN, '')
+    .replace(UNPAID_BREAK_TOKEN_PATTERN, '')
+    .trim()
 }
 
 export function getEffectiveClockHours(record: ShiftClock) {

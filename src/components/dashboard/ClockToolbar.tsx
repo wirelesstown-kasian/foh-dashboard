@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
 import { isClockOnMealBreak } from '@/lib/clockUtils'
 import { cn } from '@/lib/utils'
-import { ArrowRight, Camera, Clock3, Coffee, LogIn, LogOut } from 'lucide-react'
+import { ArrowLeft, Camera, Clock3, Coffee, LogIn, LogOut, Utensils } from 'lucide-react'
 
 interface Props {
   schedules: Schedule[]
@@ -19,19 +19,25 @@ interface Props {
 
 const CLOCK_IN_TITLE = 'Clock In'
 const CLOCK_OUT_TITLE = 'Clock Out'
-const MEAL_BREAK_TITLE = 'Break'
 type ClockAction = 'clock_in' | 'clock_out' | 'toggle_break'
 type ClockStatus = {
   state: 'clocked_out' | 'clocked_in' | 'on_break'
+  break_type?: 'meal' | 'unpaid' | null
   can_clock_in: boolean
   can_clock_out: boolean
   can_start_break: boolean
   can_end_break: boolean
+  can_start_unpaid_break?: boolean
+  can_end_unpaid_break?: boolean
   break_used: boolean
+  unpaid_break_used?: boolean
   clock_in_at?: string
   break_started_at?: string | null
   break_ended_at?: string | null
   break_minutes?: number
+  unpaid_break_started_at?: string | null
+  unpaid_break_ended_at?: string | null
+  unpaid_break_minutes?: number
 }
 type EmployeeClockLookup = {
   employee: { id: string; name: string; role: string }
@@ -43,9 +49,19 @@ function formatStatusTime(value: string | null | undefined) {
   return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
+function formatStatusDateTime(value: string | null | undefined) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 export function ClockToolbar({ schedules, clockRecords, today, onRefresh, variant = 'panel' }: Props) {
   const [panelOpen, setPanelOpen] = useState(false)
-  const [target, setTarget] = useState<ClockAction | null>(null)
+  const [target, setTarget] = useState<ClockAction | 'toggle_unpaid_break' | null>(null)
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [lookup, setLookup] = useState<EmployeeClockLookup | null>(null)
@@ -97,7 +113,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       setCameraReady(false)
     }
 
-    if (!panelOpen) {
+    if (!panelOpen || !lookup) {
       stopCamera()
       return
     }
@@ -131,7 +147,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       cancelled = true
       stopCamera()
     }
-  }, [panelOpen])
+  }, [panelOpen, lookup])
 
   const captureFrame = () => {
     const video = videoRef.current
@@ -180,7 +196,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     }
   }
 
-  const handleSubmit = async (nextTarget: ClockAction, skipPhoto = false) => {
+  const handleSubmit = async (nextTarget: ClockAction | 'toggle_unpaid_break', skipPhoto = false) => {
     setTarget(nextTarget)
     setError(null)
 
@@ -197,6 +213,10 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     }
     if (nextTarget === 'toggle_break' && !currentLookup.status.can_start_break && !currentLookup.status.can_end_break) {
       setError(currentLookup.status.break_used ? 'Break has already been used for this shift.' : `${currentLookup.employee.name} is not clocked in.`)
+      return
+    }
+    if (nextTarget === 'toggle_unpaid_break' && !currentLookup.status.can_start_unpaid_break && !currentLookup.status.can_end_unpaid_break) {
+      setError(currentLookup.status.unpaid_break_used ? 'Regular break has already been used for this shift.' : `${currentLookup.employee.name} is not clocked in.`)
       return
     }
 
@@ -241,12 +261,13 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
 
   const statusLabel = lookup
     ? lookup.status.state === 'on_break'
-      ? 'On Break'
+      ? lookup.status.break_type === 'unpaid' ? 'On Regular Break' : 'On Meal Break'
       : lookup.status.state === 'clocked_in'
         ? 'Clocked In'
         : 'Ready to Clock In'
     : 'Enter PIN'
-  const breakActionLabel = lookup?.status.can_end_break ? 'End Break' : MEAL_BREAK_TITLE
+  const mealBreakActionLabel = lookup?.status.can_end_break ? 'End Meal Break' : 'Meal Break'
+  const unpaidBreakActionLabel = lookup?.status.can_end_unpaid_break ? 'End Break' : 'Break'
   const isNav = variant === 'nav'
 
   return (
@@ -261,7 +282,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
           size="sm"
           className={cn(
             isNav
-              ? 'h-9 w-9 rounded-md bg-amber-500 p-0 text-white hover:bg-amber-400'
+              ? 'h-10 rounded-md bg-amber-500 px-3 text-sm font-bold text-white shadow-sm hover:bg-amber-400'
               : 'h-8 bg-slate-950 px-3 text-sm font-semibold hover:bg-slate-800'
           )}
           onClick={() => {
@@ -273,8 +294,8 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
           aria-label="Open time clock"
           title="Time Clock"
         >
-          <Clock3 className={cn('h-4 w-4', !isNav && 'mr-2')} />
-          {!isNav && 'Time Clock'}
+          <Clock3 className={cn('h-4 w-4', !isNav && 'mr-2', isNav && 'mr-1.5')} />
+          {(isNav || !isNav) && 'Time Clock'}
         </Button>
         <div className={cn('flex items-center gap-1.5 pr-0.5', isNav && 'hidden')}>
           {openClockCount > 0 && (
@@ -305,37 +326,29 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
           }
         }}
       >
-        <DialogContent className="max-w-md gap-3">
-          <DialogHeader>
-            <DialogTitle>Time Clock</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="mx-auto w-[160px] overflow-hidden rounded-xl border border-slate-300 bg-slate-900 shadow-sm">
-              <div className="flex h-[170px] items-center justify-center">
-                <video
-                  ref={videoRef}
-                  muted
-                  playsInline
-                  autoPlay
-                  className="h-full w-full object-cover"
-                />
+        <DialogContent className="left-0 top-0 h-dvh max-w-none translate-x-0 translate-y-0 gap-0 overflow-hidden rounded-none bg-slate-950 p-0 text-slate-950 sm:max-w-none">
+          <DialogTitle className="sr-only">Time Clock</DialogTitle>
+          {!lookup ? (
+            <div className="flex h-full flex-col bg-slate-950 text-white">
+              <div className="flex h-14 items-center justify-between border-b border-white/10 px-4">
+                <div className="flex items-center gap-2 font-semibold">
+                  <Clock3 className="h-5 w-5 text-amber-400" />
+                  Time Clock
+                </div>
+                <Button variant="ghost" className="text-white hover:bg-white/10" onClick={resetPanel}>
+                  Cancel
+                </Button>
               </div>
-              <div className="flex items-center justify-center gap-1.5 border-t border-slate-700 bg-slate-950 px-2.5 py-1.5 text-center text-xs text-slate-200">
-                <Camera className="h-3.5 w-3.5" />
-                {cameraReady ? 'Front camera ready' : 'Starting camera...'}
-              </div>
-            </div>
-            <div className="space-y-2.5">
-              <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                <div>First shift starts at {firstShift ? formatTime(firstShift.schedule.start_time) : '-'}</div>
-                <div>Final shift ends at {lastShift ? formatTime(lastShift.schedule.end_time) : '-'}</div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">PIN</label>
-                <div className="flex gap-2">
+              <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+                <div className="w-full max-w-sm">
+                  <div className="mb-6 text-center">
+                    <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Staff PIN</p>
+                    <p className="mt-2 text-3xl font-bold">Enter 4 digits</p>
+                  </div>
                   <input
                     type="password"
                     inputMode="numeric"
+                    autoFocus
                     maxLength={4}
                     value={pin}
                     onChange={event => clearLookup(event.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -345,87 +358,153 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                         void lookupClockStatus()
                       }
                     }}
-                    className="min-w-0 flex-1 rounded-md border border-input px-3 py-2 text-center font-mono tracking-[0.35em]"
-                    placeholder="****"
+                    className="mb-5 h-16 w-full rounded-lg border border-white/20 bg-white px-4 text-center font-mono text-3xl tracking-[0.55em] text-slate-950 shadow-sm"
+                    placeholder="••••"
                   />
+                  <div className="grid grid-cols-3 gap-2">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(value => (
+                      <Button
+                        key={value}
+                        className="h-14 bg-white text-2xl font-bold text-slate-950 hover:bg-amber-100"
+                        onClick={() => clearLookup(`${pin}${value}`.replace(/\D/g, '').slice(0, 4))}
+                      >
+                        {value}
+                      </Button>
+                    ))}
+                    <Button variant="outline" className="h-14 border-white/20 bg-white/10 text-white hover:bg-white/20" onClick={() => clearLookup(pin.slice(0, -1))}>
+                      Delete
+                    </Button>
+                    <Button className="h-14 bg-white text-2xl font-bold text-slate-950 hover:bg-amber-100" onClick={() => clearLookup(`${pin}0`.slice(0, 4))}>
+                      0
+                    </Button>
+                    <Button
+                      className="h-14 bg-amber-500 font-bold text-white hover:bg-amber-400"
+                      onClick={() => void lookupClockStatus()}
+                      disabled={lookupLoading || pin.length !== 4}
+                    >
+                      {lookupLoading ? 'Checking' : 'Next'}
+                    </Button>
+                  </div>
+                  {error && (
+                    <div className="mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {error}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-full flex-col bg-slate-100">
+              <div className="flex h-14 items-center justify-between border-b bg-slate-950 px-4 text-white">
+                <div>
+                  <div className="text-sm font-semibold text-amber-300">Announcement</div>
+                  <div className="max-w-[56vw] truncate text-sm text-slate-100">No announcement posted.</div>
+                </div>
+                <Button variant="ghost" className="text-white hover:bg-white/10" onClick={resetPanel}>
+                  Cancel
+                </Button>
+              </div>
+              <div className="grid min-h-0 flex-1 gap-4 p-4 lg:grid-cols-[1fr_1fr_340px]">
+                <div className="flex min-h-[240px] flex-col overflow-hidden rounded-lg border bg-slate-900 shadow-sm">
+                  <div className="flex min-h-0 flex-1 items-center justify-center">
+                    <video
+                      ref={videoRef}
+                      muted
+                      playsInline
+                      autoPlay
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5 border-t border-slate-700 bg-slate-950 px-2.5 py-2 text-center text-xs text-slate-200">
+                    <Camera className="h-3.5 w-3.5" />
+                    {cameraReady ? 'Front camera ready' : 'Starting camera...'}
+                  </div>
+                </div>
+
+                <div className="flex min-h-0 flex-col justify-center gap-3">
                   <Button
-                    className="h-10 w-12 shrink-0 bg-slate-950 px-0 text-white shadow-sm hover:bg-slate-800"
-                    onClick={() => void lookupClockStatus()}
-                    disabled={lookupLoading || pin.length !== 4}
-                    aria-label="Check PIN"
-                    title="Check PIN"
+                    className="h-16 bg-emerald-600 text-lg font-bold hover:bg-emerald-700"
+                    onClick={() => void handleSubmit('clock_in')}
+                    disabled={submitting || !cameraReady || !lookup.status.can_clock_in}
                   >
-                    <ArrowRight className="h-5 w-5" />
+                    <LogIn className="mr-2 h-5 w-5" />
+                    {submitting && target === 'clock_in' ? 'Saving...' : CLOCK_IN_TITLE}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-16 border-slate-300 bg-white text-lg font-bold"
+                    onClick={() => void handleSubmit('clock_out')}
+                    disabled={submitting || !cameraReady || !lookup.status.can_clock_out}
+                  >
+                    <LogOut className="mr-2 h-5 w-5" />
+                    {submitting && target === 'clock_out' ? 'Saving...' : CLOCK_OUT_TITLE}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-16 border-blue-200 bg-blue-50 text-lg font-bold text-blue-800 hover:bg-blue-100"
+                    onClick={() => void handleSubmit('toggle_break', true)}
+                    disabled={submitting || (!lookup.status.can_start_break && !lookup.status.can_end_break)}
+                  >
+                    <Utensils className="mr-2 h-5 w-5" />
+                    {submitting && target === 'toggle_break' ? 'Saving...' : mealBreakActionLabel}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-16 border-amber-200 bg-amber-50 text-lg font-bold text-amber-900 hover:bg-amber-100"
+                    onClick={() => void handleSubmit('toggle_unpaid_break', true)}
+                    disabled={submitting || (!lookup.status.can_start_unpaid_break && !lookup.status.can_end_unpaid_break)}
+                  >
+                    <Coffee className="mr-2 h-5 w-5" />
+                    {submitting && target === 'toggle_unpaid_break' ? 'Saving...' : unpaidBreakActionLabel}
+                  </Button>
+                  <Button variant="ghost" className="h-11 text-slate-600" onClick={() => { setLookup(null); setError(null); setPin('') }}>
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Back to PIN
+                  </Button>
+                </div>
+
+                <div className="min-h-0 overflow-auto rounded-lg border bg-white p-4 shadow-sm">
+                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Current Status</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-950">{lookup.employee.name}</div>
+                  <div className="mt-1 rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">{statusLabel}</div>
+                  <div className="mt-4 grid gap-2 text-sm">
+                    <div className="rounded-md border bg-slate-50 px-3 py-2">
+                      <div className="text-xs uppercase text-slate-400">Clock In</div>
+                      <div className="font-semibold">{formatStatusDateTime(lookup.status.clock_in_at)}</div>
+                    </div>
+                    <div className="rounded-md border bg-slate-50 px-3 py-2">
+                      <div className="text-xs uppercase text-slate-400">Meal Break</div>
+                      <div className="font-semibold">{formatStatusTime(lookup.status.break_started_at)} - {formatStatusTime(lookup.status.break_ended_at)}</div>
+                      <div className="text-xs text-slate-500">{lookup.status.break_minutes ? `${lookup.status.break_minutes} min` : 'No meal break recorded'}</div>
+                    </div>
+                    <div className="rounded-md border bg-slate-50 px-3 py-2">
+                      <div className="text-xs uppercase text-slate-400">Break</div>
+                      <div className="font-semibold">{formatStatusTime(lookup.status.unpaid_break_started_at)} - {formatStatusTime(lookup.status.unpaid_break_ended_at)}</div>
+                      <div className="text-xs text-slate-500">{lookup.status.unpaid_break_minutes ? `${lookup.status.unpaid_break_minutes} min` : 'No regular break recorded'}</div>
+                    </div>
+                    <div className="rounded-md border bg-slate-50 px-3 py-2">
+                      <div className="text-xs uppercase text-slate-400">Today</div>
+                      <div className="font-semibold">First shift {firstShift ? formatTime(firstShift.schedule.start_time) : '-'}</div>
+                      <div className="text-xs text-slate-500">Final shift {lastShift ? formatTime(lastShift.schedule.end_time) : '-'}</div>
+                    </div>
+                  </div>
+                  {error && (
+                    <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {error}
+                    </div>
+                  )}
+                  <Button
+                    variant="ghost"
+                    className="mt-3 w-full text-slate-600"
+                    onClick={() => void handleSubmit('clock_in', true)}
+                    disabled={submitting}
+                  >
+                    {submitting && target === 'clock_in' ? 'Saving...' : 'Manager Clock In Without Photo'}
                   </Button>
                 </div>
               </div>
             </div>
-            <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <div>
-                <div className="font-semibold text-slate-950">{lookup?.employee.name ?? 'No employee selected'}</div>
-                <div className="text-xs text-slate-500">{statusLabel}</div>
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs">
-                <div className="rounded-md border bg-white px-2.5 py-1.5">
-                  <div className="uppercase text-slate-400">Clock In</div>
-                  <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.clock_in_at)}</div>
-                </div>
-                <div className="rounded-md border bg-white px-2.5 py-1.5">
-                  <div className="uppercase text-slate-400">Break In</div>
-                  <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.break_started_at)}</div>
-                </div>
-                <div className="rounded-md border bg-white px-2.5 py-1.5">
-                  <div className="uppercase text-slate-400">Break Out</div>
-                  <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.break_ended_at)}</div>
-                </div>
-                <div className="rounded-md border bg-white px-2.5 py-1.5">
-                  <div className="uppercase text-slate-400">Break Min</div>
-                  <div className="mt-1 font-semibold text-slate-900">{lookup?.status.break_minutes ? `${lookup.status.break_minutes} min` : '-'}</div>
-                </div>
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button
-                className="h-10 bg-emerald-600 font-semibold hover:bg-emerald-700"
-                onClick={() => void handleSubmit('clock_in')}
-                disabled={submitting || !cameraReady || (lookup ? !lookup.status.can_clock_in : pin.length !== 4)}
-              >
-                <LogIn className="mr-2 h-4 w-4" />
-                {submitting && target === 'clock_in' ? 'Saving...' : CLOCK_IN_TITLE}
-              </Button>
-              <Button
-                variant="outline"
-                className="h-10 font-semibold"
-                onClick={() => void handleSubmit('clock_out')}
-                disabled={submitting || !cameraReady || (lookup ? !lookup.status.can_clock_out : pin.length !== 4)}
-              >
-                <LogOut className="mr-2 h-4 w-4" />
-                {submitting && target === 'clock_out' ? 'Saving...' : CLOCK_OUT_TITLE}
-              </Button>
-            </div>
-            <Button
-              variant="outline"
-              className="h-10 w-full font-semibold"
-              onClick={() => void handleSubmit('toggle_break', true)}
-              disabled={submitting || (lookup ? (!lookup.status.can_start_break && !lookup.status.can_end_break) : pin.length !== 4)}
-            >
-              <Coffee className="mr-2 h-4 w-4" />
-              {submitting && target === 'toggle_break' ? 'Saving...' : breakActionLabel}
-            </Button>
-            {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-            <Button
-              variant="ghost"
-              className="w-full text-slate-600"
-              onClick={() => void handleSubmit('clock_in', true)}
-              disabled={submitting}
-            >
-              {submitting && target === 'clock_in' ? 'Saving...' : 'Manager Clock In Without Photo'}
-            </Button>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
     </>

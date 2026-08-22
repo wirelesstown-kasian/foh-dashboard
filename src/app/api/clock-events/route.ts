@@ -4,7 +4,7 @@ import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { CLOCK_PHOTO_BUCKET, calculateClockHours, calculateClockHoursAfterBreak, dataUrlToArrayBuffer, getClockBreakMinutes, getMealBreakState, getSessionCutoffIso, setMealBreakManagerNote } from '@/lib/clockUtils'
+import { CLOCK_PHOTO_BUCKET, calculateClockHours, calculateClockHoursAfterBreak, dataUrlToArrayBuffer, getClockBreakMinutes, getMealBreakState, getSessionCutoffIso, getUnpaidBreakState, setMealBreakManagerNote, setUnpaidBreakManagerNote } from '@/lib/clockUtils'
 import { ShiftClock } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -86,20 +86,31 @@ function getClockStatus(record: ShiftClock | null) {
   }
 
   const breakState = getMealBreakState(record)
-  const onBreak = Boolean(breakState.startedAt && !breakState.endedAt)
+  const unpaidBreakState = getUnpaidBreakState(record)
+  const onMealBreak = Boolean(breakState.startedAt && !breakState.endedAt)
+  const onUnpaidBreak = Boolean(unpaidBreakState.startedAt && !unpaidBreakState.endedAt)
+  const onBreak = onMealBreak || onUnpaidBreak
   const breakUsed = Boolean(breakState.startedAt && breakState.endedAt)
+  const unpaidBreakUsed = Boolean(unpaidBreakState.startedAt && unpaidBreakState.endedAt)
 
   return {
     state: onBreak ? 'on_break' : 'clocked_in',
+    break_type: onMealBreak ? 'meal' : onUnpaidBreak ? 'unpaid' : null,
     can_clock_in: false,
     can_clock_out: !onBreak,
     can_start_break: !onBreak && !breakUsed,
-    can_end_break: onBreak,
+    can_end_break: onMealBreak,
+    can_start_unpaid_break: !onBreak && !unpaidBreakUsed,
+    can_end_unpaid_break: onUnpaidBreak,
     break_used: breakUsed,
+    unpaid_break_used: unpaidBreakUsed,
     clock_in_at: record.clock_in_at,
     break_started_at: breakState.startedAt,
     break_ended_at: breakState.endedAt,
     break_minutes: breakState.minutes,
+    unpaid_break_started_at: unpaidBreakState.startedAt,
+    unpaid_break_ended_at: unpaidBreakState.endedAt,
+    unpaid_break_minutes: unpaidBreakState.minutes,
   }
 }
 
@@ -322,7 +333,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const payload = await req.json() as {
-    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break' | 'lookup_status'
+    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break' | 'start_unpaid_break' | 'end_unpaid_break' | 'toggle_unpaid_break' | 'lookup_status'
     pin?: string
     session_date?: string
     employee_id?: string
@@ -374,7 +385,7 @@ export async function POST(req: NextRequest) {
   const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.${ext}`
   const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
 
-  if (action === 'start_break' || action === 'end_break' || action === 'toggle_break') {
+  if (action === 'start_break' || action === 'end_break' || action === 'toggle_break' || action === 'start_unpaid_break' || action === 'end_unpaid_break' || action === 'toggle_unpaid_break') {
     if (!existingRecord?.clock_in_at) {
       return NextResponse.json({ error: 'No active clock-in found for this employee today' }, { status: 400 })
     }
@@ -383,10 +394,23 @@ export async function POST(req: NextRequest) {
     }
 
     const breakState = getMealBreakState(existingRecord)
-    const breakAction = action === 'toggle_break'
-      ? breakState.startedAt && !breakState.endedAt
-        ? 'end_break'
-        : 'start_break'
+    const unpaidBreakState = getUnpaidBreakState(existingRecord)
+    const onMealBreak = Boolean(breakState.startedAt && !breakState.endedAt)
+    const onUnpaidBreak = Boolean(unpaidBreakState.startedAt && !unpaidBreakState.endedAt)
+
+    if ((action === 'start_break' || action === 'toggle_break') && onUnpaidBreak) {
+      return NextResponse.json({ error: 'End regular break before starting meal break' }, { status: 400 })
+    }
+    if ((action === 'start_unpaid_break' || action === 'toggle_unpaid_break') && onMealBreak) {
+      return NextResponse.json({ error: 'End meal break before starting regular break' }, { status: 400 })
+    }
+
+    const isUnpaidBreakAction = action === 'start_unpaid_break' || action === 'end_unpaid_break' || action === 'toggle_unpaid_break'
+    const selectedState = isUnpaidBreakAction ? unpaidBreakState : breakState
+    const breakAction = action === 'toggle_break' || action === 'toggle_unpaid_break'
+      ? selectedState.startedAt && !selectedState.endedAt
+        ? (isUnpaidBreakAction ? 'end_unpaid_break' : 'end_break')
+        : (isUnpaidBreakAction ? 'start_unpaid_break' : 'start_break')
       : action
 
     if (breakAction === 'start_break') {
@@ -409,6 +433,52 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
       return NextResponse.json({ success: true, employee, break_action: 'start_break', break_started_at: nowIso })
+    }
+
+    if (breakAction === 'start_unpaid_break') {
+      if (unpaidBreakState.startedAt && !unpaidBreakState.endedAt) {
+        return NextResponse.json({ error: 'You are already on regular break' }, { status: 400 })
+      }
+      if (unpaidBreakState.startedAt && unpaidBreakState.endedAt) {
+        return NextResponse.json({ error: 'Regular break has already been used for this shift' }, { status: 400 })
+      }
+
+      const { error } = await supabaseAdmin
+        .from('shift_clocks')
+        .update({
+          manager_note: setUnpaidBreakManagerNote(existingRecord.manager_note, { startedAt: nowIso, minutes: 0 }),
+          updated_at: nowIso,
+        })
+        .eq('id', existingRecord.id)
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ success: true, employee, break_action: 'start_unpaid_break', unpaid_break_started_at: nowIso })
+    }
+
+    if (breakAction === 'end_unpaid_break') {
+      if (!unpaidBreakState.startedAt || unpaidBreakState.endedAt) {
+        return NextResponse.json({ error: 'No active regular break found' }, { status: 400 })
+      }
+
+      const elapsedMinutes = Math.floor((new Date(nowIso).getTime() - new Date(unpaidBreakState.startedAt).getTime()) / 60_000)
+      const { error } = await supabaseAdmin
+        .from('shift_clocks')
+        .update({
+          manager_note: setUnpaidBreakManagerNote(existingRecord.manager_note, {
+            startedAt: unpaidBreakState.startedAt,
+            endedAt: nowIso,
+            minutes: elapsedMinutes,
+          }),
+          updated_at: nowIso,
+        })
+        .eq('id', existingRecord.id)
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ success: true, employee, break_action: 'end_unpaid_break', unpaid_break_minutes: elapsedMinutes })
     }
 
     if (!breakState.startedAt || breakState.endedAt) {
@@ -482,8 +552,13 @@ export async function POST(req: NextRequest) {
   if (existingRecord.clock_out_at) {
     return NextResponse.json({ error: 'This shift is already clocked out' }, { status: 400 })
   }
-  if (getMealBreakState(existingRecord).startedAt && !getMealBreakState(existingRecord).endedAt) {
+  const mealBreakState = getMealBreakState(existingRecord)
+  const unpaidBreakState = getUnpaidBreakState(existingRecord)
+  if (mealBreakState.startedAt && !mealBreakState.endedAt) {
     return NextResponse.json({ error: 'End meal break before clocking out' }, { status: 400 })
+  }
+  if (unpaidBreakState.startedAt && !unpaidBreakState.endedAt) {
+    return NextResponse.json({ error: 'End regular break before clocking out' }, { status: 400 })
   }
 
   const approvedHours = calculateClockHoursAfterBreak(existingRecord.clock_in_at, nowIso, getClockBreakMinutes(existingRecord))
