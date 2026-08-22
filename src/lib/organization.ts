@@ -103,7 +103,7 @@ export function getFallbackScheduleDepartment(employee: Employee): ScheduleDepar
 }
 
 export function getPrimaryDepartmentBadge(primaryDepartment: PrimaryDepartment | undefined, definitions: DepartmentDefinition[]) {
-  return getDepartmentLabel(primaryDepartment ?? 'foh', definitions)
+  return getDepartmentLabel(primaryDepartment ?? 'unassigned', definitions)
 }
 
 export function getScheduleDepartmentBadges(employee: Pick<Employee, 'primary_department' | 'schedule_departments'>, definitions: DepartmentDefinition[]) {

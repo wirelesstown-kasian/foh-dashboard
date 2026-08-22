@@ -15,7 +15,7 @@ export function DepartmentTabs({ department, onChange }: DepartmentTabsProps) {
   const tabs = [
     { key: 'all', label: 'All' },
     ...(departmentDefinitions.length > 0
-      ? departmentDefinitions.map(definition => ({ key: definition.key, label: definition.label }))
+      ? departmentDefinitions.filter(definition => definition.is_active).map(definition => ({ key: definition.key, label: definition.label }))
       : [
           { key: 'manager', label: 'Manager' },
           { key: 'server', label: 'Server' },

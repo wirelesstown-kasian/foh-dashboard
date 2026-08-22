@@ -956,29 +956,39 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           body: JSON.stringify({ week_start: startDate, week_end: endDate, department }),
         })
         const payload = (await response.json().catch(() => ({}))) as { success?: boolean; sent?: number; error?: string; errors?: string[]; message?: string }
-        if (!response.ok || payload.success === false) {
-          throw new Error(payload.errors?.join(' ') || payload.error || payload.message || 'Failed to send schedule emails')
+        const emailErrorMessage = payload.errors?.join(' ') || payload.error || payload.message || 'Failed to send schedule emails'
+
+        if (!response.ok && response.status !== 207) {
+          throw new Error(emailErrorMessage)
         }
         if ((payload.sent ?? 0) <= 0) {
           throw new Error(payload.message || 'Schedule published, but no schedule emails were sent. Check Email Settings and employee email addresses.')
         }
 
-        const markSentResult = await supabase
-          .from('schedule_publications')
-          .upsert({
-            week_start: startDate,
-            week_end: endDate,
-            scheduled_send_date: startDate,
-            scheduled_send_at: new Date().toISOString(),
-            published_at: new Date().toISOString(),
-            email_sent_at: new Date().toISOString(),
-          }, { onConflict: 'week_start' })
-        if (markSentResult.error) throw markSentResult.error
+        if (response.ok && payload.success !== false) {
+          const markSentResult = await supabase
+            .from('schedule_publications')
+            .upsert({
+              week_start: startDate,
+              week_end: endDate,
+              scheduled_send_date: startDate,
+              scheduled_send_at: new Date().toISOString(),
+              published_at: new Date().toISOString(),
+              email_sent_at: new Date().toISOString(),
+            }, { onConflict: 'week_start' })
+          if (markSentResult.error) throw markSentResult.error
 
-        setPublishFeedback({
-          tone: 'success',
-          message: `Schedule published and emails sent${typeof payload.sent === 'number' ? ` (${payload.sent} sent)` : ''}.`,
-        })
+          setPublishFeedback({
+            tone: 'success',
+            message: `Schedule published and emails sent${typeof payload.sent === 'number' ? ` (${payload.sent} sent)` : ''}.`,
+          })
+        } else {
+          const sentLabel = typeof payload.sent === 'number' ? ` ${payload.sent} email${payload.sent === 1 ? '' : 's'} sent.` : ''
+          setPublishFeedback({
+            tone: 'error',
+            message: `Schedule published, but email delivery was only partially successful.${sentLabel} ${emailErrorMessage}`.trim(),
+          })
+        }
       } else if (publishMode === 'queued') {
         const scheduledSendAt = getSelectedQueuedSendAt()
         const scheduledSendDateStr = formatDate(scheduledSendAt)

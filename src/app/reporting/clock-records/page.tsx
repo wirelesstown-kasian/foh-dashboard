@@ -113,6 +113,7 @@ export default function ClockRecordsPage() {
   const [savingClockId, setSavingClockId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [addHourOpen, setAddHourOpen] = useState(false)
+  const [sheetSyncing, setSheetSyncing] = useState(false)
   const [addHourForm, setAddHourForm] = useState<AddHourFormState>({
     employeeId: '',
     sessionDate: format(new Date(), 'yyyy-MM-dd'),
@@ -236,11 +237,20 @@ export default function ClockRecordsPage() {
     setClockRecords(prev => [json.record!, ...prev])
     try {
       await recomputeSessionTips(json.record.session_date)
+      const sheetSync = await fetch('/api/clock-records-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record_id: json.record.id }),
+      })
+      if (!sheetSync.ok) {
+        const payload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? 'Google Sheets sync failed')
+      }
       notifyReportingDataChanged()
       setAddHourOpen(false)
       setStatus('Clock record added and tip distribution recalculated.')
     } catch (error) {
-      setStatus(getErrorMessage(error, 'Clock record added, but tip distribution refresh failed'))
+      setStatus(getErrorMessage(error, 'Clock record added, but Google Sheets sync failed'))
     } finally {
       setAddingHour(false)
     }
@@ -275,9 +285,18 @@ export default function ClockRecordsPage() {
       for (const sessionDate of datesToRecompute) {
         await recomputeSessionTips(sessionDate)
       }
+      const sheetSync = await fetch('/api/clock-records-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record_id: json.record.id }),
+      })
+      if (!sheetSync.ok) {
+        const payload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? 'Google Sheets sync failed')
+      }
       notifyReportingDataChanged()
     } catch (error) {
-      setStatus(getErrorMessage(error, 'Clock record updated, but tip distribution refresh failed'))
+      setStatus(getErrorMessage(error, 'Clock record updated, but Google Sheets sync failed'))
       setSavingClockId(null)
       return false
     }
@@ -378,6 +397,15 @@ export default function ClockRecordsPage() {
 
     try {
       await recomputeSessionTips(json.session_date)
+      const sheetSync = await fetch('/api/clock-records-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deleted_record_id: deleteTarget.id }),
+      })
+      if (!sheetSync.ok) {
+        const payload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? 'Google Sheets sync failed')
+      }
       setClockRecords(prev => prev.filter(item => item.id !== deleteTarget.id))
       notifyReportingDataChanged()
       setDeleteTarget(null)
@@ -385,9 +413,28 @@ export default function ClockRecordsPage() {
       setDetailEditing(false)
       setStatus('Clock record deleted and tip distribution recalculated.')
     } catch (error) {
-      setStatus(getErrorMessage(error, 'Clock record deleted, but tip distribution refresh failed'))
+      setStatus(getErrorMessage(error, 'Clock record deleted, but Google Sheets sync failed'))
     } finally {
       setDeletingClockId(null)
+    }
+  }
+
+  const handleSheetSync = async () => {
+    setSheetSyncing(true)
+    setStatus(null)
+    try {
+      const res = await fetch('/api/clock-records-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset_sheet: true }),
+      })
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; rowCount?: number }
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to sync clock records to Google Sheets')
+      setStatus(`Clock records synced to Google Sheets${typeof payload.rowCount === 'number' ? ` (${payload.rowCount} rows)` : ''}.`)
+    } catch (error) {
+      setStatus(getErrorMessage(error, 'Failed to sync clock records to Google Sheets'))
+    } finally {
+      setSheetSyncing(false)
     }
   }
 
@@ -432,6 +479,9 @@ export default function ClockRecordsPage() {
           }
           rightSlot={
             <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={handleSheetSync} disabled={sheetSyncing}>
+                {sheetSyncing ? 'Syncing Sheet...' : 'Sync Sheet'}
+              </Button>
               <Button size="sm" onClick={openAddHourDialog} disabled={filteredEmployees.length === 0}>
                 <Plus className="mr-2 h-4 w-4" /> Add Hour
               </Button>

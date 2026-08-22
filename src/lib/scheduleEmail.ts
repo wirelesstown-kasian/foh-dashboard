@@ -119,7 +119,7 @@ export async function sendWeeklyScheduleEmails({
     const shiftsByDate = new Map(shifts.map(shift => [shift.date, shift]))
     const weekStartDate = new Date(weekStart + 'T12:00:00')
     const weekEndDate = new Date(weekEnd + 'T12:00:00')
-    const weekLabel = `${weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${weekEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    const weekLabel = `${weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ??${weekEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
     const weekDates: string[] = []
     for (let cursor = new Date(weekStart + 'T12:00:00'); cursor <= weekEndDate; cursor.setDate(cursor.getDate() + 1)) {
       weekDates.push(cursor.toISOString().split('T')[0])
@@ -133,7 +133,7 @@ export async function sendWeeklyScheduleEmails({
           <div style="font-size:12px;font-weight:700;color:#111827">${formatCalendarDay(date)}</div>
           <div style="font-size:12px;color:#6b7280;margin-top:2px">${formatDisplayDate(date)}</div>
           ${shift ? `
-            <div style="margin-top:10px;font-size:13px;font-weight:600;color:#1d4ed8">${formatTime(shift.start_time)} – ${formatTime(shift.end_time)}</div>
+            <div style="margin-top:10px;font-size:13px;font-weight:600;color:#1d4ed8">${formatTime(shift.start_time)} ??${formatTime(shift.end_time)}</div>
             <div style="font-size:12px;color:#475569;margin-top:4px">${duration}</div>
           ` : `
             <div style="margin-top:14px;font-size:12px;color:#9ca3af">Off</div>
@@ -163,7 +163,7 @@ export async function sendWeeklyScheduleEmails({
           return `
             <td style="border:1px solid #e5e7eb;padding:8px;text-align:center;background:${shift ? '#eef7ff' : '#fafafa'}">
               ${shift ? `
-                <div style="font-size:12px;font-weight:600;color:#1d4ed8">${formatTime(shift.start_time)} – ${formatTime(shift.end_time)}</div>
+                <div style="font-size:12px;font-weight:600;color:#1d4ed8">${formatTime(shift.start_time)} ??${formatTime(shift.end_time)}</div>
                 <div style="font-size:11px;color:#475569;margin-top:2px">${formatHours(calcHours(shift.start_time, shift.end_time))}</div>
               ` : `
                 <div style="font-size:11px;color:#9ca3af">Off</div>
@@ -214,14 +214,14 @@ export async function sendWeeklyScheduleEmails({
             </tbody>
           </table>
         </div>
-        <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
+        <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub 쨌 FOH Dashboard</p>
     `)
 
     const weekStartShort = weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
     emailQueue.push({
       resendKey,
       to: employee.email,
-      subject: `Your ${formatDepartmentLabel(scheduleDepartment)} Schedule — Week of ${weekStartShort}`,
+      subject: `Your ${formatDepartmentLabel(scheduleDepartment)} Schedule ??Week of ${weekStartShort}`,
       html,
       fromName: emailSettings.from_name,
       fromEmail: emailSettings.from_email,
@@ -239,8 +239,11 @@ export async function sendWeeklyScheduleEmails({
     try {
       await sendEmail(params)
       sent++
-    } catch (err) {
-      errors.push(err instanceof Error ? err.message : 'Unknown error')
+      if (sent < emailQueue.length) {
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'Unknown error')
     }
   }
 
