@@ -566,7 +566,7 @@ export async function PATCH(req: NextRequest) {
     session_date: nextSessionDate,
     approval_status: 'approved',
     approved_hours: numericHours ?? fallbackHours,
-    manager_note: manager_note?.trim() || null,
+    manager_note: setMealBreakManagerNote(manager_note?.trim() || null, getMealBreakState(existing as ShiftClock)) || null,
     clock_in_at: nextClockInAt,
     clock_out_at: nextClockOutAt,
     auto_clock_out: false,

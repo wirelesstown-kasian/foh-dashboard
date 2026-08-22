@@ -148,14 +148,27 @@ export function useScheduledDepartmentIds(startDate: string, endDate: string) {
   return deptMap
 }
 
-export function useClockRecords() {
+export function useClockRecords({
+  sessionDate,
+  startDate,
+  endDate,
+}: {
+  sessionDate?: string
+  startDate?: string
+  endDate?: string
+} = {}) {
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
 
   useEffect(() => {
     let mounted = true
 
     const load = async () => {
-      const res = await fetch('/api/clock-events', { cache: 'no-store' })
+      const params = new URLSearchParams()
+      if (sessionDate) params.set('session_date', sessionDate)
+      if (startDate) params.set('start_date', startDate)
+      if (endDate) params.set('end_date', endDate)
+      const query = params.toString()
+      const res = await fetch(`/api/clock-events${query ? `?${query}` : ''}`, { cache: 'no-store' })
       const json = (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
       if (!mounted) return
       setClockRecords(json.records ?? [])
@@ -170,7 +183,7 @@ export function useClockRecords() {
       mounted = false
       window.removeEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     }
-  }, [])
+  }, [endDate, sessionDate, startDate])
 
   return { clockRecords, setClockRecords }
 }

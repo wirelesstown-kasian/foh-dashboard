@@ -124,6 +124,10 @@ export function setMealBreakManagerNote(
   return [baseNote, ...tokens].filter(Boolean).join(' ')
 }
 
+export function getVisibleManagerNote(note: string | null | undefined) {
+  return (note ?? '').replace(MEAL_BREAK_TOKEN_PATTERN, '').trim()
+}
+
 export function getEffectiveClockHours(record: ShiftClock) {
   if (record.approval_status === 'approved' || record.approval_status === 'adjusted') {
     return Number(record.approved_hours ?? 0)

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
@@ -12,9 +12,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { calculateClockHours, getEffectiveClockHours, getMealBreakThresholdHours, isClockPending, shouldWarnMissingMealBreak } from '@/lib/clockUtils'
+import { calculateClockHoursAfterBreak, getClockBreakMinutes, getEffectiveClockHours, getMealBreakState, getMealBreakThresholdHours, getVisibleManagerNote, isClockPending, shouldWarnMissingMealBreak } from '@/lib/clockUtils'
 import { Employee, ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleEmployee } from '@/lib/tipEligibility'
@@ -78,15 +79,15 @@ function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
 
 export default function ClockRecordsPage() {
   const employees = useEmployees({ includeArchived: true })
-  const { clockRecords, setClockRecords } = useClockRecords()
 
-  const [department, setDepartment] = useState<ReportDepartment>('foh')
+  const [department, setDepartment] = useState<ReportDepartment>('all')
   const [period, setPeriod] = useState<ReportPeriod>('daily')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
-  const [employeeFilter, setEmployeeFilter] = useState('all')
-  const [editingClockId, setEditingClockId] = useState<string | null>(null)
+  const [employeeFilter, setEmployeeFilter] = useState('')
+  const [selectedClockId, setSelectedClockId] = useState<string | null>(null)
+  const [detailEditing, setDetailEditing] = useState(false)
   const [clockEdits, setClockEdits] = useState<Record<string, ClockEditState>>({})
   const [savingClockId, setSavingClockId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -106,10 +107,29 @@ export default function ClockRecordsPage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
+  const { clockRecords, setClockRecords } = useClockRecords({ startDate, endDate })
   const filteredEmployees = useMemo(
     () => employees.filter(employee => isEmployeeInDepartment(employee, department)),
     [employees, department]
   )
+  const staffFilterEmployees = useMemo(() => {
+    const byId = new Map<string, Employee>()
+    for (const employee of filteredEmployees) byId.set(employee.id, employee)
+    for (const record of clockRecords) {
+      const employee = getClockRecordEmployee(record, employees)
+      if (employee && isEmployeeInDepartment(employee, department)) byId.set(employee.id, employee)
+    }
+    return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name))
+  }, [clockRecords, department, employees, filteredEmployees])
+  useEffect(() => {
+    if (staffFilterEmployees.length === 0) {
+      setEmployeeFilter('')
+      return
+    }
+    if (!employeeFilter || !staffFilterEmployees.some(employee => employee.id === employeeFilter)) {
+      setEmployeeFilter(staffFilterEmployees[0].id)
+    }
+  }, [employeeFilter, staffFilterEmployees])
   const filteredClockRecords = useMemo(
     () =>
       clockRecords
@@ -117,16 +137,36 @@ export default function ClockRecordsPage() {
         .filter(record => {
           const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
           if (!employee || !isEmployeeInDepartment(employee, department)) return false
-          return employeeFilter === 'all' || employee.id === employeeFilter
+          return employeeFilter ? employee.id === employeeFilter : false
         })
         .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)),
     [clockRecords, department, employeeFilter, employees, endDate, startDate]
   )
+  const getClockEditState = (record: ShiftClock): ClockEditState => ({
+    sessionDate: record.session_date,
+    clockIn: isoToTimeInput(record.clock_in_at),
+    clockOut: isoToTimeInput(record.clock_out_at),
+    note: getVisibleManagerNote(record.manager_note),
+  })
+
+  const selectedClockRecord = useMemo(
+    () => clockRecords.find(record => record.id === selectedClockId) ?? null,
+    [clockRecords, selectedClockId]
+  )
+  const selectedClockEmployee = selectedClockRecord ? getClockRecordEmployee(selectedClockRecord, employees) : null
+  const selectedClockEdit = selectedClockRecord ? clockEdits[selectedClockRecord.id] ?? getClockEditState(selectedClockRecord) : null
+
+  const openClockDetail = (record: ShiftClock, edit = false) => {
+    setClockEdits(prev => ({ ...prev, [record.id]: prev[record.id] ?? getClockEditState(record) }))
+    setSelectedClockId(record.id)
+    setDetailEditing(edit)
+    setStatus(null)
+  }
 
   const openAddHourDialog = () => {
     const today = format(new Date(), 'yyyy-MM-dd')
     const defaultDate = today >= startDate && today <= endDate ? today : endDate
-    const defaultEmployeeId = employeeFilter !== 'all' ? employeeFilter : filteredEmployees[0]?.id ?? ''
+    const defaultEmployeeId = employeeFilter || (filteredEmployees[0]?.id ?? '')
     setAddHourForm({
       employeeId: defaultEmployeeId,
       sessionDate: defaultDate,
@@ -191,7 +231,7 @@ export default function ClockRecordsPage() {
 
   const saveClockAdjustment = async (record: ShiftClock) => {
     const currentEdit = clockEdits[record.id]
-    if (!currentEdit) return
+    if (!currentEdit) return false
     setSavingClockId(record.id)
     setStatus(null)
     const res = await fetch('/api/clock-events', {
@@ -210,7 +250,7 @@ export default function ClockRecordsPage() {
     if (!res.ok || !json.record) {
       setStatus(json.error ?? 'Failed to save clock change')
       setSavingClockId(null)
-      return
+      return false
     }
     setClockRecords(prev => prev.map(item => item.id === record.id ? json.record! : item))
     try {
@@ -222,16 +262,17 @@ export default function ClockRecordsPage() {
     } catch (error) {
       setStatus(getErrorMessage(error, 'Clock record updated, but tip distribution refresh failed'))
       setSavingClockId(null)
-      return
+      return false
     }
     setClockEdits(prev => {
       const next = { ...prev }
       delete next[record.id]
       return next
     })
-    setEditingClockId(null)
+    setDetailEditing(false)
     setSavingClockId(null)
     setStatus('Clock record saved successfully.')
+    return true
   }
 
   const recomputeSessionTips = async (sessionDate: string) => {
@@ -323,6 +364,8 @@ export default function ClockRecordsPage() {
       setClockRecords(prev => prev.filter(item => item.id !== deleteTarget.id))
       notifyReportingDataChanged()
       setDeleteTarget(null)
+      setSelectedClockId(current => current === deleteTarget.id ? null : current)
+      setDetailEditing(false)
       setStatus('Clock record deleted and tip distribution recalculated.')
     } catch (error) {
       setStatus(getErrorMessage(error, 'Clock record deleted, but tip distribution refresh failed'))
@@ -339,7 +382,7 @@ export default function ClockRecordsPage() {
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
-      <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
+      <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('') }} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
           period={period}
@@ -351,13 +394,12 @@ export default function ClockRecordsPage() {
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
           leftSlot={
-            <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)}>
+            <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)} disabled={staffFilterEmployees.length === 0}>
               <SelectTrigger className="w-44">
-                <span>{employeeFilter === 'all' ? 'All Staff' : getEmployeeNameById(employees, employeeFilter) ?? 'Unknown Staff'}</span>
+                <span>{employeeFilter ? getEmployeeNameById(staffFilterEmployees, employeeFilter) ?? getEmployeeNameById(employees, employeeFilter) ?? 'Unknown Staff' : 'Select staff'}</span>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Staff</SelectItem>
-                {filteredEmployees.map(employee => (
+                {staffFilterEmployees.map(employee => (
                   <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -383,6 +425,7 @@ export default function ClockRecordsPage() {
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Clock In</TableHead>
               <TableHead className="text-right">Clock Out</TableHead>
+              <TableHead className="text-right">Break</TableHead>
               <TableHead className="text-right">Worked Hrs</TableHead>
               <TableHead className="w-36">Note</TableHead>
               <TableHead>Action</TableHead>
@@ -393,31 +436,21 @@ export default function ClockRecordsPage() {
               const employee = getClockRecordEmployee(record, employees)
               const employeeName = employee?.name ?? 'Unknown Staff'
               const missingBreakWarning = shouldWarnMissingMealBreak(record, employee)
-              const currentEdit = clockEdits[record.id] ?? {
-                sessionDate: record.session_date,
-                clockIn: isoToTimeInput(record.clock_in_at),
-                clockOut: isoToTimeInput(record.clock_out_at),
-                note: record.manager_note ?? '',
-              }
-              const isEditing = editingClockId === record.id
-              const previewIn = timeInputToIso(currentEdit.sessionDate, currentEdit.clockIn)
-              const previewOut = currentEdit.clockOut ? timeInputToIso(currentEdit.sessionDate, currentEdit.clockOut) : null
-              const workedHours = previewIn && previewOut ? calculateClockHours(previewIn, previewOut) : 0
+              const breakState = getMealBreakState(record)
+              const breakMinutes = getClockBreakMinutes(record)
+              const workedHours = record.clock_out_at ? calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, breakMinutes) : 0
               return (
                 <TableRow key={record.id}>
-                  <TableCell className="font-medium">
-                    {isEditing ? (
-                      <Input
-                        type="date"
-                        value={currentEdit.sessionDate}
-                        onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, sessionDate: event.target.value } }))}
-                        className="h-8 w-36"
-                      />
-                    ) : (
-                      format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')
-                    )}
+                  <TableCell className="font-medium">{format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
+                  <TableCell>
+                    <button
+                      type="button"
+                      className="font-medium text-slate-900 underline-offset-4 hover:underline"
+                      onClick={() => openClockDetail(record)}
+                    >
+                      {employeeName}
+                    </button>
                   </TableCell>
-                  <TableCell>{employeeName}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1.5">
                       <Badge variant="outline" className={record.auto_clock_out ? 'border-orange-300 bg-orange-50 text-orange-800' : record.clock_out_at ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>
@@ -434,92 +467,181 @@ export default function ClockRecordsPage() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-right">
-                    {isEditing ? <Input type="time" value={currentEdit.clockIn} onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, clockIn: event.target.value } }))} className="ml-auto h-8 w-28 text-right" /> : format(new Date(record.clock_in_at), 'p')}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {isEditing ? <Input type="time" value={currentEdit.clockOut} onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, clockOut: event.target.value } }))} className="ml-auto h-8 w-28 text-right" /> : record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}
+                  <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
+                  <TableCell className="text-right">{record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {breakState.startedAt
+                      ? breakState.endedAt
+                        ? `${breakMinutes} min`
+                        : `Open since ${format(new Date(breakState.startedAt), 'p')}`
+                      : '—'}
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">{workedHours.toFixed(2)}</TableCell>
                   <TableCell>
-                    {isEditing ? (
-                      <Input
-                        value={currentEdit.note}
-                        onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, note: event.target.value } }))}
-                        className="h-8 w-32"
-                      />
-                    ) : (
-                      <span className="inline-block max-w-32 truncate text-sm text-muted-foreground">
-                        {record.manager_note ?? '—'}
-                      </span>
-                    )}
+                    <span className="inline-block max-w-32 truncate text-sm text-muted-foreground">
+                      {getVisibleManagerNote(record.manager_note) || '—'}
+                    </span>
                   </TableCell>
                   <TableCell className="align-top">
-                    {isEditing ? (
-                      <div className="flex items-start gap-3">
-                        <div className="flex gap-2">
-                          {record.clock_in_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}>In Photo</Button>}
-                          {record.clock_out_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => saveClockAdjustment(record)}
-                            disabled={savingClockId === record.id}
-                          >
-                            {savingClockId === record.id ? 'Saving…' : 'Save'}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-red-700 hover:text-red-800"
-                            onClick={() => setDeleteTarget(record)}
-                            disabled={savingClockId === record.id}
-                          >
-                            Delete
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setClockEdits(prev => {
-                                const next = { ...prev }
-                                delete next[record.id]
-                                return next
-                              })
-                              setEditingClockId(null)
-                              setStatus('Edit canceled.')
-                            }}
-                            disabled={savingClockId === record.id}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-start gap-3">
-                        <div className="flex gap-2">
-                          {record.clock_in_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}>In Photo</Button>}
-                          {record.clock_out_photo_path && <Button size="sm" variant="outline" onClick={() => window.open(`/api/clock-events/${record.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <Button size="sm" variant="outline" onClick={() => { setClockEdits(prev => ({ ...prev, [record.id]: { sessionDate: record.session_date, clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at), note: record.manager_note ?? '' } })); setEditingClockId(record.id) }}>Edit Times</Button>
-                        </div>
-                      </div>
-                    )}
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => openClockDetail(record)}>View</Button>
+                      <Button size="sm" variant="outline" onClick={() => openClockDetail(record, true)}>Edit</Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               )
             })}
             {filteredClockRecords.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">No clock records for this range</TableCell>
+                <TableCell colSpan={9} className="py-6 text-center text-muted-foreground">No clock records for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
         </Table>
       </div>
+
+      <Sheet
+        open={!!selectedClockRecord}
+        onOpenChange={open => {
+          if (!open) {
+            setSelectedClockId(null)
+            setDetailEditing(false)
+          }
+        }}
+      >
+        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+          {selectedClockRecord && selectedClockEdit && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{selectedClockEmployee?.name ?? 'Unknown Staff'}</SheetTitle>
+                <SheetDescription>
+                  {format(new Date(`${selectedClockRecord.session_date}T12:00:00`), 'MMM d, yyyy')} clock record
+                </SheetDescription>
+              </SheetHeader>
+              <div className="space-y-4 px-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <div className="text-xs font-medium uppercase text-muted-foreground">Status</div>
+                    <div className="mt-1 font-medium">
+                      {selectedClockRecord.auto_clock_out ? 'Auto Clock-Out' : selectedClockRecord.clock_out_at ? 'Closed' : 'Open'}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <div className="text-xs font-medium uppercase text-muted-foreground">Worked Hrs</div>
+                    <div className="mt-1 font-medium">
+                      {(selectedClockEdit.clockOut
+                        ? calculateClockHoursAfterBreak(
+                            timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.clockIn) ?? selectedClockRecord.clock_in_at,
+                            timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.clockOut) ?? selectedClockRecord.clock_out_at ?? selectedClockRecord.clock_in_at,
+                            getClockBreakMinutes(selectedClockRecord)
+                          )
+                        : 0).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                {detailEditing ? (
+                  <div className="space-y-4">
+                    <div>
+                      <Label>Date</Label>
+                      <Input
+                        type="date"
+                        value={selectedClockEdit.sessionDate}
+                        onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, sessionDate: event.target.value } }))}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Clock In</Label>
+                        <Input
+                          type="time"
+                          value={selectedClockEdit.clockIn}
+                          onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, clockIn: event.target.value } }))}
+                        />
+                      </div>
+                      <div>
+                        <Label>Clock Out</Label>
+                        <Input
+                          type="time"
+                          value={selectedClockEdit.clockOut}
+                          onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, clockOut: event.target.value } }))}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Manager Note</Label>
+                      <Input
+                        value={selectedClockEdit.note}
+                        onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, note: event.target.value } }))}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3 text-sm">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Clock In</div>
+                        <div className="mt-1">{format(new Date(selectedClockRecord.clock_in_at), 'p')}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Clock Out</div>
+                        <div className="mt-1">{selectedClockRecord.clock_out_at ? format(new Date(selectedClockRecord.clock_out_at), 'p') : 'Open'}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium uppercase text-muted-foreground">Break</div>
+                      <div className="mt-1">
+                        {getMealBreakState(selectedClockRecord).startedAt
+                          ? getMealBreakState(selectedClockRecord).endedAt
+                            ? `${getClockBreakMinutes(selectedClockRecord)} min`
+                            : `Open since ${format(new Date(getMealBreakState(selectedClockRecord).startedAt!), 'p')}`
+                          : 'No break recorded'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium uppercase text-muted-foreground">Note</div>
+                      <div className="mt-1">{getVisibleManagerNote(selectedClockRecord.manager_note) || 'No note'}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <SheetFooter>
+                {detailEditing ? (
+                  <>
+                    <Button onClick={() => void saveClockAdjustment(selectedClockRecord)} disabled={savingClockId === selectedClockRecord.id}>
+                      {savingClockId === selectedClockRecord.id ? 'Saving…' : 'Save Changes'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: getClockEditState(selectedClockRecord) }))
+                        setDetailEditing(false)
+                      }}
+                      disabled={savingClockId === selectedClockRecord.id}
+                    >
+                      Cancel Edit
+                    </Button>
+                  </>
+                ) : (
+                  <Button onClick={() => setDetailEditing(true)}>Edit Record</Button>
+                )}
+                <div className="flex gap-2">
+                  {selectedClockRecord.clock_in_photo_path && <Button className="flex-1" variant="outline" onClick={() => window.open(`/api/clock-events/${selectedClockRecord.id}/photo?kind=in`, '_blank', 'noopener,noreferrer')}>In Photo</Button>}
+                  {selectedClockRecord.clock_out_photo_path && <Button className="flex-1" variant="outline" onClick={() => window.open(`/api/clock-events/${selectedClockRecord.id}/photo?kind=out`, '_blank', 'noopener,noreferrer')}>Out Photo</Button>}
+                </div>
+                <Button
+                  variant="outline"
+                  className="text-red-700 hover:text-red-800"
+                  onClick={() => setDeleteTarget(selectedClockRecord)}
+                  disabled={savingClockId === selectedClockRecord.id}
+                >
+                  Delete Record
+                </Button>
+              </SheetFooter>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={addHourOpen} onOpenChange={setAddHourOpen}>
         <DialogContent className="max-w-md">
