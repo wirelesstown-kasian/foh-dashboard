@@ -4,6 +4,8 @@ import { buildEmailDocument, renderEmailShell, sendEmail } from '@/lib/emailUtil
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getEmailSettings } from '@/lib/appSettings'
+import { getEffectiveClockHours } from '@/lib/clockUtils'
+import type { ShiftClock } from '@/lib/types'
 
 type WageReportPeriod = 'daily' | 'weekly' | 'monthly'
 type WageReportView = 'earnings' | 'tips'
@@ -187,7 +189,7 @@ export async function POST(req: NextRequest) {
 
   const { data: clockRecords, error: clockError } = await supabaseAdmin
     .from('shift_clocks')
-    .select('session_date, approved_hours, auto_clock_out, clock_out_at, approval_status')
+    .select('*')
     .eq('employee_id', employee_id)
     .gte('session_date', start)
     .lte('session_date', end)
@@ -196,9 +198,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: clockError.message }, { status: 500 })
   }
 
-  const approvedClockHoursByDate = ((clockRecords ?? []) as Array<{ session_date: string; approved_hours: number | null }>)
+  const approvedClockHoursByDate = ((clockRecords ?? []) as ShiftClock[])
     .reduce((map, record) => {
-      map.set(record.session_date, (map.get(record.session_date) ?? 0) + Number(record.approved_hours ?? 0))
+      map.set(record.session_date, (map.get(record.session_date) ?? 0) + getEffectiveClockHours(record))
       return map
     }, new Map<string, number>())
 
