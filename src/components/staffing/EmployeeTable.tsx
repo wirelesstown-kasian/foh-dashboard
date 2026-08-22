@@ -40,7 +40,7 @@ interface FormState {
   phone: string
   email: string
   address: string
-  role: EmployeeRole
+  role: EmployeeRole | ''
   primary_department: string
   schedule_departments: string[]
   hourly_wage: string
@@ -67,9 +67,9 @@ const EMPTY_FORM: FormState = {
   phone: '',
   email: '',
   address: '',
-  role: 'server',
-  primary_department: 'server',
-  schedule_departments: ['server'],
+  role: '',
+  primary_department: '',
+  schedule_departments: [],
   hourly_wage: '',
   tip_cap_enabled: false,
   guaranteed_hourly: '',
@@ -189,11 +189,10 @@ export function EmployeeTable() {
   useEffect(() => { load() }, [load])
 
   const openAdd = () => {
-    const firstDepartment = departmentDefinitions.find(department => department.key === 'server')?.key ?? departmentDefinitions[0]?.key ?? 'server'
     setEditTarget(null)
     setResetPinMode(true)
     setDepartmentDropdownOpen(false)
-    setForm({ ...EMPTY_FORM, primary_department: firstDepartment, schedule_departments: [firstDepartment] })
+    setForm(EMPTY_FORM)
     setDialogOpen(true)
   }
 
@@ -232,6 +231,10 @@ export function EmployeeTable() {
   const handleSave = async () => {
     const name = getFullName(form)
     if (!name) return
+    if (!form.role) {
+      setSaveError('Select a role')
+      return
+    }
     if (form.schedule_departments.length === 0) {
       setSaveError('Select at least one schedule department')
       return
@@ -336,6 +339,7 @@ export function EmployeeTable() {
   const canSaveEmployee = Boolean(getFullName(form)) &&
     (!editTarget || !resetPinMode || /^\d{4}$/.test(form.pin)) &&
     (Boolean(editTarget) || /^\d{4}$/.test(form.pin)) &&
+    Boolean(form.role) &&
     form.schedule_departments.length > 0 &&
     Boolean(form.payment_method) &&
     (!form.tip_cap_enabled || Boolean(form.tip_pool_hourly_rate.trim())) &&
@@ -556,10 +560,10 @@ export function EmployeeTable() {
                 )}
               </div>
               <div>
-                <Label>Role</Label>
-                <Select value={form.role} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
+                <Label>Role *</Label>
+                <Select value={form.role || undefined} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, role: v as EmployeeRole }))}>
                   <SelectTrigger className="w-full">
-                    <span>{getRoleLabel(form.role, roleDefinitions)}</span>
+                    <span className={form.role ? '' : 'text-muted-foreground'}>{form.role ? getRoleLabel(form.role, roleDefinitions) : 'Select role'}</span>
                   </SelectTrigger>
                   <SelectContent>
                     {roleDefinitions.map(r => (
