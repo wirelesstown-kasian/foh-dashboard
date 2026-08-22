@@ -191,6 +191,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [manualSaveStatus, setManualSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [publishFeedback, setPublishFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null)
+  const [hasPublishedSchedule, setHasPublishedSchedule] = useState(false)
   const [scheduleEmailDefaults, setScheduleEmailDefaults] = useState(DEFAULT_SCHEDULE_EMAIL_SETTINGS)
   const allowedTimeOptions = getAllowedTimeOptions()
   const departmentLabel = getDepartmentLabel(department, departmentDefinitions)
@@ -382,6 +383,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       start_time: s.start_time,
       end_time: s.end_time,
     }))
+    setHasPublishedSchedule(published.length > 0)
 
     const serverDraftRows = (draftRes.data ?? []) as Array<ShiftDraft & { id?: string }>
     const hasDepartmentServerDrafts = serverDraftRows.length > 0
@@ -792,14 +794,17 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const previousWeekStart = formatDate(previousWeekDays[0])
     const previousWeekEnd = formatDate(previousWeekDays[6])
 
-    // Fetch both the previous week's draft order AND published schedules in parallel
+    setPublishFeedback(null)
+
+    // Prefer previous week's planner draft, then fall back to published schedule.
     const [prevDraftsRes, prevSchedulesRes] = await Promise.all([
       supabase
         .from('schedule_drafts')
-        .select('employee_id, display_order')
+        .select('*')
         .eq('week_start', previousWeekStart)
         .eq('department', department)
-        .order('display_order'),
+        .order('display_order')
+        .order('date'),
       supabase
         .from('schedules')
         .select('*')
@@ -810,13 +815,27 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         .order('date'),
     ])
 
+    if (prevDraftsRes.error) {
+      console.error('Failed to load previous week planner drafts', prevDraftsRes.error)
+      setPublishFeedback({
+        tone: 'error',
+        message: prevDraftsRes.error.message,
+      })
+      return
+    }
+
     if (prevSchedulesRes.error) {
       console.error('Failed to load previous week schedules', prevSchedulesRes.error)
+      setPublishFeedback({
+        tone: 'error',
+        message: prevSchedulesRes.error.message,
+      })
       return
     }
 
     const previousSchedules = prevSchedulesRes.data ?? []
-    const previousDraftRows = (prevDraftsRes.data ?? []) as Array<{ employee_id: string; display_order: number | null }>
+    const previousDraftRows = (prevDraftsRes.data ?? []) as Array<ShiftDraft & { week_start?: string; display_order: number | null }>
+    const hasPreviousDraftRows = previousDraftRows.length > 0
 
     // Build ordered employee list from previous week's saved display_order
     const prevDraftOrderedIds = Array.from(
@@ -832,13 +851,30 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
     // Combined ordered list: draft order first, then extras from published schedules
     const allPrevEmployeeIds = Array.from(
-      new Set([...prevDraftOrderedIds, ...prevScheduleEmployeeIds])
+      new Set(hasPreviousDraftRows ? prevDraftOrderedIds : [...prevDraftOrderedIds, ...prevScheduleEmployeeIds])
     ).filter(id => employees.some(emp => emp.id === id)) // must exist in current dept
 
-    if (allPrevEmployeeIds.length === 0 && previousSchedules.length === 0) return
+    if (allPrevEmployeeIds.length === 0) {
+      setPublishFeedback({
+        tone: 'error',
+        message: `No previous week ${departmentLabel} planner draft or published schedule was found.`,
+      })
+      return
+    }
 
-    // Shift previous week's published shifts forward by 7 days
-    const shiftedDrafts = previousSchedules
+    const sourceRows = hasPreviousDraftRows
+      ? previousDraftRows
+      : previousSchedules.map(schedule => ({
+          employee_id: schedule.employee_id,
+          date: schedule.date,
+          start_time: schedule.start_time,
+          end_time: schedule.end_time,
+          is_off: false,
+        }))
+
+    // Shift previous week's draft or published shifts forward by 7 days.
+    const displayOrderByEmployeeId = new Map(allPrevEmployeeIds.map((employeeId, index) => [employeeId, index]))
+    const shiftedDrafts = sourceRows
       .filter(s => allPrevEmployeeIds.includes(s.employee_id))
       .map(schedule => {
         const previousDate = new Date(schedule.date + 'T12:00:00')
@@ -849,7 +885,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           date: formatDate(nextDate),
           start_time: schedule.start_time,
           end_time: schedule.end_time,
-          is_off: false,
+          is_off: !!schedule.is_off,
+          display_order: displayOrderByEmployeeId.get(schedule.employee_id) ?? 0,
         } satisfies ShiftDraft
       })
 
@@ -864,11 +901,15 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const replacedIds = new Set(allPrevEmployeeIds)
     const keptDrafts = drafts.filter(draft => !replacedIds.has(draft.employee_id))
     persistDisplayedEmployeeIds(nextDisplayedIds)
-    persistDrafts([...keptDrafts, ...shiftedDrafts].sort((a, b) => {
+    persistDrafts(ensureMondayOffDrafts([...keptDrafts, ...shiftedDrafts].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date)
       if (a.employee_id !== b.employee_id) return a.employee_id.localeCompare(b.employee_id)
       return a.start_time.localeCompare(b.start_time)
-    }))
+    }), nextDisplayedIds))
+    setPublishFeedback({
+      tone: 'success',
+      message: `Copied previous week ${hasPreviousDraftRows ? 'planner draft' : 'published schedule'} into this week.`,
+    })
   }
 
 
@@ -1039,10 +1080,6 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             </span>
           )}
           {/* 5. Action buttons */}
-          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => void copyPreviousWeekForAll()} disabled={!isEditableWeek}>
-            <Copy className="w-4 h-4 mr-1.5" />
-            Copy Previous Week
-          </Button>
           <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={exportPlannerPdf}>
             <Download className="w-4 h-4 mr-1.5" />
             Export PDF
@@ -1053,7 +1090,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           </Button>
           <Button size="sm" className="h-8 rounded-lg px-3" onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
             <Send className="w-4 h-4 mr-1.5" />
-            Publish
+            {hasPublishedSchedule ? 'Replace Published Schedule' : 'Publish'}
           </Button>
         </div>
       </div>
@@ -1201,7 +1238,18 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               {displayedEmployees.length === 0 && !addStaffDialogOpen && (
                 <tr>
                   <td colSpan={9} className="text-center py-10 text-muted-foreground text-sm">
-                    No staff lines yet. Click <strong>+ Add staff</strong> below to start building this week&apos;s schedule.
+                    <div className="flex min-h-56 flex-col items-center justify-center gap-3">
+                      <Button
+                        variant="outline"
+                        className="h-11 rounded-lg px-5 text-sm font-semibold"
+                        onClick={() => void copyPreviousWeekForAll()}
+                        disabled={!isEditableWeek}
+                      >
+                        <Copy className="mr-2 h-4 w-4" />
+                        Copy Previous Week
+                      </Button>
+                      <p>No staff lines yet. Click <strong>+ Add staff</strong> below to start building this week&apos;s schedule.</p>
+                    </div>
                   </td>
                 </tr>
               )}
@@ -1310,11 +1358,13 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Confirm Publish</DialogTitle>
+            <DialogTitle>{hasPublishedSchedule ? 'Replace Published Schedule' : 'Confirm Publish'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              You are about to publish the {departmentLabel} schedule for {formatWeekRange(weekRef)}.
+              {hasPublishedSchedule
+                ? `You are about to replace the current published ${departmentLabel} schedule for ${formatWeekRange(weekRef)}.`
+                : `You are about to publish the ${departmentLabel} schedule for ${formatWeekRange(weekRef)}.`}
             </p>
             <div className="rounded-lg border bg-slate-50 p-3 text-sm">
               <div className="flex justify-between">
@@ -1327,7 +1377,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               </div>
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-              Review once more before confirming. This will replace the published schedule for this department and week.
+              {hasPublishedSchedule
+                ? 'Review once more before confirming. This deletes the current employee schedule board version for this department/week and publishes this planner version in its place.'
+                : 'Review once more before confirming. This will publish this planner version to the employee schedule board.'}
             </div>
             <div className="rounded-lg border bg-white p-3 text-sm">
               <p className="font-medium text-slate-900">Email Delivery</p>
@@ -1339,7 +1391,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 >
                   <div className="font-medium text-slate-900">Publish Only</div>
                   <div className="mt-1 text-muted-foreground">
-                    Publish to the employee schedule board without sending email.
+                    {hasPublishedSchedule ? 'Replace the employee schedule board without sending email.' : 'Publish to the employee schedule board without sending email.'}
                   </div>
                 </button>
                 <button
@@ -1349,7 +1401,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 >
                   <div className="font-medium text-slate-900">Send Immediately</div>
                   <div className="mt-1 text-muted-foreground">
-                    Publish to the employee schedule board and send email right now.
+                    {hasPublishedSchedule ? 'Replace the employee schedule board and send email right now.' : 'Publish to the employee schedule board and send email right now.'}
                   </div>
                 </button>
                 <button
@@ -1359,7 +1411,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 >
                   <div className="font-medium text-slate-900">Schedule Email</div>
                   <div className="mt-1 text-muted-foreground">
-                    Publish to the employee schedule board and queue email for {getSelectedQueuedSendAt().toLocaleString('en-US', {
+                    {hasPublishedSchedule ? 'Replace the employee schedule board and queue email for ' : 'Publish to the employee schedule board and queue email for '}{getSelectedQueuedSendAt().toLocaleString('en-US', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',
@@ -1403,9 +1455,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 <div>
                   <p className="font-medium text-slate-900">Current action</p>
                   <p className="mt-1 text-muted-foreground">
-                    {publishMode === 'schedule_only' && 'This publish will update the employee schedule board only.'}
-                    {publishMode === 'immediate' && 'This publish will update the employee schedule board and send email immediately.'}
-                    {publishMode === 'queued' && `This publish will update the employee schedule board and queue email for ${getSelectedQueuedSendAt().toLocaleString('en-US', {
+                    {publishMode === 'schedule_only' && (hasPublishedSchedule ? 'This will replace the current employee schedule board version only.' : 'This publish will update the employee schedule board only.')}
+                    {publishMode === 'immediate' && (hasPublishedSchedule ? 'This will replace the current employee schedule board version and send email immediately.' : 'This publish will update the employee schedule board and send email immediately.')}
+                    {publishMode === 'queued' && `${hasPublishedSchedule ? 'This will replace the current employee schedule board version' : 'This publish will update the employee schedule board'} and queue email for ${getSelectedQueuedSendAt().toLocaleString('en-US', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',
@@ -1432,7 +1484,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 Back
               </Button>
               <Button className="flex-1" onClick={handlePublish} disabled={saving}>
-                {saving ? 'Publishing…' : 'Confirm Publish'}
+                {saving ? 'Publishing…' : hasPublishedSchedule ? 'Replace Published Schedule' : 'Confirm Publish'}
               </Button>
             </div>
           </div>
