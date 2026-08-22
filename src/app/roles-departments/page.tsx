@@ -5,6 +5,7 @@ import { Building2, BriefcaseBusiness, Plus, Trash2 } from 'lucide-react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { AppSettings, DepartmentDefinition, RoleDefinition } from '@/lib/appSettings'
 import { sortDefinitionsByOrder, titleCaseWords } from '@/lib/organization'
 import { Employee } from '@/lib/types'
@@ -19,10 +20,10 @@ const DEFAULT_ROLES: RoleDefinition[] = [
 ]
 
 const DEFAULT_DEPARTMENTS: DepartmentDefinition[] = [
-  { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', is_active: true, display_order: 0 },
-  { key: 'server', label: 'Server', description: 'Dining room service', is_active: true, display_order: 1 },
-  { key: 'cook', label: 'Cook', description: 'Cooking shifts', is_active: true, display_order: 2 },
-  { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', is_active: true, display_order: 3 },
+  { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', payroll_cycle: 'semi_monthly', is_active: true, display_order: 0 },
+  { key: 'server', label: 'Server', description: 'Dining room service', payroll_cycle: 'weekly', is_active: true, display_order: 1 },
+  { key: 'cook', label: 'Cook', description: 'Cooking shifts', payroll_cycle: 'semi_monthly', is_active: true, display_order: 2 },
+  { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', payroll_cycle: 'semi_monthly', is_active: true, display_order: 3 },
 ]
 
 function slugifyRoleKey(value: string) {
@@ -126,6 +127,12 @@ export default function RolesDepartmentsPage() {
     )))
   }
 
+  const updateDepartmentPayrollCycle = (key: string, payrollCycle: 'weekly' | 'semi_monthly') => {
+    setDepartments(currentDepartments => currentDepartments.map(department => (
+      department.key === key ? { ...department, payroll_cycle: payrollCycle } : department
+    )))
+  }
+
   const addDepartment = () => {
     if (!newDepartment.trim()) return
     const key = slugifyRoleKey(newDepartment)
@@ -140,6 +147,7 @@ export default function RolesDepartmentsPage() {
         label: titleCaseWords(newDepartment),
         description: '',
         is_active: true,
+        payroll_cycle: key === 'server' ? 'weekly' : 'semi_monthly',
         display_order: currentDepartments.length,
       },
     ])
@@ -258,14 +266,15 @@ export default function RolesDepartmentsPage() {
               </div>
             </div>
             <div className="overflow-hidden rounded-lg border">
-              <div className="grid grid-cols-[minmax(0,1fr)_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
+              <div className="grid grid-cols-[minmax(0,1fr)_32px] gap-2 bg-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_130px_56px_32px]">
                 <span>Name</span>
                 <span className="hidden sm:block">Description</span>
+                <span className="hidden sm:block">Payroll</span>
                 <span className="hidden sm:block">Key</span>
                 <span />
               </div>
               {departments.map(department => (
-                <div key={department.key} className="grid grid-cols-[minmax(0,1fr)_32px] items-center gap-2 border-t px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_56px_32px]">
+                <div key={department.key} className="grid grid-cols-[minmax(0,1fr)_32px] items-center gap-2 border-t px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)_130px_56px_32px]">
                   <Input className="min-w-0" value={department.label} onChange={(event) => updateDepartment(department.key, event.target.value)} />
                   <Input
                     className="hidden min-w-0 sm:flex"
@@ -273,6 +282,18 @@ export default function RolesDepartmentsPage() {
                     onChange={(event) => updateDepartmentDescription(department.key, event.target.value)}
                     placeholder="Description"
                   />
+                  <Select
+                    value={department.payroll_cycle ?? (department.key === 'server' ? 'weekly' : 'semi_monthly')}
+                    onValueChange={(value: string | null) => value && updateDepartmentPayrollCycle(department.key, value as 'weekly' | 'semi_monthly')}
+                  >
+                    <SelectTrigger className="hidden h-9 min-w-0 sm:flex">
+                      <span>{(department.payroll_cycle ?? (department.key === 'server' ? 'weekly' : 'semi_monthly')) === 'weekly' ? 'Weekly' : 'Semi-monthly'}</span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <span className="hidden min-w-0 truncate font-mono text-[11px] text-slate-500 sm:block" title={department.key}>{department.key}</span>
                   <Button
                     type="button"

@@ -29,6 +29,7 @@ export interface DepartmentDefinition {
   key: string
   label: string
   description?: string
+  payroll_cycle?: 'weekly' | 'semi_monthly'
   is_active: boolean
   display_order: number
 }
@@ -60,10 +61,10 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     { key: 'kitchen_staff', label: 'Kitchen Staff', description: 'Back-of-house prep and line work', color: '#f43f5e', is_active: true, display_order: 4 },
   ],
   primary_department_definitions: [
-    { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', is_active: true, display_order: 0 },
-    { key: 'server', label: 'Server', description: 'Dining room service', is_active: true, display_order: 1 },
-    { key: 'cook', label: 'Cook', description: 'Cooking shifts', is_active: true, display_order: 2 },
-    { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', is_active: true, display_order: 3 },
+    { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', payroll_cycle: 'semi_monthly', is_active: true, display_order: 0 },
+    { key: 'server', label: 'Server', description: 'Dining room service', payroll_cycle: 'weekly', is_active: true, display_order: 1 },
+    { key: 'cook', label: 'Cook', description: 'Cooking shifts', payroll_cycle: 'semi_monthly', is_active: true, display_order: 2 },
+    { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', payroll_cycle: 'semi_monthly', is_active: true, display_order: 3 },
   ],
 }
 
@@ -96,21 +97,38 @@ function normalizeOptionalHexColor(value: unknown) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim()) ? value.trim() : undefined
 }
 
+function getDefaultPayrollCycleForDepartment(key: string) {
+  return key === 'server' ? 'weekly' : 'semi_monthly'
+}
+
+function normalizePayrollCycle(value: unknown, departmentKey: string) {
+  return value === 'weekly' || value === 'semi_monthly'
+    ? value
+    : getDefaultPayrollCycleForDepartment(departmentKey)
+}
+
 function normalizeDefinitions<T extends RoleDefinition | DepartmentDefinition>(value: unknown, fallback: T[]): T[] {
   if (!Array.isArray(value)) return fallback
+  const includesPayrollCycle = fallback.some(entry => 'payroll_cycle' in entry)
   const normalized = value
     .map((entry, index) => {
       if (!entry || typeof entry !== 'object') return null
       const maybeEntry = entry as Partial<T>
       if (typeof maybeEntry.key !== 'string' || !maybeEntry.key.trim()) return null
-      return {
+      const normalizedEntry = {
         key: maybeEntry.key.trim(),
         label: typeof maybeEntry.label === 'string' && maybeEntry.label.trim() ? maybeEntry.label.trim() : maybeEntry.key.trim(),
         description: normalizeOptionalString(maybeEntry.description),
         color: normalizeOptionalHexColor((maybeEntry as Partial<RoleDefinition>).color),
         is_active: typeof maybeEntry.is_active === 'boolean' ? maybeEntry.is_active : true,
         display_order: typeof maybeEntry.display_order === 'number' ? maybeEntry.display_order : index,
-      } as T
+      }
+      return (includesPayrollCycle
+        ? {
+            ...normalizedEntry,
+            payroll_cycle: normalizePayrollCycle((maybeEntry as Partial<DepartmentDefinition>).payroll_cycle, maybeEntry.key.trim()),
+          }
+        : normalizedEntry) as unknown as T
     })
     .filter((entry): entry is T => entry !== null)
 

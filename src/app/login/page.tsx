@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { LockKeyhole, Mail, ShieldCheck } from 'lucide-react'
+import { LockKeyhole, Mail } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -80,19 +80,6 @@ function LoginForm() {
           <p className="mt-1 text-sm text-slate-500">
             Sign in with the app login managed in Staffing. PIN stays available for task actions inside service.
           </p>
-        </div>
-
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          <div className="flex items-start gap-2">
-            <ShieldCheck className="mt-0.5 h-4 w-4 text-violet-600" />
-            <div>
-              <p className="font-medium text-slate-800">Existing manager PIN access still works.</p>
-              <p className="mt-1">
-                Managers can go back to the dashboard and open <span className="font-medium">Admin Board</span> with the
-                usual PIN. Use this page only after an app login has been enabled in Staffing.
-              </p>
-            </div>
-          </div>
         </div>
 
         {loginReady ? (

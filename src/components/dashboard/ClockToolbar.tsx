@@ -159,46 +159,51 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
 
   return (
     <>
-      <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          className="h-9 bg-emerald-600 px-4 text-sm font-semibold hover:bg-emerald-700"
-          onClick={() => {
-            openDialog('clock_in')
-          }}
-        >
-          {CLOCK_IN_TITLE}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-9 px-4 text-sm font-semibold"
-          onClick={() => {
-            openDialog('clock_out')
-          }}
-        >
-          {CLOCK_OUT_TITLE}
-        </Button>
-        <Button
-          size="sm"
-          variant={activeBreakCount > 0 ? 'default' : 'outline'}
-          className="h-9 px-4 text-sm font-semibold"
-          onClick={() => {
-            openDialog(activeBreakCount > 0 ? 'end_break' : 'start_break')
-          }}
-        >
-          {breakButtonLabel}
-        </Button>
-        {openClockCount > 0 && (
-          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-            {openClockCount} clocked in
-          </span>
-        )}
-        {activeBreakCount > 0 && (
-          <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
-            {activeBreakCount} on break
-          </span>
-        )}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-white px-2.5 py-2 shadow-sm">
+        <div className="flex items-center gap-2 pr-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Time Clock</span>
+          {openClockCount > 0 && (
+            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+              {openClockCount} clocked in
+            </span>
+          )}
+          {activeBreakCount > 0 && (
+            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
+              {activeBreakCount} on break
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            className="h-9 bg-emerald-600 px-4 text-sm font-semibold hover:bg-emerald-700"
+            onClick={() => {
+              openDialog('clock_in')
+            }}
+          >
+            {CLOCK_IN_TITLE}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 px-4 text-sm font-semibold"
+            onClick={() => {
+              openDialog('clock_out')
+            }}
+          >
+            {CLOCK_OUT_TITLE}
+          </Button>
+          <Button
+            size="sm"
+            variant={activeBreakCount > 0 ? 'default' : 'outline'}
+            className="h-9 px-4 text-sm font-semibold"
+            onClick={() => {
+              openDialog(activeBreakCount > 0 ? 'end_break' : 'start_break')
+            }}
+          >
+            {breakButtonLabel}
+          </Button>
+        </div>
       </div>
 
       <Dialog

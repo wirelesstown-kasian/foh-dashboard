@@ -26,11 +26,15 @@ import {
   paymentMethodLabel,
 } from '@/lib/payroll'
 import { PaymentMethod } from '@/lib/types'
+import { DepartmentDefinition } from '@/lib/appSettings'
 
 type Step = 'setup' | 'worksheet'
 type PayrollCycle = 'weekly' | 'semi_monthly'
 
-function getPayrollCycleForDepartment(department: string): PayrollCycle {
+function getPayrollCycleForDepartment(department: string, departmentDefinitions: DepartmentDefinition[] = []): PayrollCycle {
+  if (department === 'all') return 'semi_monthly'
+  const configuredCycle = departmentDefinitions.find(definition => definition.key === department)?.payroll_cycle
+  if (configuredCycle === 'weekly' || configuredCycle === 'semi_monthly') return configuredCycle
   return department === 'server' ? 'weekly' : 'semi_monthly'
 }
 
@@ -46,15 +50,16 @@ function getPayrollRangeFromPayDate(cycle: PayrollCycle, payDate: string) {
   }
 
   if (date.getDate() <= 15) {
+    const previousMonth = new Date(date.getFullYear(), date.getMonth() - 1, 1)
     return {
-      startDate: format(startOfMonth(date), 'yyyy-MM-dd'),
-      endDate: format(new Date(date.getFullYear(), date.getMonth(), 15), 'yyyy-MM-dd'),
+      startDate: format(new Date(previousMonth.getFullYear(), previousMonth.getMonth(), 16), 'yyyy-MM-dd'),
+      endDate: format(endOfMonth(previousMonth), 'yyyy-MM-dd'),
     }
   }
 
   return {
-    startDate: format(new Date(date.getFullYear(), date.getMonth(), 16), 'yyyy-MM-dd'),
-    endDate: format(endOfMonth(date), 'yyyy-MM-dd'),
+    startDate: format(startOfMonth(date), 'yyyy-MM-dd'),
+    endDate: format(new Date(date.getFullYear(), date.getMonth(), 15), 'yyyy-MM-dd'),
   }
 }
 
@@ -175,7 +180,7 @@ export default function WageWorksheetPage() {
   const { clockRecords } = useClockRecords()
   const { eodReports } = useEodReports()
   const { departmentDefinitions } = useAppSettings()
-  const initialPayrollCycle = getPayrollCycleForDepartment('all')
+  const initialPayrollCycle = getPayrollCycleForDepartment('all', departmentDefinitions)
   const initialPayrollPeriod = getDefaultPayrollPeriod(initialPayrollCycle)
   const [step, setStep] = useState<Step>('setup')
   const [department, setDepartment] = useState('all')
@@ -225,22 +230,18 @@ export default function WageWorksheetPage() {
     return department === 'all' || getEmployeeScheduleDepartments(employee).includes(department)
   })
 
-  const applyPayrollPeriod = (cycle: PayrollCycle) => {
-    const nextPeriod = getDefaultPayrollPeriod(cycle)
+  const applyPayrollPeriod = (cycle: PayrollCycle, nextPayDate = getDefaultPayDate(cycle)) => {
+    const nextRange = getPayrollRangeFromPayDate(cycle, nextPayDate)
     setPayrollCycle(cycle)
-    setStartDate(nextPeriod.startDate)
-    setEndDate(nextPeriod.endDate)
-    setPayDate(nextPeriod.payDate)
+    setStartDate(nextRange.startDate)
+    setEndDate(nextRange.endDate)
+    setPayDate(nextPayDate)
   }
 
   const handleDepartmentChange = (value: string) => {
     setDepartment(value)
     setEmployeeToAdd('')
-    applyPayrollPeriod(getPayrollCycleForDepartment(value))
-  }
-
-  const handlePayrollCycleChange = (cycle: PayrollCycle) => {
-    applyPayrollPeriod(cycle)
+    applyPayrollPeriod(getPayrollCycleForDepartment(value, departmentDefinitions))
   }
 
   const handlePayDateChange = (value: string) => {
@@ -411,11 +412,9 @@ export default function WageWorksheetPage() {
               <ArrowLeft className="size-4" />
               Back to Admin Board
             </Link>
-            <p className="text-xs font-semibold uppercase text-slate-300">Worksheet Setup</p>
             <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold">Create Payroll Worksheet</h2>
-                <p className="mt-1 text-sm text-slate-300">Choose department, payroll type, pay date, and the period to load.</p>
               </div>
               <div className="rounded-lg border border-white/20 px-3 py-1.5 text-right">
                 <div className="text-xs uppercase text-slate-300">Selected Period</div>
@@ -450,13 +449,9 @@ export default function WageWorksheetPage() {
                       </div>
                       <div>
                         <Label>Payroll Type</Label>
-                        <Select value={payrollCycle} onValueChange={(value: string | null) => value && handlePayrollCycleChange(value as PayrollCycle)}>
-                          <SelectTrigger><span>{payrollCycleLabel(payrollCycle)}</span></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="weekly">Weekly</SelectItem>
-                            <SelectItem value="semi_monthly">Semi-monthly</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="flex h-9 items-center rounded-md border border-input bg-slate-50 px-3 text-sm font-medium text-slate-700">
+                          {payrollCycleLabel(payrollCycle)}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -512,7 +507,7 @@ export default function WageWorksheetPage() {
                   <div>
                     <p className="text-xs font-semibold uppercase text-slate-500">Period Rule</p>
                     <p className="mt-1 text-base font-semibold text-slate-950">
-                      {payrollCycle === 'weekly' ? 'Previous Mon-Sun week' : '1-15 or 16-end of month'}
+                      {payrollCycle === 'weekly' ? 'Previous Mon-Sun week' : 'Previous half-month'}
                     </p>
                     <p className="mt-1 text-xs text-slate-600">
                       Changing the pay date updates the range. Managers can still edit the start and end dates.
@@ -537,7 +532,7 @@ export default function WageWorksheetPage() {
                     </div>
                   </div>
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
-                    Server department defaults to weekly payroll. All other departments default to semi-monthly payroll.
+                    Payroll type is loaded from Roles & Departments for the selected department.
                   </div>
                 </div>
               </div>

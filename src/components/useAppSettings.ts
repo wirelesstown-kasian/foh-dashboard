@@ -13,10 +13,10 @@ const DEFAULT_ROLE_DEFINITIONS: RoleDefinition[] = [
 ]
 
 const DEFAULT_DEPARTMENT_DEFINITIONS: DepartmentDefinition[] = [
-  { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', is_active: true, display_order: 0 },
-  { key: 'server', label: 'Server', description: 'Dining room service', is_active: true, display_order: 1 },
-  { key: 'cook', label: 'Cook', description: 'Cooking shifts', is_active: true, display_order: 2 },
-  { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', is_active: true, display_order: 3 },
+  { key: 'manager', label: 'Manager', description: 'Management and schedule oversight', payroll_cycle: 'semi_monthly', is_active: true, display_order: 0 },
+  { key: 'server', label: 'Server', description: 'Dining room service', payroll_cycle: 'weekly', is_active: true, display_order: 1 },
+  { key: 'cook', label: 'Cook', description: 'Cooking shifts', payroll_cycle: 'semi_monthly', is_active: true, display_order: 2 },
+  { key: 'kitchen', label: 'Kitchen', description: 'Kitchen support shifts', payroll_cycle: 'semi_monthly', is_active: true, display_order: 3 },
 ]
 
 export function useAppSettings() {
