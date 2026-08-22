@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
 import { isClockOnMealBreak } from '@/lib/clockUtils'
-import { Camera, Clock3, Coffee, LogIn, LogOut } from 'lucide-react'
+import { ArrowRight, Camera, Clock3, Coffee, LogIn, LogOut } from 'lucide-react'
 
 interface Props {
   schedules: Schedule[]
@@ -28,11 +28,17 @@ type ClockStatus = {
   break_used: boolean
   clock_in_at?: string
   break_started_at?: string | null
+  break_ended_at?: string | null
   break_minutes?: number
 }
 type EmployeeClockLookup = {
   employee: { id: string; name: string; role: string }
   status: ClockStatus
+}
+
+function formatStatusTime(value: string | null | undefined) {
+  if (!value) return '-'
+  return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
 export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Props) {
@@ -307,37 +313,56 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">PIN</label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={pin}
-                  onChange={event => clearLookup(event.target.value.replace(/\D/g, '').slice(0, 4))}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      void lookupClockStatus()
-                    }
-                  }}
-                  className="w-full rounded-md border border-input px-3 py-2 text-center font-mono tracking-[0.35em]"
-                  placeholder="****"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={pin}
+                    onChange={event => clearLookup(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        void lookupClockStatus()
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded-md border border-input px-3 py-2 text-center font-mono tracking-[0.35em]"
+                    placeholder="****"
+                  />
+                  <Button
+                    className="h-10 w-12 shrink-0 bg-slate-950 px-0 text-white shadow-sm hover:bg-slate-800"
+                    onClick={() => void lookupClockStatus()}
+                    disabled={lookupLoading || pin.length !== 4}
+                    aria-label="Check PIN"
+                    title="Check PIN"
+                  >
+                    <ArrowRight className="h-5 w-5" />
+                  </Button>
+                </div>
               </div>
             </div>
             <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="font-semibold text-slate-950">{lookup?.employee.name ?? 'No employee selected'}</div>
-                  <div className="text-xs text-slate-500">{statusLabel}</div>
+              <div>
+                <div className="font-semibold text-slate-950">{lookup?.employee.name ?? 'No employee selected'}</div>
+                <div className="text-xs text-slate-500">{statusLabel}</div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="uppercase text-slate-400">Clock In</div>
+                  <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.clock_in_at)}</div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void lookupClockStatus()}
-                  disabled={lookupLoading || pin.length !== 4}
-                >
-                  {lookupLoading ? 'Checking...' : 'Enter'}
-                </Button>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="uppercase text-slate-400">Break In</div>
+                  <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.break_started_at)}</div>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="uppercase text-slate-400">Break Out</div>
+                  <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.break_ended_at)}</div>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="uppercase text-slate-400">Break Min</div>
+                  <div className="mt-1 font-semibold text-slate-900">{lookup?.status.break_minutes ? `${lookup.status.break_minutes} min` : '-'}</div>
+                </div>
               </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">

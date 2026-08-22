@@ -9,12 +9,31 @@ import { ShiftClock } from '@/lib/types'
 
 export const runtime = 'nodejs'
 
+let clockPhotoBucketReady = false
+
 async function requireAdmin() {
   const cookieStore = await cookies()
   return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
+function isMissingPinCodeColumn(error: { message?: string; code?: string } | null | undefined) {
+  const message = error?.message?.toLowerCase() ?? ''
+  return message.includes('pin_code') || message.includes('schema cache')
+}
+
 async function verifyEmployeeByPin(pin: string) {
+  const directResult = await supabaseAdmin
+    .from('employees')
+    .select('id, name, role, pin_hash, pin_code')
+    .eq('is_active', true)
+    .eq('pin_code', pin)
+    .maybeSingle()
+
+  if (directResult.data) return directResult.data
+  if (directResult.error && !isMissingPinCodeColumn(directResult.error)) {
+    throw new Error(directResult.error.message)
+  }
+
   const { data: employees, error } = await supabaseAdmin
     .from('employees')
     .select('id, name, role, pin_hash')
@@ -30,13 +49,18 @@ async function verifyEmployeeByPin(pin: string) {
 }
 
 async function ensureClockPhotoBucket() {
+  if (clockPhotoBucketReady) return
   const { data } = await supabaseAdmin.storage.getBucket(CLOCK_PHOTO_BUCKET)
-  if (data) return
+  if (data) {
+    clockPhotoBucketReady = true
+    return
+  }
   await supabaseAdmin.storage.createBucket(CLOCK_PHOTO_BUCKET, {
     public: false,
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/heic', 'image/webp'],
     fileSizeLimit: 10 * 1024 * 1024,
   })
+  clockPhotoBucketReady = true
 }
 
 const MIME_TO_EXT: Record<string, string> = {
@@ -297,8 +321,6 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  await processOverdueClockRecords()
-
   const payload = await req.json() as {
     action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break' | 'lookup_status'
     pin?: string
@@ -325,6 +347,10 @@ export async function POST(req: NextRequest) {
   }
   if (!isValidPin(pin)) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
+  }
+
+  if (action !== 'lookup_status') {
+    await processOverdueClockRecords()
   }
 
   const employee = await verifyEmployeeByPin(pin)
