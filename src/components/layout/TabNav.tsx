@@ -37,7 +37,6 @@ export function TabNav() {
   const [loginReady, setLoginReady] = useState(false)
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [adminNeedsSetup, setAdminNeedsSetup] = useState(false)
-  const [adminAvailable, setAdminAvailable] = useState(false)
   const [showPinModal, setShowPinModal] = useState(false)
   const [pinError, setPinError] = useState<string | null>(null)
   const [adminAccessError, setAdminAccessError] = useState<string | null>(null)
@@ -56,7 +55,6 @@ export function TabNav() {
       } catch (error) {
         if (mounted) {
           setAdminAccessError(error instanceof Error ? `Admin API fetch failed: ${error.message}` : 'Admin API fetch failed')
-          setAdminAvailable(false)
           setAdminNeedsSetup(false)
           setAdminUnlocked(false)
         }
@@ -72,7 +70,6 @@ export function TabNav() {
 
       if (!sessionRes.ok || !setupRes.ok) {
         setAdminAccessError(setupData.error ?? 'Admin access check failed')
-        setAdminAvailable(false)
         setAdminNeedsSetup(false)
         setAdminUnlocked(false)
         return
@@ -83,7 +80,6 @@ export function TabNav() {
           method: 'POST',
         })
         if (createRes.ok && mounted) {
-          setAdminAvailable(true)
           setAdminNeedsSetup(false)
           return
         }
@@ -92,7 +88,6 @@ export function TabNav() {
       if (mounted) {
         setAdminUnlocked(sessionData.authenticated === true)
         setAdminNeedsSetup(setupData.needsSetup === true)
-        setAdminAvailable(setupData.needsSetup !== true)
         setAdminAccessError(null)
       }
     })()
@@ -175,15 +170,6 @@ export function TabNav() {
     return null
   }
 
-  const adminTabClass = cn(
-    'flex items-center gap-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap shrink-0',
-    isOnAdminPage && adminUnlocked
-      ? 'bg-violet-600 text-white'
-      : adminUnlocked || adminAvailable
-        ? 'text-violet-300 hover:bg-gray-700 hover:text-white'
-        : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-  )
-
   return (
     <>
       <nav className="flex flex-col bg-gray-900 shrink-0">
@@ -226,6 +212,17 @@ export function TabNav() {
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-48 bg-white text-slate-950">
                   <div className="border-b pb-2 text-xs font-semibold text-slate-500">{appUserName}</div>
+                  <button
+                    onClick={handleAdminClick}
+                    className={cn(
+                      'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-violet-50',
+                      isOnAdminPage ? 'text-violet-700' : 'text-slate-700'
+                    )}
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    {adminNeedsSetup ? 'Setup Admin' : 'Admin Board'}
+                    {adminUnlocked && <Lock className="ml-auto h-3.5 w-3.5 text-emerald-600" />}
+                  </button>
                   <button
                     onClick={handleLogout}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
@@ -270,19 +267,6 @@ export function TabNav() {
             )
           })}
 
-          <div className="w-px h-5 bg-gray-700 mx-0.5 shrink-0" />
-
-          <button
-            onClick={handleAdminClick}
-            className={cn(adminTabClass, 'px-3 py-2')}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            {adminNeedsSetup ? 'Setup' : 'Admin'}
-            {adminUnlocked
-              ? <Lock className="w-3 h-3 ml-0.5 text-green-400" />
-              : <Lock className="w-3 h-3 ml-0.5" />
-            }
-          </button>
         </div>
 
         {/* ── Desktop / landscape tablet layout (single row) ── */}
@@ -325,20 +309,6 @@ export function TabNav() {
             )
           })}
 
-          <div className="w-px h-6 bg-gray-700 mx-1" />
-
-          <button
-            onClick={handleAdminClick}
-            className={cn(adminTabClass, 'px-4 py-2.5')}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            {adminNeedsSetup ? 'Setup Admin' : 'Admin Board'}
-            {adminUnlocked
-              ? <Lock className="w-3 h-3 ml-1 text-green-400" />
-              : <Lock className="w-3 h-3 ml-1" />
-            }
-          </button>
-
           <div className="ml-auto flex items-center gap-2">
             <GlobalTimeClock />
             {appUserName ? (
@@ -356,6 +326,17 @@ export function TabNav() {
                 </PopoverTrigger>
                 <PopoverContent align="end" className="w-52 bg-white text-slate-950">
                   <div className="border-b pb-2 text-sm font-semibold text-slate-700">{appUserName}</div>
+                  <button
+                    onClick={handleAdminClick}
+                    className={cn(
+                      'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-violet-50',
+                      isOnAdminPage ? 'text-violet-700' : 'text-slate-700'
+                    )}
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    {adminNeedsSetup ? 'Setup Admin' : 'Admin Board'}
+                    {adminUnlocked && <Lock className="ml-auto h-3.5 w-3.5 text-emerald-600" />}
+                  </button>
                   <button
                     onClick={handleLogout}
                     className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
