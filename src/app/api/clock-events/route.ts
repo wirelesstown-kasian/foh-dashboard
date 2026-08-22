@@ -49,6 +49,36 @@ const MIME_TO_EXT: Record<string, string> = {
 
 const MEAL_BREAK_MINUTES = 30
 
+function getClockStatus(record: ShiftClock | null) {
+  if (!record?.clock_in_at) {
+    return {
+      state: 'clocked_out',
+      can_clock_in: true,
+      can_clock_out: false,
+      can_start_break: false,
+      can_end_break: false,
+      break_used: false,
+    }
+  }
+
+  const breakState = getMealBreakState(record)
+  const onBreak = Boolean(breakState.startedAt && !breakState.endedAt)
+  const breakUsed = Boolean(breakState.startedAt && breakState.endedAt)
+
+  return {
+    state: onBreak ? 'on_break' : 'clocked_in',
+    can_clock_in: false,
+    can_clock_out: !onBreak,
+    can_start_break: !onBreak && !breakUsed,
+    can_end_break: onBreak,
+    break_used: breakUsed,
+    clock_in_at: record.clock_in_at,
+    break_started_at: breakState.startedAt,
+    break_ended_at: breakState.endedAt,
+    break_minutes: breakState.minutes,
+  }
+}
+
 function getPhotoExtension(dataUrl: string): string {
   const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)
   const mime = match?.[1] ?? 'image/jpeg'
@@ -270,7 +300,7 @@ export async function POST(req: NextRequest) {
   await processOverdueClockRecords()
 
   const payload = await req.json() as {
-    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break'
+    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break' | 'lookup_status'
     pin?: string
     session_date?: string
     employee_id?: string
@@ -307,6 +337,10 @@ export async function POST(req: NextRequest) {
     existingRecord = await getOpenClockRecord(employee.id, session_date)
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load clock record' }, { status: 500 })
+  }
+
+  if (action === 'lookup_status') {
+    return NextResponse.json({ success: true, employee, status: getClockStatus(existingRecord) })
   }
 
   const nowIso = new Date().toISOString()

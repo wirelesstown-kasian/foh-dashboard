@@ -19,12 +19,29 @@ const CLOCK_IN_TITLE = 'Clock In'
 const CLOCK_OUT_TITLE = 'Clock Out'
 const MEAL_BREAK_TITLE = 'Break'
 type ClockAction = 'clock_in' | 'clock_out' | 'toggle_break'
+type ClockStatus = {
+  state: 'clocked_out' | 'clocked_in' | 'on_break'
+  can_clock_in: boolean
+  can_clock_out: boolean
+  can_start_break: boolean
+  can_end_break: boolean
+  break_used: boolean
+  clock_in_at?: string
+  break_started_at?: string | null
+  break_minutes?: number
+}
+type EmployeeClockLookup = {
+  employee: { id: string; name: string; role: string }
+  status: ClockStatus
+}
 
 export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Props) {
   const [panelOpen, setPanelOpen] = useState(false)
   const [target, setTarget] = useState<ClockAction | null>(null)
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [lookup, setLookup] = useState<EmployeeClockLookup | null>(null)
+  const [lookupLoading, setLookupLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -49,7 +66,15 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
     setPanelOpen(false)
     setTarget(null)
     setError(null)
+    setLookup(null)
+    setLookupLoading(false)
     setPin('')
+  }
+
+  const clearLookup = (nextPin: string) => {
+    setPin(nextPin)
+    setLookup(null)
+    setError(null)
   }
 
   useEffect(() => {
@@ -112,12 +137,58 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
     return canvas.toDataURL('image/jpeg', 0.9)
   }
 
-  const handleSubmit = async (nextTarget: ClockAction, skipPhoto = false) => {
-    setTarget(nextTarget)
+  const lookupClockStatus = async () => {
     setError(null)
 
     if (!/^\d{4}$/.test(pin)) {
       setError('Enter a valid 4-digit PIN')
+      return null
+    }
+
+    setLookupLoading(true)
+    try {
+      const res = await fetch('/api/clock-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'lookup_status',
+          pin,
+          session_date: today,
+        }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string } & Partial<EmployeeClockLookup>
+      if (!res.ok || !data.employee || !data.status) {
+        throw new Error(data.error ?? 'Failed to load clock status')
+      }
+      const nextLookup = { employee: data.employee, status: data.status }
+      setLookup(nextLookup)
+      return nextLookup
+    } catch (err) {
+      setLookup(null)
+      setError(err instanceof Error ? err.message : 'Failed to load clock status')
+      return null
+    } finally {
+      setLookupLoading(false)
+    }
+  }
+
+  const handleSubmit = async (nextTarget: ClockAction, skipPhoto = false) => {
+    setTarget(nextTarget)
+    setError(null)
+
+    const currentLookup = lookup ?? await lookupClockStatus()
+    if (!currentLookup) return
+
+    if (nextTarget === 'clock_in' && !currentLookup.status.can_clock_in) {
+      setError(`${currentLookup.employee.name} is already clocked in.`)
+      return
+    }
+    if (nextTarget === 'clock_out' && !currentLookup.status.can_clock_out) {
+      setError(currentLookup.status.state === 'on_break' ? 'End break before clocking out.' : `${currentLookup.employee.name} is not clocked in.`)
+      return
+    }
+    if (nextTarget === 'toggle_break' && !currentLookup.status.can_start_break && !currentLookup.status.can_end_break) {
+      setError(currentLookup.status.break_used ? 'Break has already been used for this shift.' : `${currentLookup.employee.name} is not clocked in.`)
       return
     }
 
@@ -160,6 +231,15 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
     }
   }
 
+  const statusLabel = lookup
+    ? lookup.status.state === 'on_break'
+      ? 'On Break'
+      : lookup.status.state === 'clocked_in'
+        ? 'Clocked In'
+        : 'Ready to Clock In'
+    : 'Enter PIN'
+  const breakActionLabel = lookup?.status.can_end_break ? 'End Break' : MEAL_BREAK_TITLE
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-white px-2.5 py-2 shadow-sm">
@@ -169,6 +249,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
           onClick={() => {
             setPanelOpen(true)
             setTarget(null)
+            setLookup(null)
             setError(null)
           }}
         >
@@ -231,17 +312,39 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
                   inputMode="numeric"
                   maxLength={4}
                   value={pin}
-                  onChange={event => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                  onChange={event => clearLookup(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void lookupClockStatus()
+                    }
+                  }}
                   className="w-full rounded-md border border-input px-3 py-2 text-center font-mono tracking-[0.35em]"
                   placeholder="****"
                 />
+              </div>
+            </div>
+            <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-slate-950">{lookup?.employee.name ?? 'No employee selected'}</div>
+                  <div className="text-xs text-slate-500">{statusLabel}</div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void lookupClockStatus()}
+                  disabled={lookupLoading || pin.length !== 4}
+                >
+                  {lookupLoading ? 'Checking...' : 'Enter'}
+                </Button>
               </div>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <Button
                 className="h-11 bg-emerald-600 font-semibold hover:bg-emerald-700"
                 onClick={() => void handleSubmit('clock_in')}
-                disabled={submitting || !cameraReady}
+                disabled={submitting || !cameraReady || (lookup ? !lookup.status.can_clock_in : pin.length !== 4)}
               >
                 <LogIn className="mr-2 h-4 w-4" />
                 {submitting && target === 'clock_in' ? 'Saving...' : CLOCK_IN_TITLE}
@@ -250,7 +353,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
                 variant="outline"
                 className="h-11 font-semibold"
                 onClick={() => void handleSubmit('clock_out')}
-                disabled={submitting || !cameraReady}
+                disabled={submitting || !cameraReady || (lookup ? !lookup.status.can_clock_out : pin.length !== 4)}
               >
                 <LogOut className="mr-2 h-4 w-4" />
                 {submitting && target === 'clock_out' ? 'Saving...' : CLOCK_OUT_TITLE}
@@ -260,10 +363,10 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
               variant="outline"
               className="h-11 w-full font-semibold"
               onClick={() => void handleSubmit('toggle_break', true)}
-              disabled={submitting}
+              disabled={submitting || (lookup ? (!lookup.status.can_start_break && !lookup.status.can_end_break) : pin.length !== 4)}
             >
               <Coffee className="mr-2 h-4 w-4" />
-              {submitting && target === 'toggle_break' ? 'Saving...' : MEAL_BREAK_TITLE}
+              {submitting && target === 'toggle_break' ? 'Saving...' : breakActionLabel}
             </Button>
             {error && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
