@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, DailySession, EodReport, TipDistribution, ShiftClock, Schedule } from '@/lib/types'
+import { Employee, DailySession, EodReport, TipDistribution, ShiftClock } from '@/lib/types'
 import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
@@ -28,7 +28,6 @@ import {
 import { Lock, Plus, Trash2, Send, CheckCircle2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { PinModal } from '@/components/layout/PinModal'
-import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 
 interface TipRow {
   employee_id: string
@@ -154,7 +153,6 @@ export default function EodPage() {
   const [session, setSession] = useState<DailySession | null>(null)
   const [appCanManageAdmin, setAppCanManageAdmin] = useState(false)
   const [employees, setEmployees] = useState<Employee[]>([])
-  const [schedules, setSchedules] = useState<Schedule[]>([])
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [existing, setExisting] = useState<EodReport | null>(null)
   const [loading, setLoading] = useState(true)
@@ -257,10 +255,9 @@ export default function EodPage() {
       }
     }
 
-    const [sessRes, empRes, schRes, eodRes, clockRes, appSessionRes] = await Promise.all([
+    const [sessRes, empRes, eodRes, clockRes, appSessionRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
       loadEmployees(),
-      supabase.from('schedules').select('*').eq('date', today),
       supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
@@ -273,7 +270,6 @@ export default function EodPage() {
     setAppCanManageAdmin(appSessionRes.can_manage_admin === true)
     setStartingCash(Number(sessRes.data?.starting_cash ?? 0))
     setEmployees(empRes.data ?? [])
-    setSchedules(schRes.data ?? [])
     setClockRecords(clockRes.records ?? [])
 
     const eod = eodRes.data as EodReport | null
@@ -327,6 +323,14 @@ export default function EodPage() {
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  useEffect(() => {
+    const handleClockRecordsChanged = () => {
+      void load()
+    }
+    window.addEventListener('foh-clock-records-changed', handleClockRecordsChanged)
+    return () => window.removeEventListener('foh-clock-records-changed', handleClockRecordsChanged)
   }, [load])
 
 
@@ -633,10 +637,11 @@ export default function EodPage() {
         const message = data.error || 'Failed to send emails. Please try again.'
         throw new Error(message)
       }
-      // 207 = partial success (some sent, some failed e.g. missing email address)
+      if (data.success === false) {
+        throw new Error(data.errors?.length ? data.errors.join(' | ') : data.error || 'One or more EOD emails failed to send.')
+      }
       const sentCount = typeof data.sent === 'number' ? data.sent : null
-      const partialNote = data.errors?.length ? ` (${data.errors.length} skipped — missing email)` : ''
-      setSubmitResult({ success: true, message: `EOD report sent${sentCount !== null ? ` — ${sentCount} email${sentCount !== 1 ? 's' : ''} delivered` : ''}${partialNote}.` })
+      setSubmitResult({ success: true, message: `EOD report sent${sentCount !== null ? ` — ${sentCount} email${sentCount !== 1 ? 's' : ''} delivered` : ''}.` })
       setSubmissionComplete(true)
       setShowConfirm(false)
     } catch (error) {
@@ -850,10 +855,9 @@ export default function EodPage() {
                   className="mt-4 w-full"
                   onClick={() => {
                     setShowFinancialConfirm(false)
-                    document.getElementById('clock-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                   }}
                 >
-                  Go to Clock In / Clock Out
+                  Use Time Clock in Menu Bar
                 </Button>
               </div>
             )}
@@ -924,9 +928,6 @@ export default function EodPage() {
           <div>
             <h1 className="text-2xl font-bold">End of Day — {format(businessDate, 'MMM d, yyyy')}</h1>
           </div>
-          <div id="clock-actions" className="flex justify-start md:justify-end">
-            <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
-          </div>
         </div>
 
         {submissionComplete ? (
@@ -974,14 +975,6 @@ export default function EodPage() {
                 <Button variant="outline" onClick={() => setShowUnlockPin(true)}>
                   Manager Edit Override
                 </Button>
-                {hasOpenClockWarnings && (
-                  <Button
-                    variant="outline"
-                    onClick={() => document.getElementById('clock-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  >
-                    Go to Clock In / Clock Out
-                  </Button>
-                )}
                 <Button variant="destructive" onClick={() => setShowResetConfirm(true)}>
                   Reset Saved EOD
                 </Button>
@@ -1005,13 +998,7 @@ export default function EodPage() {
                   <p className="mt-1">{pendingApprovalRecords.length} auto clock-out record{pendingApprovalRecords.length > 1 ? 's are' : ' is'} pending manager review. Those hours should be checked before payroll.</p>
                 )}
                 {openClockRecords.length > 0 && (
-                  <Button
-                    variant="outline"
-                    className="mt-3"
-                    onClick={() => document.getElementById('clock-actions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                  >
-                    Open Clock In / Clock Out
-                  </Button>
+                  <p className="mt-2 text-xs font-semibold uppercase tracking-wide">Use Time Clock in the menu bar for clock-out.</p>
                 )}
               </div>
             )}

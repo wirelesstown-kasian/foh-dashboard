@@ -6,7 +6,6 @@ import { Employee, Schedule, TaskCategory, Task, TaskCompletion, DailySession, S
 import { getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
 import { StaffSidebar } from '@/components/dashboard/StaffSidebar'
 import { TaskFlow } from '@/components/dashboard/TaskFlow'
-import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
 import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
@@ -134,6 +133,14 @@ export default function DashboardPage() {
     }
   }, [load])
 
+  useEffect(() => {
+    const handleClockRecordsChanged = () => {
+      void load()
+    }
+    window.addEventListener('foh-clock-records-changed', handleClockRecordsChanged)
+    return () => window.removeEventListener('foh-clock-records-changed', handleClockRecordsChanged)
+  }, [load])
+
   const saveNotes = async () => {
     if (session) {
       await supabase.from('daily_sessions').update({ notes }).eq('id', session.id)
@@ -192,7 +199,6 @@ export default function DashboardPage() {
             <h1 className="text-lg font-bold">{format(businessDate, 'EEEE, MMMM d, yyyy')}</h1>
           </div>
           <div className="flex flex-wrap items-center gap-3 md:gap-4 md:pt-1">
-            <ClockToolbar schedules={schedules} clockRecords={clockRecords} today={today} onRefresh={load} />
             <div className="flex items-center gap-2">
               <div className="h-2 w-28 overflow-hidden rounded-full bg-gray-200">
                 <div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progressPct}%` }} />

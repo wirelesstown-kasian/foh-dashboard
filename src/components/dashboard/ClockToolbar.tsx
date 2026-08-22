@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
 import { isClockOnMealBreak } from '@/lib/clockUtils'
+import { cn } from '@/lib/utils'
 import { ArrowRight, Camera, Clock3, Coffee, LogIn, LogOut } from 'lucide-react'
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
   clockRecords: ShiftClock[]
   today: string
   onRefresh: () => void
+  variant?: 'panel' | 'nav'
 }
 
 const CLOCK_IN_TITLE = 'Clock In'
@@ -41,7 +43,7 @@ function formatStatusTime(value: string | null | undefined) {
   return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
 
-export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Props) {
+export function ClockToolbar({ schedules, clockRecords, today, onRefresh, variant = 'panel' }: Props) {
   const [panelOpen, setPanelOpen] = useState(false)
   const [target, setTarget] = useState<ClockAction | null>(null)
   const [pin, setPin] = useState('')
@@ -245,24 +247,36 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
         : 'Ready to Clock In'
     : 'Enter PIN'
   const breakActionLabel = lookup?.status.can_end_break ? 'End Break' : MEAL_BREAK_TITLE
+  const isNav = variant === 'nav'
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 shadow-sm">
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-1.5',
+          isNav ? 'relative' : 'rounded-lg border bg-white px-2 py-1.5 shadow-sm'
+        )}
+      >
         <Button
           size="sm"
-          className="h-8 bg-slate-950 px-3 text-sm font-semibold hover:bg-slate-800"
+          className={cn(
+            isNav
+              ? 'h-9 w-9 rounded-md bg-amber-500 p-0 text-white hover:bg-amber-400'
+              : 'h-8 bg-slate-950 px-3 text-sm font-semibold hover:bg-slate-800'
+          )}
           onClick={() => {
             setPanelOpen(true)
             setTarget(null)
             setLookup(null)
             setError(null)
           }}
+          aria-label="Open time clock"
+          title="Time Clock"
         >
-          <Clock3 className="mr-2 h-4 w-4" />
-          Time Clock
+          <Clock3 className={cn('h-4 w-4', !isNav && 'mr-2')} />
+          {!isNav && 'Time Clock'}
         </Button>
-        <div className="flex items-center gap-1.5 pr-0.5">
+        <div className={cn('flex items-center gap-1.5 pr-0.5', isNav && 'hidden')}>
           {openClockCount > 0 && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
               {openClockCount} clocked in
@@ -274,6 +288,11 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
             </span>
           )}
         </div>
+        {isNav && (openClockCount > 0 || activeBreakCount > 0) && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">
+            {activeBreakCount > 0 ? activeBreakCount : openClockCount}
+          </span>
+        )}
       </div>
 
       <Dialog

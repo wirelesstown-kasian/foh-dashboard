@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
         scheduled_end: schedule?.end_time ?? null,
       }
     })
-    const emailQueue: (() => Promise<void>)[] = []
+    const emailQueue: Array<{ label: string; send: () => Promise<void> }> = []
 
     const { data: shiftClocks } = await supabaseAdmin
       .from('shift_clocks')
@@ -256,17 +256,19 @@ export async function POST(req: NextRequest) {
         <p style="color:#aaa;font-size:11px;margin-top:4px">New Village Pub · FOH Dashboard</p>
     `, 480)
     if (emailSettings.eod_tip_emails_enabled) {
-      emailQueue.push(() =>
-        sendEmail({
-          resendKey,
-          to: dist.employee!.email!,
-          subject: `Your Tip — ${report.session_date}`,
-          html,
-          fromName: emailSettings.from_name,
-          fromEmail: emailSettings.from_email,
-          replyTo: emailSettings.reply_to,
-        })
-      )
+      emailQueue.push({
+        label: `Tip email to ${dist.employee.name}`,
+        send: () =>
+          sendEmail({
+            resendKey,
+            to: dist.employee!.email!,
+            subject: `Your Tip — ${report.session_date}`,
+            html,
+            fromName: emailSettings.from_name,
+            fromEmail: emailSettings.from_email,
+            replyTo: emailSettings.reply_to,
+          }),
+      })
     }
   }
 
@@ -354,31 +356,33 @@ export async function POST(req: NextRequest) {
       <p style="color:#888;font-size:12px;margin-top:20px">New Village Pub · FOH Dashboard</p>
   `)
     if (emailSettings.eod_admin_summary_enabled) {
-    emailQueue.push(() =>
-      sendEmail({
-        resendKey,
-        to: emailSettings.eod_report_email,
-        subject: `EOD Report — ${report.session_date}`,
-        html: adminEodHtml,
-        fromName: emailSettings.from_name,
-        fromEmail: emailSettings.from_email,
-        replyTo: emailSettings.reply_to,
-      })
-    )
+    emailQueue.push({
+      label: 'Admin EOD summary',
+      send: () =>
+        sendEmail({
+          resendKey,
+          to: emailSettings.eod_report_email,
+          subject: `EOD Report — ${report.session_date}`,
+          html: adminEodHtml,
+          fromName: emailSettings.from_name,
+          fromEmail: emailSettings.from_email,
+          replyTo: emailSettings.reply_to,
+        }),
+    })
   }
 
     // Send sequentially to avoid Resend rate limits (queue holds fns, not started promises)
     let sent = 0
     const errors: string[] = []
-    for (const send of emailQueue) {
+    for (const item of emailQueue) {
       try {
-        await send()
+        await item.send()
         sent++
         if (sent < emailQueue.length) {
           await new Promise(resolve => setTimeout(resolve, 350))
         }
       } catch (err) {
-        errors.push(err instanceof Error ? err.message : 'Unknown error')
+        errors.push(`${item.label}: ${err instanceof Error ? err.message : 'Unknown error'}`)
       }
     }
 

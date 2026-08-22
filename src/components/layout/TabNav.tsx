@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { PinModal } from '@/components/layout/PinModal'
+import { GlobalTimeClock } from '@/components/layout/GlobalTimeClock'
 import {
   LayoutDashboard,
   Calendar,
@@ -208,24 +209,26 @@ export function TabNav() {
           </div>
 
           <div className="ml-auto flex items-center gap-1 shrink-0">
+            <GlobalTimeClock />
             {appUserName ? (
-              <>
-                <span className="max-w-25 truncate text-xs text-gray-300 hidden xs:block">{appUserName}</span>
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-1 rounded-md px-2.5 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span className="text-xs">Logout</span>
-                </button>
-              </>
+              <button
+                onClick={handleLogout}
+                className="flex h-9 items-center gap-1.5 rounded-md px-2 text-sm text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                aria-label={`Logout ${appUserName}`}
+                title={`Logout ${appUserName}`}
+              >
+                <UserRound className="h-4 w-4 text-amber-400" />
+                <span className="hidden max-w-20 truncate text-xs xs:inline">{appUserName}</span>
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
             ) : loginReady ? (
               <Link
                 href="/login"
-                className="flex items-center gap-1.5 rounded-md px-2.5 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                aria-label="Login"
+                title="Login"
               >
                 <UserRound className="h-4 w-4" />
-                <span className="text-xs">Login</span>
               </Link>
             ) : null}
           </div>
@@ -323,27 +326,26 @@ export function TabNav() {
           </button>
 
           <div className="ml-auto flex items-center gap-2">
+            <GlobalTimeClock />
             {appUserName ? (
-              <>
-                <div className="hidden rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 md:flex md:items-center md:gap-2">
-                  <UserRound className="h-4 w-4 text-amber-400" />
-                  {appUserName}
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Logout
-                </button>
-              </>
+              <button
+                onClick={handleLogout}
+                className="flex h-9 max-w-48 items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-2.5 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-700 hover:text-white"
+                aria-label={`Logout ${appUserName}`}
+                title={`Logout ${appUserName}`}
+              >
+                <UserRound className="h-4 w-4 shrink-0 text-amber-400" />
+                <span className="min-w-0 truncate">{appUserName}</span>
+                <LogOut className="h-4 w-4 shrink-0" />
+              </button>
             ) : loginReady ? (
               <Link
                 href="/login"
-                className="flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+                aria-label="Login"
+                title="Login"
               >
                 <UserRound className="h-4 w-4" />
-                Login
               </Link>
             ) : (
               <div className="hidden rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-400 md:block">

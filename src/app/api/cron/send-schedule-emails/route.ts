@@ -42,13 +42,12 @@ export async function GET(req: NextRequest) {
       appUrl,
     })
 
-    // Always mark email_sent_at regardless of success/failure.
-    // Without this, any email error leaves the record permanently pending
-    // and the cron resends every hour indefinitely.
-    await supabaseAdmin
-      .from('schedule_publications')
-      .update({ email_sent_at: new Date().toISOString() })
-      .eq('week_start', publication.week_start)
+    if (result.success) {
+      await supabaseAdmin
+        .from('schedule_publications')
+        .update({ email_sent_at: new Date().toISOString() })
+        .eq('week_start', publication.week_start)
+    }
 
     results.push({ week_start: publication.week_start, scheduled_send_at: publication.scheduled_send_at, ...result })
   }
