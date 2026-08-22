@@ -129,8 +129,8 @@ export function getVisibleManagerNote(note: string | null | undefined) {
 }
 
 export function getEffectiveClockHours(record: ShiftClock) {
-  if (record.approval_status === 'approved' || record.approval_status === 'adjusted') {
-    return Number(record.approved_hours ?? 0)
+  if ((record.approval_status === 'approved' || record.approval_status === 'adjusted') && record.clock_out_at) {
+    return calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, getClockBreakMinutes(record))
   }
   return 0
 }

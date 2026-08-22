@@ -38,6 +38,8 @@ type AddHourFormState = {
   note: string
 }
 
+const ALL_STAFF_FILTER = 'all_staff'
+
 function isoToTimeInput(value: string | null) {
   if (!value) return ''
   const date = new Date(value)
@@ -122,12 +124,8 @@ export default function ClockRecordsPage() {
     return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name))
   }, [clockRecords, department, employees, filteredEmployees])
   useEffect(() => {
-    if (staffFilterEmployees.length === 0) {
+    if (employeeFilter && !staffFilterEmployees.some(employee => employee.id === employeeFilter)) {
       setEmployeeFilter('')
-      return
-    }
-    if (!employeeFilter || !staffFilterEmployees.some(employee => employee.id === employeeFilter)) {
-      setEmployeeFilter(staffFilterEmployees[0].id)
     }
   }, [employeeFilter, staffFilterEmployees])
   const filteredClockRecords = useMemo(
@@ -137,7 +135,7 @@ export default function ClockRecordsPage() {
         .filter(record => {
           const employee = record.employee ?? employees.find(item => item.id === record.employee_id)
           if (!employee || !isEmployeeInDepartment(employee, department)) return false
-          return employeeFilter ? employee.id === employeeFilter : false
+          return employeeFilter ? employee.id === employeeFilter : true
         })
         .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)),
     [clockRecords, department, employeeFilter, employees, endDate, startDate]
@@ -394,11 +392,19 @@ export default function ClockRecordsPage() {
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
           leftSlot={
-            <Select value={employeeFilter} onValueChange={(value: string | null) => value && setEmployeeFilter(value)} disabled={staffFilterEmployees.length === 0}>
+            <Select
+              value={employeeFilter || ALL_STAFF_FILTER}
+              onValueChange={(value: string | null) => {
+                if (!value) return
+                setEmployeeFilter(value === ALL_STAFF_FILTER ? '' : value)
+              }}
+              disabled={staffFilterEmployees.length === 0}
+            >
               <SelectTrigger className="w-44">
-                <span>{employeeFilter ? getEmployeeNameById(staffFilterEmployees, employeeFilter) ?? getEmployeeNameById(employees, employeeFilter) ?? 'Unknown Staff' : 'Select staff'}</span>
+                <span>{employeeFilter ? getEmployeeNameById(staffFilterEmployees, employeeFilter) ?? getEmployeeNameById(employees, employeeFilter) ?? 'Unknown Staff' : 'All Staff'}</span>
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={ALL_STAFF_FILTER}>All Staff</SelectItem>
                 {staffFilterEmployees.map(employee => (
                   <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
                 ))}

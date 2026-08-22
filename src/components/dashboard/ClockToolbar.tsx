@@ -248,10 +248,10 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-white px-2.5 py-2 shadow-sm">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-white px-2 py-1.5 shadow-sm">
         <Button
           size="sm"
-          className="h-9 bg-slate-950 px-4 text-sm font-semibold hover:bg-slate-800"
+          className="h-8 bg-slate-950 px-3 text-sm font-semibold hover:bg-slate-800"
           onClick={() => {
             setPanelOpen(true)
             setTarget(null)
@@ -262,14 +262,14 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
           <Clock3 className="mr-2 h-4 w-4" />
           Time Clock
         </Button>
-        <div className="flex items-center gap-2 pr-1">
+        <div className="flex items-center gap-1.5 pr-0.5">
           {openClockCount > 0 && (
-            <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
               {openClockCount} clocked in
             </span>
           )}
           {activeBreakCount > 0 && (
-            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
+            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
               {activeBreakCount} on break
             </span>
           )}
@@ -286,13 +286,13 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
           }
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md gap-3">
           <DialogHeader>
             <DialogTitle>Time Clock</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="mx-auto w-[180px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-900 shadow-sm">
-              <div className="flex h-[220px] items-center justify-center">
+          <div className="space-y-3">
+            <div className="mx-auto w-[160px] overflow-hidden rounded-xl border border-slate-300 bg-slate-900 shadow-sm">
+              <div className="flex h-[170px] items-center justify-center">
                 <video
                   ref={videoRef}
                   muted
@@ -301,13 +301,13 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="flex items-center justify-center gap-1.5 border-t border-slate-700 bg-slate-950 px-3 py-2 text-center text-xs text-slate-200">
+              <div className="flex items-center justify-center gap-1.5 border-t border-slate-700 bg-slate-950 px-2.5 py-1.5 text-center text-xs text-slate-200">
                 <Camera className="h-3.5 w-3.5" />
                 {cameraReady ? 'Front camera ready' : 'Starting camera...'}
               </div>
             </div>
-            <div className="space-y-3">
-              <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <div className="space-y-2.5">
+              <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-700">
                 <div>First shift starts at {firstShift ? formatTime(firstShift.schedule.start_time) : '-'}</div>
                 <div>Final shift ends at {lastShift ? formatTime(lastShift.schedule.end_time) : '-'}</div>
               </div>
@@ -341,25 +341,25 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
                 </div>
               </div>
             </div>
-            <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-700">
               <div>
                 <div className="font-semibold text-slate-950">{lookup?.employee.name ?? 'No employee selected'}</div>
                 <div className="text-xs text-slate-500">{statusLabel}</div>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-lg border bg-white px-3 py-2">
+              <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs">
+                <div className="rounded-md border bg-white px-2.5 py-1.5">
                   <div className="uppercase text-slate-400">Clock In</div>
                   <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.clock_in_at)}</div>
                 </div>
-                <div className="rounded-lg border bg-white px-3 py-2">
+                <div className="rounded-md border bg-white px-2.5 py-1.5">
                   <div className="uppercase text-slate-400">Break In</div>
                   <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.break_started_at)}</div>
                 </div>
-                <div className="rounded-lg border bg-white px-3 py-2">
+                <div className="rounded-md border bg-white px-2.5 py-1.5">
                   <div className="uppercase text-slate-400">Break Out</div>
                   <div className="mt-1 font-semibold text-slate-900">{formatStatusTime(lookup?.status.break_ended_at)}</div>
                 </div>
-                <div className="rounded-lg border bg-white px-3 py-2">
+                <div className="rounded-md border bg-white px-2.5 py-1.5">
                   <div className="uppercase text-slate-400">Break Min</div>
                   <div className="mt-1 font-semibold text-slate-900">{lookup?.status.break_minutes ? `${lookup.status.break_minutes} min` : '-'}</div>
                 </div>
@@ -367,7 +367,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <Button
-                className="h-11 bg-emerald-600 font-semibold hover:bg-emerald-700"
+                className="h-10 bg-emerald-600 font-semibold hover:bg-emerald-700"
                 onClick={() => void handleSubmit('clock_in')}
                 disabled={submitting || !cameraReady || (lookup ? !lookup.status.can_clock_in : pin.length !== 4)}
               >
@@ -376,7 +376,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
               </Button>
               <Button
                 variant="outline"
-                className="h-11 font-semibold"
+                className="h-10 font-semibold"
                 onClick={() => void handleSubmit('clock_out')}
                 disabled={submitting || !cameraReady || (lookup ? !lookup.status.can_clock_out : pin.length !== 4)}
               >
@@ -386,7 +386,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
             </div>
             <Button
               variant="outline"
-              className="h-11 w-full font-semibold"
+              className="h-10 w-full font-semibold"
               onClick={() => void handleSubmit('toggle_break', true)}
               disabled={submitting || (lookup ? (!lookup.status.can_start_break && !lookup.status.can_end_break) : pin.length !== 4)}
             >

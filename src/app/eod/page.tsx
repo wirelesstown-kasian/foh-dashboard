@@ -279,6 +279,8 @@ export default function EodPage() {
     const eod = eodRes.data as EodReport | null
     setExisting(eod)
     setCurrentReportId(eod?.id ?? null)
+    const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
+    const clockRowsByEmployeeId = new Map(clockBasedRows.map(row => [row.employee_id, row]))
 
     if (eod) {
       const savedTipRows = (eod.tip_distributions ?? [])
@@ -287,13 +289,13 @@ export default function EodPage() {
           return !!employee && isTipEligibleEmployee(employee)
         })
         .map((d: TipDistribution & { employee?: Employee }) => {
-          const clockRecord = (clockRes.records ?? []).find((record: ShiftClock) => record.employee_id === d.employee_id)
+          const clockRow = clockRowsByEmployeeId.get(d.employee_id)
           return {
             employee_id: d.employee_id,
             hours_worked: Number(d.hours_worked ?? 0),
-            clock_in_at: clockRecord?.clock_in_at ?? null,
-            clock_out_at: clockRecord?.clock_out_at ?? null,
-            name: d.employee?.name ?? '',
+            clock_in_at: clockRow?.clock_in_at ?? null,
+            clock_out_at: clockRow?.clock_out_at ?? null,
+            name: d.employee?.name ?? clockRow?.name ?? '',
           }
         })
 
@@ -307,19 +309,15 @@ export default function EodPage() {
         memo: eod.memo,
         closed_by: eod.closed_by_employee_id,
       }))
-      const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
-      if (savedTipRows.length > 0) {
-        const missingClockRows = clockBasedRows.filter(row => !savedTipRows.some(savedRow => savedRow.employee_id === row.employee_id))
-        setTipRows([...savedTipRows, ...missingClockRows])
-        setTipDistributionSaved(missingClockRows.length === 0)
+      if (savedTipRows.length > 0 && hasSameClockState(savedTipRows, clockBasedRows)) {
+        setTipRows(savedTipRows)
+        setTipDistributionSaved(true)
       } else {
         setTipRows(clockBasedRows)
         setTipDistributionSaved(false)
       }
       setFinancialsSaved(true)
     } else {
-      const clockBasedRows = aggregateClockTipRows((clockRes.records ?? []) as ShiftClock[], empRes.data ?? [])
-
       setTipRows(clockBasedRows)
       setFinancialsSaved(false)
       setTipDistributionSaved(false)

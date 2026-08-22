@@ -405,8 +405,8 @@ export default function WageReportPage() {
             totalEarnings: Number(item.payout_amount ?? item.net_pay ?? 0),
             tipRate: Number(item.hours ?? 0) > 0 ? Number(item.tips ?? 0) / Number(item.hours ?? 0) : null,
             effectiveRate: Number(item.hours ?? 0) > 0 ? Number(item.payout_amount ?? item.net_pay ?? 0) / Number(item.hours ?? 0) : null,
-            hasAutoClockOut: item.has_auto_clock_out,
-            hasOpenClock: item.has_open_clock,
+            hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
+            hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
             hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
           }
         })
@@ -623,13 +623,24 @@ export default function WageReportPage() {
                     <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge>
                   ) : row.hasAutoClockOut ? (
                     <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge>
-                  ) : row.hasMissingMealBreak ? (
-                    <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Break Audit</Badge>
                   ) : (
                     <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>
                   )}
                 </TableCell>
-                <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell>
+                <TableCell className="text-right">
+                  <span className="inline-flex items-center justify-end gap-1.5">
+                    {row.hours.toFixed(2)}h
+                    {row.hasMissingMealBreak && (
+                      <span
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold leading-none text-white"
+                        title="Break audit needed"
+                        aria-label="Break audit needed"
+                      >
+                        !
+                      </span>
+                    )}
+                  </span>
+                </TableCell>
                 <TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
                 <TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
                 <TableCell className="text-right text-muted-foreground">
