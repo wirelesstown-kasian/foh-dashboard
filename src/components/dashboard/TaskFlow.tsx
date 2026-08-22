@@ -446,26 +446,25 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
                     setTaskActionTarget(task)
                   }}
                 >
-                  {pending && (
-                    <span className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded border text-[10px] font-bold ${
-                      selected ? 'border-amber-600 bg-amber-500 text-white' : 'border-slate-300 bg-white text-transparent'
-                    }`}>
-                      ✓
-                    </span>
-                  )}
-                  <div className="flex flex-col items-center gap-1.5">
-                    {status === 'complete' ? (
-                      <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
-                    ) : status === 'incomplete' ? (
-                      <Circle className="h-5 w-5 shrink-0 text-red-500" />
-                    ) : (
-                      <Circle className="h-5 w-5 shrink-0 text-gray-300" />
-                    )}
-                    <p className={`line-clamp-2 text-xs font-semibold leading-tight ${
-                      status === 'complete' ? 'text-green-800' : status === 'incomplete' ? 'text-red-800' : 'text-slate-900'
-                    }`}>
-                      {task.title}
-                    </p>
+                  <div className="flex min-h-[72px] flex-col gap-1.5">
+                    <div className="flex items-start gap-2 text-left">
+                      {pending ? (
+                        <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] font-bold ${
+                          selected ? 'border-amber-600 bg-amber-500 text-white' : 'border-slate-300 bg-white text-transparent'
+                        }`}>
+                          ✓
+                        </span>
+                      ) : status === 'complete' ? (
+                        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-500" />
+                      ) : (
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-red-400 bg-red-100" />
+                      )}
+                      <p className={`line-clamp-3 min-w-0 flex-1 text-xs font-semibold leading-tight ${
+                        status === 'complete' ? 'text-green-800' : status === 'incomplete' ? 'text-red-800' : 'text-slate-900'
+                      }`}>
+                        {task.title}
+                      </p>
+                    </div>
                     {employee ? (
                       <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
                         status === 'complete' ? 'bg-green-200 text-green-700' :
@@ -481,6 +480,33 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
               )
             })}
           </div>
+          {selectedTasks.length > 0 && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 shadow-sm">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-sm font-semibold text-amber-900">
+                  {selectedTasks.length} task{selectedTasks.length === 1 ? '' : 's'} selected
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    className="h-10 bg-emerald-600 px-5 font-semibold hover:bg-emerald-700"
+                    onClick={() => setPinTarget({ tasks: selectedTasks, status: 'complete' })}
+                  >
+                    Complete
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="h-10 px-4 font-semibold"
+                    onClick={() => setPinTarget({ tasks: selectedTasks, status: 'incomplete' })}
+                  >
+                    Mark Incomplete
+                  </Button>
+                  <Button variant="ghost" className="h-10" onClick={clearSelection}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -503,34 +529,6 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
           </Button>
         )}
       </div>
-
-      {selectedTasks.length > 0 && (
-        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 shadow-sm">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span className="text-sm font-semibold text-amber-900">
-              {selectedTasks.length} task{selectedTasks.length === 1 ? '' : 's'} selected
-            </span>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                className="h-10 bg-emerald-600 px-5 font-semibold hover:bg-emerald-700"
-                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'complete' })}
-              >
-                Complete
-              </Button>
-              <Button
-                variant="destructive"
-                className="h-10 px-4 font-semibold"
-                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'incomplete' })}
-              >
-                Mark Incomplete
-              </Button>
-              <Button variant="ghost" className="h-10" onClick={clearSelection}>
-                Clear
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <PinModal
         open={!!pinTarget}

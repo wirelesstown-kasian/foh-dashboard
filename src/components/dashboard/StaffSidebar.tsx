@@ -43,11 +43,9 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
     const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
     const clockOnlyEntries = Array.from(new Set(
       clockRecords
-        .filter(record => !scheduledEmployeeIds.has(record.employee_id))
+        .filter(record => !record.clock_out_at && !scheduledEmployeeIds.has(record.employee_id))
         .map(record => record.employee_id)
     )).map((employeeId): StaffEntry | null => {
-      const employee = employees.find(item => item.id === employeeId)
-      if (!employee) return null
       const record = [...clockRecords]
         .filter(item => item.employee_id === employeeId)
         .sort((a, b) => {
@@ -55,6 +53,9 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
           if (a.clock_out_at && !b.clock_out_at) return 1
           return b.clock_in_at.localeCompare(a.clock_in_at)
         })[0] ?? null
+      const relatedEmployee = record?.employee as Employee | Employee[] | undefined
+      const employee = employees.find(item => item.id === employeeId) ?? (Array.isArray(relatedEmployee) ? relatedEmployee[0] : relatedEmployee) ?? null
+      if (!employee) return null
       return {
         employee,
         schedule: null,

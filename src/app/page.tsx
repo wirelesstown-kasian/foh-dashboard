@@ -83,14 +83,30 @@ export default function DashboardPage() {
 
       const loadedTasks = (taskRes.data ?? []).filter(task => !isSystemClockTask(task))
       const loadedSession = sessRes.data ?? null
+      const loadedEmployees = empRes.data ?? []
+      const loadedClockRecords = clockRes.records ?? []
+      const missingClockEmployeeIds = Array.from(new Set(
+        loadedClockRecords
+          .filter(record => !record.clock_out_at && !loadedEmployees.some(employee => employee.id === record.employee_id))
+          .map(record => record.employee_id)
+      ))
+      if (missingClockEmployeeIds.length > 0) {
+        const missingEmployeesRes = await supabase
+          .from('employees')
+          .select(EMPLOYEE_PUBLIC_SELECT)
+          .in('id', missingClockEmployeeIds)
+        if (!missingEmployeesRes.error) {
+          loadedEmployees.push(...withMealBreakThresholdHours(withPaymentMethod(withTipPoolHourlyRate(missingEmployeesRes.data ?? []))) as Employee[])
+        }
+      }
 
-      setEmployees(empRes.data ?? [])
+      setEmployees(loadedEmployees)
       setSchedules(schRes.data ?? [])
       setCategories(catRes.data ?? [])
       setTasks(loadedTasks)
       setCompletions(compRes.data ?? [])
       setMonthCompletions(monthCompRes.data ?? [])
-      setClockRecords(clockRes.records ?? [])
+      setClockRecords(loadedClockRecords)
       setSession(loadedSession)
       setNotes(loadedSession?.notes ?? '')
       setStartingCash(loadedSession?.starting_cash != null ? String(loadedSession.starting_cash) : '')

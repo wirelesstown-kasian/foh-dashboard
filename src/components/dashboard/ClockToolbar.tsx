@@ -468,8 +468,8 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                   Cancel
                 </Button>
               </div>
-              <div className="grid min-h-0 flex-1 items-center gap-4 overflow-auto p-4 lg:grid-cols-[minmax(320px,420px)_minmax(280px,420px)] lg:justify-center">
-                <div className="w-full">
+              <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+                <div className="w-full max-w-md">
                   <div className="mb-6 text-center">
                     <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Staff PIN</p>
                     <p className="mt-2 text-4xl font-bold">Enter 4 digits</p>
@@ -522,7 +522,6 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                     </div>
                   )}
                 </div>
-                <TodayStaffPanel staff={availableStaff} />
               </div>
             </div>
           ) : (
