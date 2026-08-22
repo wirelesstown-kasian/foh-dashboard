@@ -84,6 +84,11 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   const getCompletion = (taskId: string) =>
     completions.find(completion => completion.task_id === taskId && completion.session_date === today)
 
+  const getCompletionEmployee = (completion: TaskCompletion | undefined) => {
+    if (!completion) return null
+    return employees.find(item => item.id === completion.employee_id) ?? completion.employee ?? null
+  }
+
   const getTaskStatus = (taskId: string): 'pending' | TaskCompletionStatus => {
     const completion = getCompletion(taskId)
     if (!completion) return 'pending'
@@ -96,10 +101,14 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
   useEffect(() => {
     const justFinished = allCurrentDone && !prevAllCurrentDoneRef.current && currentTasks.length > 0 && currentPhase !== 'complete' && !showSummary
+    let promptTimer: number | null = null
     if (justFinished) {
-      setNextPhasePromptOpen(true)
+      promptTimer = window.setTimeout(() => setNextPhasePromptOpen(true), 0)
     }
     prevAllCurrentDoneRef.current = allCurrentDone
+    return () => {
+      if (promptTimer !== null) window.clearTimeout(promptTimer)
+    }
   }, [allCurrentDone, currentPhase, currentTasks.length, showSummary])
 
   const getTaskHelperText = (task: Task) =>
@@ -307,7 +316,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
                 {phaseTasks.map(task => {
                   const status = getTaskStatus(task.id)
                   const completion = getCompletion(task.id)
-                  const employee = completion ? employees.find(item => item.id === completion.employee_id) : null
+                  const employee = getCompletionEmployee(completion)
 
                   return (
                     <div key={task.id} className="flex items-center gap-2 py-0.5 text-sm">
@@ -452,7 +461,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
             {currentTasks.map(task => {
               const status = getTaskStatus(task.id)
               const completion = getCompletion(task.id)
-              const employee = completion ? employees.find(item => item.id === completion.employee_id) : null
+              const employee = getCompletionEmployee(completion)
 
               return (
                 <button
@@ -579,7 +588,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
           </DialogHeader>
           {taskActionTarget && (() => {
             const completion = getCompletion(taskActionTarget.id)
-            const assignedEmployee = completion ? employees.find(employee => employee.id === completion.employee_id) : null
+            const assignedEmployee = getCompletionEmployee(completion)
             const taskStatus = completion?.status ?? 'complete'
 
             return completion ? (

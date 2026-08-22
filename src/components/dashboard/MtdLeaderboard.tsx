@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react'
 import { addMonths, endOfMonth, format, isSameMonth, startOfMonth, subMonths } from 'date-fns'
-import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { buildPerformanceReportHtml, buildPerformanceRows } from '@/lib/performanceReporting'
@@ -33,10 +32,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
   const rangeEndDate = viewingCurrentMonth ? todayDate : endOfMonth(monthRef)
   const monthStart = format(rangeStartDate, 'yyyy-MM-dd')
   const rangeEnd = format(rangeEndDate, 'yyyy-MM-dd')
-  const filteredEmployees = useMemo(
-    () => employees.filter(employee => employeeMatchesScheduleDepartment(employee, 'foh')),
-    [employees]
-  )
+  const filteredEmployees = useMemo(() => employees, [employees])
 
   const { filteredCompletions, employeeMonthStats, perfRows, totalTasks } = useMemo(
     () => buildPerformanceRows({
@@ -63,7 +59,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
       totalTasks,
       startDate: monthStart,
       endDate: rangeEnd,
-      departmentLabel: 'FOH',
+      departmentLabel: 'All Staff',
     })
 
   const handleEmailReport = async (employeeId: string) => {
@@ -76,7 +72,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
           employee_id: employeeId,
           start_date: monthStart,
           end_date: rangeEnd,
-          department: 'foh',
+          department: 'all',
           report_html: buildReportHtml(employeeId),
         }),
       })

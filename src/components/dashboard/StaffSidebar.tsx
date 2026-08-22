@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Employee, Schedule, ShiftClock } from '@/lib/types'
 import { formatTime, calcHours, formatHours, getBusinessDate, isBirthdayToday } from '@/lib/dateUtils'
-import { getDepartmentLabel, getFallbackScheduleDepartment, getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getFallbackScheduleDepartment } from '@/lib/organization'
 import { ChevronDown, ChevronRight, Gift, Phone } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
 
@@ -13,32 +13,64 @@ interface Props {
   clockRecords: ShiftClock[]
 }
 
+type StaffEntry = {
+  employee: Employee
+  schedule: Schedule | null
+  record: ShiftClock | null
+  department: string
+}
+
 export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
-  const { roleDefinitions, departmentDefinitions } = useAppSettings()
-  const [fohOpen, setFohOpen] = useState(true)
-  const [bohOpen, setBohOpen] = useState(false)
+  const { departmentDefinitions } = useAppSettings()
+  const [openDepartments, setOpenDepartments] = useState<Record<string, boolean>>({})
 
   const businessDate = getBusinessDate()
-  const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
-  const clockActivityEmployeeIds = new Set(clockRecords.map(record => record.employee_id))
-  const staffIds = Array.from(new Set([...scheduledEmployeeIds, ...clockActivityEmployeeIds]))
-  const staffOnToday = staffIds.map(employeeId => {
-    const employee = employees.find(item => item.id === employeeId)
-    const schedule = schedules.find(item => item.employee_id === employeeId) ?? null
-    const record = [...clockRecords]
-      .filter(item => item.employee_id === employeeId)
-      .sort((a, b) => {
-        if (!a.clock_out_at && b.clock_out_at) return -1
-        if (a.clock_out_at && !b.clock_out_at) return 1
-        return b.clock_in_at.localeCompare(a.clock_in_at)
-      })[0] ?? null
-    return { employee, schedule, record }
-  }).filter(entry => entry.employee)
+  const staffOnToday = useMemo(() => {
+    const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
+    const clockActivityEmployeeIds = new Set(clockRecords.map(record => record.employee_id))
+    const staffIds = Array.from(new Set([...scheduledEmployeeIds, ...clockActivityEmployeeIds]))
 
-  const groupedStaff = {
-    foh: staffOnToday.filter(({ employee, schedule }) => (schedule?.department ?? getFallbackScheduleDepartment(employee!)) === 'foh'),
-    boh: staffOnToday.filter(({ employee, schedule }) => (schedule?.department ?? getFallbackScheduleDepartment(employee!)) === 'boh'),
-  }
+    return staffIds.map((employeeId): StaffEntry | null => {
+      const employee = employees.find(item => item.id === employeeId)
+      if (!employee) return null
+      const employeeSchedules = schedules
+        .filter(item => item.employee_id === employeeId)
+        .sort((a, b) => a.start_time.localeCompare(b.start_time))
+      const schedule = employeeSchedules[0] ?? null
+      const record = [...clockRecords]
+        .filter(item => item.employee_id === employeeId)
+        .sort((a, b) => {
+          if (!a.clock_out_at && b.clock_out_at) return -1
+          if (a.clock_out_at && !b.clock_out_at) return 1
+          return b.clock_in_at.localeCompare(a.clock_in_at)
+        })[0] ?? null
+      const department = schedule?.department ?? getFallbackScheduleDepartment(employee)
+      return { employee, schedule, record, department }
+    }).filter((entry): entry is StaffEntry => entry !== null)
+  }, [clockRecords, employees, schedules])
+
+  const groupedStaff = useMemo(() => {
+    const definitionOrder = new Map(departmentDefinitions.map((definition, index) => [definition.key, index]))
+    const groups = new Map<string, typeof staffOnToday>()
+    for (const entry of staffOnToday) {
+      const key = entry.department || 'server'
+      groups.set(key, [...(groups.get(key) ?? []), entry])
+    }
+
+    return [...groups.entries()]
+      .map(([department, entries]) => ({
+        department,
+        entries: entries.sort((left, right) => {
+          const leftTime = left.schedule?.start_time ?? left.record?.clock_in_at ?? ''
+          const rightTime = right.schedule?.start_time ?? right.record?.clock_in_at ?? ''
+          return leftTime.localeCompare(rightTime) || left.employee.name.localeCompare(right.employee.name)
+        }),
+      }))
+      .sort((left, right) => (
+        (definitionOrder.get(left.department) ?? 999) - (definitionOrder.get(right.department) ?? 999) ||
+        getDepartmentLabel(left.department, departmentDefinitions).localeCompare(getDepartmentLabel(right.department, departmentDefinitions))
+      ))
+  }, [departmentDefinitions, staffOnToday])
 
   return (
     <aside className="flex min-h-0 w-72 shrink-0 flex-col border-r bg-white">
@@ -52,15 +84,16 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
         {staffOnToday.length === 0 && (
           <p className="text-xs text-muted-foreground text-center py-4">No scheduled or clocked-in staff today</p>
         )}
-        {([
-          ['FOH', groupedStaff.foh, fohOpen, setFohOpen],
-          ['BOH', groupedStaff.boh, bohOpen, setBohOpen],
-        ] as const).map(([label, entries, isOpen, setOpen]) => (
-          <section key={label} className="space-y-2">
+        {groupedStaff.map(({ department, entries }) => {
+          const label = getDepartmentLabel(department, departmentDefinitions)
+          const isOpen = openDepartments[department] ?? true
+
+          return (
+          <section key={department} className="space-y-2">
             <button
               type="button"
               className="flex w-full items-center justify-between rounded-lg px-1 py-0.5 hover:bg-slate-50"
-              onClick={() => setOpen(v => !v)}
+              onClick={() => setOpenDepartments(current => ({ ...current, [department]: !isOpen }))}
             >
               <div className="flex items-center gap-1.5">
                 {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
@@ -93,11 +126,11 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                       ? 'bg-blue-100 text-blue-700'
                       : 'bg-emerald-100 text-emerald-700'
                 return (
-                <div key={`${employee!.id}-${schedule?.id ?? 'clock'}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+                <div key={`${employee.id}-${schedule?.id ?? 'clock'}`} className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
                   <div className="flex items-center justify-between gap-1.5">
                     <div className="flex min-w-0 items-center gap-1">
-                      <span className="truncate text-xs font-medium">{employee!.name}</span>
-                      {isBirthdayToday(employee!.birth_date) && (
+                      <span className="truncate text-xs font-medium">{employee.name}</span>
+                      {isBirthdayToday(employee.birth_date) && (
                         <Gift className="w-3 h-3 shrink-0 text-pink-500" />
                       )}
                     </div>
@@ -113,15 +146,15 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
                       </>
                     ) : (
                       <>
-                        <span>{getDepartmentLabel(employee?.primary_department ?? 'foh', departmentDefinitions)}</span>
+                        <span>{getDepartmentLabel(department, departmentDefinitions)}</span>
                         <span>Clock-in only</span>
                       </>
                     )}
                   </div>
-                  {employee!.phone && (
+                  {employee.phone && (
                     <div className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
                       <Phone className="w-2.5 h-2.5" />
-                      {employee!.phone}
+                      {employee.phone}
                     </div>
                   )}
                 </div>
@@ -130,7 +163,8 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
             </div>
             )}
           </section>
-        ))}
+          )
+        })}
       </div>
     </aside>
   )

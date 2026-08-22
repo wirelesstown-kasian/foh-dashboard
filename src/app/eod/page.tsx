@@ -91,6 +91,22 @@ function getFinancialDraftKey(sessionDate: string) {
   return `eod-financials:${sessionDate}`
 }
 
+function hasSameClockState(storedRows: TipRow[], clockRows: TipRow[]) {
+  if (storedRows.length !== clockRows.length) return false
+
+  const clockRowsByEmployeeId = new Map(clockRows.map(row => [row.employee_id, row]))
+  return storedRows.every(storedRow => {
+    const clockRow = clockRowsByEmployeeId.get(storedRow.employee_id)
+    if (!clockRow) return false
+
+    return (
+      Math.abs(storedRow.hours_worked - clockRow.hours_worked) < 0.005 &&
+      storedRow.clock_in_at === clockRow.clock_in_at &&
+      storedRow.clock_out_at === clockRow.clock_out_at
+    )
+  })
+}
+
 function isEodCloserRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
@@ -336,13 +352,20 @@ export default function EodPage() {
     try {
       const parsed = JSON.parse(stored) as TipRow[]
       if (Array.isArray(parsed)) {
-        setTipRows(parsed)
-        setTipDistributionSaved(true)
+        const clockBasedRows = aggregateClockTipRows(clockRecords, employees)
+        if (hasSameClockState(parsed, clockBasedRows)) {
+          setTipRows(parsed)
+          setTipDistributionSaved(true)
+        } else {
+          window.localStorage.removeItem(getTipDraftKey(today))
+          setTipRows(clockBasedRows)
+          setTipDistributionSaved(false)
+        }
       }
     } catch {
       window.localStorage.removeItem(getTipDraftKey(today))
     }
-  }, [existing, loading, toFinancialForm, today])
+  }, [clockRecords, employees, existing, loading, toFinancialForm, today])
 
   const openClockRecords = clockRecords.filter(record => !record.clock_out_at)
   const openClockStaff = openClockRecords.map(record => ({

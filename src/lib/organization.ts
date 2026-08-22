@@ -99,8 +99,7 @@ export function employeeMatchesScheduleDepartment(employee: { role?: unknown; pr
 }
 
 export function getFallbackScheduleDepartment(employee: Employee): ScheduleDepartment {
-  const primaryDepartment = employee.primary_department ?? 'foh'
-  return primaryDepartment === 'boh' ? 'boh' : 'foh'
+  return getEmployeeScheduleDepartments(employee)[0] ?? employee.primary_department ?? 'server'
 }
 
 export function getPrimaryDepartmentBadge(primaryDepartment: PrimaryDepartment | undefined, definitions: DepartmentDefinition[]) {

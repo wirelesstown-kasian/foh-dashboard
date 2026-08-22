@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDays, addWeeks, endOfMonth, endOfWeek, format, parseISO, startOfMonth, startOfWeek } from 'date-fns'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -403,6 +404,13 @@ export default function WageWorksheetPage() {
       {step === 'setup' ? (
         <div className="max-w-7xl overflow-hidden rounded-xl border bg-white shadow-sm">
           <div className="border-b bg-slate-950 px-5 py-4 text-white">
+            <Link
+              href="/admin"
+              className="mb-2 inline-flex items-center gap-1.5 text-sm text-slate-300 transition-colors hover:text-white"
+            >
+              <ArrowLeft className="size-4" />
+              Back to Admin Board
+            </Link>
             <p className="text-xs font-semibold uppercase text-slate-300">Worksheet Setup</p>
             <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
               <div>
@@ -544,9 +552,17 @@ export default function WageWorksheetPage() {
       ) : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button variant="outline" size="sm" onClick={returnToSetup}>
-              <ArrowLeft className="size-4" /> Back
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={returnToSetup}>
+                <ArrowLeft className="size-4" /> Back
+              </Button>
+              <Link
+                href="/admin"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <ArrowLeft className="size-4" /> Admin Board
+              </Link>
+            </div>
             <div className="text-right text-xs text-muted-foreground">
               {departmentOptions.find(option => option.key === department)?.label ?? department} | {startDate} to {endDate} | Pay date {payDate}
             </div>
