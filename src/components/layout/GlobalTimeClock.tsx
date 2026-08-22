@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ClockToolbar } from '@/components/dashboard/ClockToolbar'
 import { supabase } from '@/lib/supabase'
 import { getBusinessDateString } from '@/lib/dateUtils'
-import { Schedule, ShiftClock } from '@/lib/types'
+import { Employee, Schedule, ShiftClock } from '@/lib/types'
 
 export const CLOCK_RECORDS_CHANGED_EVENT = 'foh-clock-records-changed'
 
@@ -20,7 +20,7 @@ export function GlobalTimeClock() {
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
 
   const load = useCallback(async () => {
-    const [scheduleRes, clockRes] = await Promise.all([
+    const [scheduleRes, clockPayload] = await Promise.all([
       supabase
         .from('schedules')
         .select('*, employee:employees(id, name, phone, email, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, birth_date, is_active, created_at)')
@@ -31,9 +31,25 @@ export function GlobalTimeClock() {
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
       )),
     ])
+    const records = clockPayload.records ?? []
+    const missingEmployeeIds = Array.from(new Set(
+      records
+        .filter(record => !record.clock_out_at && !record.employee)
+        .map(record => record.employee_id)
+    ))
+    const employeeRes = missingEmployeeIds.length > 0
+      ? await supabase
+          .from('employees')
+          .select('id, name, phone, email, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, birth_date, is_active, created_at')
+          .in('id', missingEmployeeIds)
+      : { data: [] as Employee[] }
+    const employeeById = new Map((employeeRes.data ?? []).map(employee => [employee.id, employee as Employee]))
 
     setSchedules((scheduleRes.data ?? []) as Schedule[])
-    setClockRecords(clockRes.records ?? [])
+    setClockRecords(records.map(record => ({
+      ...record,
+      employee: record.employee ?? employeeById.get(record.employee_id),
+    })))
   }, [today])
 
   useEffect(() => {

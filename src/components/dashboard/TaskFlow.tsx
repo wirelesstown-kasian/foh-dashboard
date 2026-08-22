@@ -49,7 +49,6 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
   const [resetError, setResetError] = useState<string | null>(null)
   const [showPhaseResetPin, setShowPhaseResetPin] = useState(false)
   const [phaseResetError, setPhaseResetError] = useState<string | null>(null)
-  const [selectionMode, setSelectionMode] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [nextPhasePromptOpen, setNextPhasePromptOpen] = useState(false)
   const prevAllCurrentDoneRef = useRef(false)
@@ -396,17 +395,6 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
             <h2 className="font-semibold">{currentCategory?.name ?? PHASE_LABELS[currentPhase]}</h2>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant={selectionMode ? 'default' : 'outline'}
-              className="hidden md:inline-flex h-7 px-2 text-xs"
-              onClick={() => {
-                setSelectionMode(value => !value)
-                setSelectedTaskIds([])
-              }}
-            >
-              {selectionMode ? 'Done Selecting' : 'Multi-Select'}
-            </Button>
             <span className="text-sm text-muted-foreground">
               {currentTasks.filter(task => isResolved(task.id)).length} / {currentTasks.length} resolved
             </span>
@@ -423,34 +411,6 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
           </div>
         </div>
 
-        {selectionMode && (
-          <div className="border-b bg-amber-50 px-3 py-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-amber-800">{selectedTasks.length} selected</span>
-              <Button
-                size="sm"
-                className="h-8"
-                disabled={selectedTasks.length === 0}
-                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'complete' })}
-              >
-                Complete Selected
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                className="h-8"
-                disabled={selectedTasks.length === 0}
-                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'incomplete' })}
-              >
-                Incomplete Selected
-              </Button>
-              <Button size="sm" variant="ghost" className="h-8" onClick={clearSelection}>
-                Clear
-              </Button>
-            </div>
-          </div>
-        )}
-
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {currentTasks.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
@@ -462,26 +422,37 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
               const status = getTaskStatus(task.id)
               const completion = getCompletion(task.id)
               const employee = getCompletionEmployee(completion)
+              const selected = selectedTaskIds.includes(task.id)
+              const pending = status === 'pending'
 
               return (
                 <button
                   key={task.id}
                   type="button"
-                  className={`rounded-xl border-2 p-2.5 text-center transition-all ${
+                  className={`relative rounded-xl border-2 p-2.5 text-center transition-all ${
                     status === 'complete'
                       ? 'border-green-400 bg-green-50 hover:bg-green-100'
                       : status === 'incomplete'
                         ? 'border-red-400 bg-red-50 hover:bg-red-100'
-                        : 'border-gray-200 bg-white hover:border-amber-400 hover:shadow-sm'
-                  } ${selectionMode && selectedTaskIds.includes(task.id) ? 'ring-4 ring-amber-300' : ''}`}
+                        : selected
+                          ? 'border-amber-500 bg-amber-50 shadow-sm'
+                          : 'border-gray-200 bg-white hover:border-amber-400 hover:shadow-sm'
+                  } ${selected ? 'ring-4 ring-amber-200' : ''}`}
                   onClick={() => {
-                    if (selectionMode) {
+                    if (pending) {
                       toggleTaskSelection(task.id)
                       return
                     }
                     setTaskActionTarget(task)
                   }}
                 >
+                  {pending && (
+                    <span className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded border text-[10px] font-bold ${
+                      selected ? 'border-amber-600 bg-amber-500 text-white' : 'border-slate-300 bg-white text-transparent'
+                    }`}>
+                      ✓
+                    </span>
+                  )}
                   <div className="flex flex-col items-center gap-1.5">
                     {status === 'complete' ? (
                       <CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
@@ -532,6 +503,34 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
           </Button>
         )}
       </div>
+
+      {selectedTasks.length > 0 && (
+        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm font-semibold text-amber-900">
+              {selectedTasks.length} task{selectedTasks.length === 1 ? '' : 's'} selected
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="h-10 bg-emerald-600 px-5 font-semibold hover:bg-emerald-700"
+                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'complete' })}
+              >
+                Complete
+              </Button>
+              <Button
+                variant="destructive"
+                className="h-10 px-4 font-semibold"
+                onClick={() => setPinTarget({ tasks: selectedTasks, status: 'incomplete' })}
+              >
+                Mark Incomplete
+              </Button>
+              <Button variant="ghost" className="h-10" onClick={clearSelection}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <PinModal
         open={!!pinTarget}
