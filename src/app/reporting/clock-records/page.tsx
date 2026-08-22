@@ -461,6 +461,7 @@ export default function ClockRecordsPage() {
               const employee = getClockRecordEmployee(record, employees)
               const employeeName = employee?.name ?? 'Unknown Staff'
               const missingBreakWarning = shouldWarnMissingMealBreak(record, employee)
+              const mealBreakThresholdHours = getMealBreakThresholdHours(employee)
               const breakMinutes = getClockBreakMinutes(record)
               const workedHours = record.clock_out_at ? calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, breakMinutes) : 0
               return (
@@ -484,7 +485,7 @@ export default function ClockRecordsPage() {
                         <Badge
                           variant="outline"
                           className="border-amber-300 bg-amber-50 text-amber-800"
-                          title={`${employeeName} worked ${getEffectiveClockHours(record).toFixed(2)} hours with no completed 30 minute meal break. Alert threshold: ${getMealBreakThresholdHours(employee).toFixed(2)} hours.`}
+                          title={`${employeeName} worked ${getEffectiveClockHours(record).toFixed(2)} hours with no completed 30 minute meal break. Alert threshold: ${mealBreakThresholdHours?.toFixed(2) ?? 'disabled'} hours.`}
                         >
                           <AlertTriangle className="mr-1 h-3 w-3" /> Break Audit
                         </Badge>

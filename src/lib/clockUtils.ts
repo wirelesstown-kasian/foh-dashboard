@@ -115,6 +115,7 @@ export function getClockBreakMinutes(record: Pick<ShiftClock, 'manager_note' | '
 }
 
 export function getMealBreakThresholdHours(employee: Pick<Employee, 'meal_break_threshold_hours'> | null | undefined) {
+  if (employee && employee.meal_break_threshold_hours === null) return null
   const value = Number(employee?.meal_break_threshold_hours ?? DEFAULT_MEAL_BREAK_THRESHOLD_HOURS)
   return Number.isFinite(value) && value > 0 ? value : DEFAULT_MEAL_BREAK_THRESHOLD_HOURS
 }
@@ -127,6 +128,7 @@ export function hasCompletedMealBreak(record: Pick<ShiftClock, 'manager_note' | 
 export function shouldWarnMissingMealBreak(record: ShiftClock, employee: Pick<Employee, 'meal_break_threshold_hours'> | null | undefined) {
   if (!record.clock_out_at || isClockPending(record)) return false
   const thresholdHours = getMealBreakThresholdHours(employee)
+  if (thresholdHours === null) return false
   const workedHours = getEffectiveClockHours(record)
   return workedHours >= thresholdHours && !hasCompletedMealBreak(record)
 }

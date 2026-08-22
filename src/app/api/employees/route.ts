@@ -357,7 +357,13 @@ export async function POST(req: NextRequest) {
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
   const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
-  const mealBreakThresholdHours = typeof meal_break_threshold_hours === 'number' ? meal_break_threshold_hours : typeof meal_break_threshold_hours === 'string' && meal_break_threshold_hours.trim() ? Number(meal_break_threshold_hours) : 7.5
+  const mealBreakThresholdHours = meal_break_threshold_hours === null
+    ? null
+    : typeof meal_break_threshold_hours === 'number'
+      ? meal_break_threshold_hours
+      : typeof meal_break_threshold_hours === 'string' && meal_break_threshold_hours.trim()
+        ? Number(meal_break_threshold_hours)
+        : 7.5
   if (hourlyWage !== null && (Number.isNaN(hourlyWage) || hourlyWage < 0)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
@@ -367,17 +373,13 @@ export async function POST(req: NextRequest) {
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
     return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
   }
-  if (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0) {
+  if (mealBreakThresholdHours !== null && (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0)) {
     return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
   const paymentMethod = normalizePaymentMethod(payment_method)
   if (!paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
-  if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
-    return NextResponse.json({ error: 'Commission note is required when commission is enabled' }, { status: 400 })
-  }
-
   try {
     const duplicate = await findDuplicatePin(pin)
     if (duplicate) {
@@ -456,7 +458,13 @@ export async function PATCH(req: NextRequest) {
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
   const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
-  const mealBreakThresholdHours = typeof meal_break_threshold_hours === 'number' ? meal_break_threshold_hours : typeof meal_break_threshold_hours === 'string' && meal_break_threshold_hours.trim() ? Number(meal_break_threshold_hours) : 7.5
+  const mealBreakThresholdHours = meal_break_threshold_hours === null
+    ? null
+    : typeof meal_break_threshold_hours === 'number'
+      ? meal_break_threshold_hours
+      : typeof meal_break_threshold_hours === 'string' && meal_break_threshold_hours.trim()
+        ? Number(meal_break_threshold_hours)
+        : 7.5
   if (hourlyWage !== null && (Number.isNaN(hourlyWage) || hourlyWage < 0)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
@@ -466,17 +474,13 @@ export async function PATCH(req: NextRequest) {
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
     return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
   }
-  if (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0) {
+  if (mealBreakThresholdHours !== null && (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0)) {
     return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
   const paymentMethod = normalizePaymentMethod(payment_method)
   if (!paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
-  if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
-    return NextResponse.json({ error: 'Commission note is required when commission is enabled' }, { status: 400 })
-  }
-
   const update: {
     name: string
     phone: string | null
@@ -488,7 +492,7 @@ export async function PATCH(req: NextRequest) {
     hourly_wage: number | null
     guaranteed_hourly: number | null
     tip_pool_hourly_rate: number | null
-    meal_break_threshold_hours: number
+    meal_break_threshold_hours: number | null
     commission_enabled: boolean
     commission_note: string | null
     payment_method: PaymentMethod

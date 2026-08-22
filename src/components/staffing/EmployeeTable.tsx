@@ -48,6 +48,7 @@ interface FormState {
   guaranteed_hourly: string
   guaranteed_enabled: boolean
   tip_pool_hourly_rate: string
+  meal_break_alert_enabled: boolean
   meal_break_threshold_hours: string
   commission_enabled: boolean
   commission_note: string
@@ -75,6 +76,7 @@ const EMPTY_FORM: FormState = {
   guaranteed_hourly: '',
   guaranteed_enabled: false,
   tip_pool_hourly_rate: '',
+  meal_break_alert_enabled: true,
   meal_break_threshold_hours: '7.5',
   commission_enabled: false,
   commission_note: '',
@@ -214,6 +216,7 @@ export function EmployeeTable() {
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       guaranteed_enabled: emp.guaranteed_hourly !== null,
       tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
+      meal_break_alert_enabled: emp.meal_break_threshold_hours !== null,
       meal_break_threshold_hours: String(emp.meal_break_threshold_hours ?? 7.5),
       commission_enabled: emp.commission_enabled === true,
       commission_note: emp.commission_note ?? '',
@@ -251,12 +254,8 @@ export function EmployeeTable() {
       setSaveError('Guaranteed pay amount is required when Guaranteed Pay is on')
       return
     }
-    if (form.commission_enabled && !form.commission_note.trim()) {
-      setSaveError('Commission note is required when Commission is on')
-      return
-    }
     const mealBreakThreshold = Number(form.meal_break_threshold_hours)
-    if (!form.meal_break_threshold_hours.trim() || Number.isNaN(mealBreakThreshold) || mealBreakThreshold <= 0) {
+    if (form.meal_break_alert_enabled && (!form.meal_break_threshold_hours.trim() || Number.isNaN(mealBreakThreshold) || mealBreakThreshold <= 0)) {
       setSaveError('Meal break alert hours must be greater than 0')
       return
     }
@@ -278,6 +277,7 @@ export function EmployeeTable() {
             primary_department: form.schedule_departments[0] ?? form.primary_department,
             guaranteed_hourly: form.guaranteed_enabled ? form.guaranteed_hourly : '',
             tip_pool_hourly_rate: form.tip_cap_enabled ? form.tip_pool_hourly_rate : '',
+            meal_break_threshold_hours: form.meal_break_alert_enabled ? form.meal_break_threshold_hours : null,
             pin: resetPinMode ? form.pin : '',
             login_enabled: form.login_enabled === 'enabled',
           }),
@@ -294,6 +294,7 @@ export function EmployeeTable() {
             primary_department: form.schedule_departments[0] ?? form.primary_department,
             guaranteed_hourly: form.guaranteed_enabled ? form.guaranteed_hourly : '',
             tip_pool_hourly_rate: form.tip_cap_enabled ? form.tip_pool_hourly_rate : '',
+            meal_break_threshold_hours: form.meal_break_alert_enabled ? form.meal_break_threshold_hours : null,
             login_enabled: form.login_enabled === 'enabled',
           }),
         })
@@ -344,9 +345,7 @@ export function EmployeeTable() {
     Boolean(form.payment_method) &&
     (!form.tip_cap_enabled || Boolean(form.tip_pool_hourly_rate.trim())) &&
     (!form.guaranteed_enabled || Boolean(form.guaranteed_hourly.trim())) &&
-    (!form.commission_enabled || Boolean(form.commission_note.trim())) &&
-    Boolean(form.meal_break_threshold_hours.trim()) &&
-    Number(form.meal_break_threshold_hours) > 0
+    (!form.meal_break_alert_enabled || (Boolean(form.meal_break_threshold_hours.trim()) && Number(form.meal_break_threshold_hours) > 0))
 
   const toggleScheduleDepartment = (department: string) => {
     setForm(currentForm => {
@@ -626,13 +625,13 @@ export function EmployeeTable() {
                 checked={form.commission_enabled}
                 onCheckedChange={checked => setForm(f => ({ ...f, commission_enabled: checked, commission_note: checked ? f.commission_note : '' }))}
                 label="Commission"
-                description="Requires a note."
+                description="Optional commission tracking."
               >
-                <Label>Commission Note *</Label>
+                <Label>Commission Note</Label>
                 <Input
                   value={form.commission_note}
                   onChange={e => setForm(f => ({ ...f, commission_note: e.target.value }))}
-                  placeholder="Commission detail"
+                  placeholder="Optional commission detail"
                 />
               </ToggleRow>
             </div>
@@ -653,16 +652,22 @@ export function EmployeeTable() {
               </div>
             </div>
             <div>
-              <Label>Meal Break Alert Hours</Label>
-              <Input
-                type="number"
-                step="0.25"
-                min="0.25"
-                value={form.meal_break_threshold_hours}
-                onChange={e => setForm(f => ({ ...f, meal_break_threshold_hours: e.target.value }))}
-                placeholder="7.5"
-              />
-              <p className="mt-1 text-xs text-muted-foreground">Reports show an audit warning at this shift length when no 30 minute break is recorded.</p>
+              <ToggleRow
+                checked={form.meal_break_alert_enabled}
+                onCheckedChange={checked => setForm(f => ({ ...f, meal_break_alert_enabled: checked }))}
+                label="Meal Break Alert"
+                description="Per-day warning in clock and wage reports when a shift reaches this length without a 30 minute meal break."
+              >
+                <Label>Alert Hours</Label>
+                <Input
+                  type="number"
+                  step="0.25"
+                  min="0.25"
+                  value={form.meal_break_threshold_hours}
+                  onChange={e => setForm(f => ({ ...f, meal_break_threshold_hours: e.target.value }))}
+                  placeholder="7.5"
+                />
+              </ToggleRow>
             </div>
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">

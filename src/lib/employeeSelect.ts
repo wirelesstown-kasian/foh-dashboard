@@ -74,8 +74,8 @@ export function withTipPoolHourlyRate<T extends object>(employees: T[]) {
 export function withMealBreakThresholdHours<T extends object>(employees: T[]) {
   return employees.map(employee => ({
     ...employee,
-    meal_break_threshold_hours: 'meal_break_threshold_hours' in employee && employee.meal_break_threshold_hours != null
-      ? (employee.meal_break_threshold_hours as number)
+    meal_break_threshold_hours: 'meal_break_threshold_hours' in employee
+      ? (employee.meal_break_threshold_hours as number | null)
       : 7.5,
   }))
 }

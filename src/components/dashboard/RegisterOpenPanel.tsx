@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { DollarSign } from 'lucide-react'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 
 const DENOM_VALUES: Record<string, number> = {
   d100: 100, d50: 50, d20: 20, d10: 10, d5: 5,
@@ -97,9 +98,10 @@ interface Props {
 }
 
 function isRegisterOpener(employee: Employee) {
+  const departments = getEmployeeScheduleDepartments(employee).map(department => department.trim().toLowerCase())
   const department = (employee.primary_department ?? '').trim().toLowerCase()
   const role = (employee.role ?? '').trim().toLowerCase()
-  return department === 'server' || department === 'manager' || role === 'server' || role === 'manager'
+  return departments.includes('server') || departments.includes('manager') || department === 'server' || department === 'manager' || role === 'server' || role === 'manager'
 }
 
 export function RegisterOpenPanel({ session, employees, clockRecords, today, businessDate, onComplete }: Props) {
@@ -114,10 +116,18 @@ export function RegisterOpenPanel({ session, employees, clockRecords, today, bus
       .filter(record => record.session_date === today && record.clock_in_at && !record.clock_out_at)
       .map(record => record.employee_id)
   ), [clockRecords, today])
-  const eligibleOpeners = useMemo(
-    () => employees.filter(employee => isRegisterOpener(employee) && clockedInEmployeeIds.has(employee.id)),
-    [clockedInEmployeeIds, employees]
-  )
+  const eligibleOpeners = useMemo(() => {
+    const employeeById = new Map(employees.map(employee => [employee.id, employee]))
+    for (const record of clockRecords) {
+      if (record.session_date !== today || !record.clock_in_at || record.clock_out_at) continue
+      const relatedEmployee = record.employee as Employee | Employee[] | undefined
+      const employee = Array.isArray(relatedEmployee) ? relatedEmployee[0] : relatedEmployee
+      if (employee?.id && !employeeById.has(employee.id)) {
+        employeeById.set(employee.id, employee)
+      }
+    }
+    return [...employeeById.values()].filter(employee => isRegisterOpener(employee) && clockedInEmployeeIds.has(employee.id))
+  }, [clockRecords, clockedInEmployeeIds, employees, today])
   const hasAvailableOpeners = eligibleOpeners.length > 0
   const selectedOpener = eligibleOpeners.find(e => e.id === openedBy) ?? null
   const selectedOpenerName = selectedOpener?.name ?? 'Unknown'
