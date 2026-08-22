@@ -270,7 +270,7 @@ export async function POST(req: NextRequest) {
   await processOverdueClockRecords()
 
   const payload = await req.json() as {
-    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break'
+    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break'
     pin?: string
     session_date?: string
     employee_id?: string
@@ -314,7 +314,7 @@ export async function POST(req: NextRequest) {
   const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.${ext}`
   const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
 
-  if (action === 'start_break' || action === 'end_break') {
+  if (action === 'start_break' || action === 'end_break' || action === 'toggle_break') {
     if (!existingRecord?.clock_in_at) {
       return NextResponse.json({ error: 'No active clock-in found for this employee today' }, { status: 400 })
     }
@@ -322,8 +322,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'This shift is already clocked out' }, { status: 400 })
     }
 
-    if (action === 'start_break') {
-      const breakState = getMealBreakState(existingRecord)
+    const breakState = getMealBreakState(existingRecord)
+    const breakAction = action === 'toggle_break'
+      ? breakState.startedAt && !breakState.endedAt
+        ? 'end_break'
+        : 'start_break'
+      : action
+
+    if (breakAction === 'start_break') {
       if (breakState.startedAt && !breakState.endedAt) {
         return NextResponse.json({ error: 'You are already on meal break' }, { status: 400 })
       }
@@ -342,10 +348,9 @@ export async function POST(req: NextRequest) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
-      return NextResponse.json({ success: true, employee, break_started_at: nowIso })
+      return NextResponse.json({ success: true, employee, break_action: 'start_break', break_started_at: nowIso })
     }
 
-    const breakState = getMealBreakState(existingRecord)
     if (!breakState.startedAt || breakState.endedAt) {
       return NextResponse.json({ error: 'No active meal break found' }, { status: 400 })
     }
@@ -374,7 +379,7 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
-    return NextResponse.json({ success: true, employee, break_minutes: elapsedMinutes })
+    return NextResponse.json({ success: true, employee, break_action: 'end_break', break_minutes: elapsedMinutes })
   }
 
   if (!allowPhotoSkip && !photo_data_url) {

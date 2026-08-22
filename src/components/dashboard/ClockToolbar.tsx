@@ -17,11 +17,12 @@ interface Props {
 
 const CLOCK_IN_TITLE = 'Clock In'
 const CLOCK_OUT_TITLE = 'Clock Out'
-const MEAL_BREAK_TITLE = 'Meal Break (30 min)'
+const MEAL_BREAK_TITLE = 'Break'
+type ClockAction = 'clock_in' | 'clock_out' | 'toggle_break'
 
 export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Props) {
   const [panelOpen, setPanelOpen] = useState(false)
-  const [target, setTarget] = useState<'clock_in' | 'clock_out' | 'start_break' | 'end_break' | null>(null)
+  const [target, setTarget] = useState<ClockAction | null>(null)
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -43,7 +44,6 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
 
   const openClockCount = clockRecords.filter(record => !record.clock_out_at).length
   const activeBreakCount = clockRecords.filter(record => !record.clock_out_at && isClockOnMealBreak(record)).length
-  const breakButtonLabel = activeBreakCount > 0 ? 'End Break' : MEAL_BREAK_TITLE
 
   const resetPanel = () => {
     setPanelOpen(false)
@@ -112,7 +112,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
     return canvas.toDataURL('image/jpeg', 0.9)
   }
 
-  const handleSubmit = async (nextTarget: NonNullable<typeof target>, skipPhoto = false) => {
+  const handleSubmit = async (nextTarget: ClockAction, skipPhoto = false) => {
     setTarget(nextTarget)
     setError(null)
 
@@ -204,46 +204,39 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
             <DialogTitle>Time Clock</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-              <div className="mx-auto w-[180px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-900 shadow-sm sm:mx-0">
-                <div className="flex h-[220px] items-center justify-center">
-                  <video
-                    ref={videoRef}
-                    muted
-                    playsInline
-                    autoPlay
-                    className="h-full w-full object-cover"
-                  />
-                </div>
-                <div className="flex items-center justify-center gap-1.5 border-t border-slate-700 bg-slate-950 px-3 py-2 text-center text-xs text-slate-200">
-                  <Camera className="h-3.5 w-3.5" />
-                  {cameraReady ? 'Front camera ready' : 'Starting camera...'}
-                </div>
+            <div className="mx-auto w-[180px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-900 shadow-sm">
+              <div className="flex h-[220px] items-center justify-center">
+                <video
+                  ref={videoRef}
+                  muted
+                  playsInline
+                  autoPlay
+                  className="h-full w-full object-cover"
+                />
               </div>
-              <div className="space-y-3">
-                <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                  <div>First shift starts at {firstShift ? formatTime(firstShift.schedule.start_time) : '-'}</div>
-                  <div>Final shift ends at {lastShift ? formatTime(lastShift.schedule.end_time) : '-'}</div>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">PIN</label>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={4}
-                    value={pin}
-                    onChange={event => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
-                    className="w-full rounded-md border border-input px-3 py-2 text-center font-mono tracking-[0.35em]"
-                    placeholder="****"
-                  />
-                </div>
+              <div className="flex items-center justify-center gap-1.5 border-t border-slate-700 bg-slate-950 px-3 py-2 text-center text-xs text-slate-200">
+                <Camera className="h-3.5 w-3.5" />
+                {cameraReady ? 'Front camera ready' : 'Starting camera...'}
               </div>
             </div>
-            {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
+            <div className="space-y-3">
+              <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <div>First shift starts at {firstShift ? formatTime(firstShift.schedule.start_time) : '-'}</div>
+                <div>Final shift ends at {lastShift ? formatTime(lastShift.schedule.end_time) : '-'}</div>
               </div>
-            )}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={pin}
+                  onChange={event => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                  className="w-full rounded-md border border-input px-3 py-2 text-center font-mono tracking-[0.35em]"
+                  placeholder="****"
+                />
+              </div>
+            </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <Button
                 className="h-11 bg-emerald-600 font-semibold hover:bg-emerald-700"
@@ -262,16 +255,21 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
                 <LogOut className="mr-2 h-4 w-4" />
                 {submitting && target === 'clock_out' ? 'Saving...' : CLOCK_OUT_TITLE}
               </Button>
-              <Button
-                variant={activeBreakCount > 0 ? 'default' : 'outline'}
-                className="h-11 font-semibold sm:col-span-2"
-                onClick={() => void handleSubmit(activeBreakCount > 0 ? 'end_break' : 'start_break', true)}
-                disabled={submitting}
-              >
-                <Coffee className="mr-2 h-4 w-4" />
-                {submitting && (target === 'start_break' || target === 'end_break') ? 'Saving...' : breakButtonLabel}
-              </Button>
             </div>
+            <Button
+              variant="outline"
+              className="h-11 w-full font-semibold"
+              onClick={() => void handleSubmit('toggle_break', true)}
+              disabled={submitting}
+            >
+              <Coffee className="mr-2 h-4 w-4" />
+              {submitting && target === 'toggle_break' ? 'Saving...' : MEAL_BREAK_TITLE}
+            </Button>
+            {error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </div>
+            )}
             <Button
               variant="ghost"
               className="w-full text-slate-600"
