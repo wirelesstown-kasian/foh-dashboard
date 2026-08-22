@@ -368,9 +368,25 @@ export default function WageWorksheetPage() {
 
       if (itemInsert.error) throw itemInsert.error
 
+      const sheetSync = await fetch('/api/payroll-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId }),
+      })
+      const sheetSyncPayload = (await sheetSync.json().catch(() => ({}))) as {
+        error?: string
+        payroll?: { success?: boolean; skipped?: boolean; reason?: string; sheetName?: string }
+      }
+
       notifyReportingDataChanged()
       setConfirmOpen(false)
-      setMessage('Payroll worksheet saved. Wage Report and Dashboard can now use this payroll run.')
+      if (!sheetSync.ok) {
+        setMessage(`Payroll worksheet saved, but Google Sheets sync failed${sheetSyncPayload.error ? `: ${sheetSyncPayload.error}` : '.'}`)
+      } else if (sheetSyncPayload.payroll?.skipped) {
+        setMessage(`Payroll worksheet saved. Google Sheets sync skipped: ${sheetSyncPayload.payroll.reason ?? 'not configured.'}`)
+      } else {
+        setMessage(`Payroll worksheet saved and synced to Google Sheets${sheetSyncPayload.payroll?.sheetName ? ` (${sheetSyncPayload.payroll.sheetName})` : ''}. Wage Report and Dashboard can now use this payroll run.`)
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Failed to save payroll worksheet.')
     } finally {

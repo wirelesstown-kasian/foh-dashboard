@@ -1,5 +1,5 @@
 import { createSign } from 'crypto'
-import type { CashBalanceEntry, EodReport } from '@/lib/types'
+import type { CashBalanceEntry, EodReport, PayrollRun, PayrollRunItem } from '@/lib/types'
 
 type GoogleSheetsConfig = {
   clientEmail: string
@@ -7,6 +7,7 @@ type GoogleSheetsConfig = {
   spreadsheetId: string
   sheetName: string
   cashLogSheetName: string
+  payrollSheetName: string
 }
 
 function getConfig(): GoogleSheetsConfig | null {
@@ -15,9 +16,10 @@ function getConfig(): GoogleSheetsConfig | null {
   const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
   const sheetName = process.env.GOOGLE_SHEETS_EOD_SHEET_NAME ?? 'EOD'
   const cashLogSheetName = process.env.GOOGLE_SHEETS_CASH_LOG_SHEET_NAME ?? 'Cash Log'
+  const payrollSheetName = process.env.GOOGLE_SHEETS_PAYROLL_SHEET_NAME ?? 'Payroll'
 
   if (!clientEmail || !privateKey || !spreadsheetId) return null
-  return { clientEmail, privateKey, spreadsheetId, sheetName, cashLogSheetName }
+  return { clientEmail, privateKey, spreadsheetId, sheetName, cashLogSheetName, payrollSheetName }
 }
 
 function base64UrlEncode(value: string) {
@@ -129,6 +131,7 @@ async function resolveSheetName(config: GoogleSheetsConfig, accessToken: string,
 }
 
 type EodSheetReport = EodReport & { closed_by?: { name?: string | null } | null }
+type PayrollSheetRun = PayrollRun & { payroll_run_items?: PayrollRunItem[] }
 
 const EOD_SHEET_HEADERS = [
   'Session Date',
@@ -147,6 +150,40 @@ const EOD_SHEET_HEADERS = [
   'Closed By',
   'Updated At',
   'Report ID',
+]
+
+const PAYROLL_SHEET_HEADERS = [
+  'Pay Date',
+  'Period Start',
+  'Period End',
+  'Run Department',
+  'Run Memo',
+  'Paid By',
+  'Employee',
+  'Role',
+  'Item Department',
+  'Hours',
+  'Tips',
+  'Base Wages',
+  'Guarantee Top-Up',
+  'Commission',
+  'Deductions',
+  'Gross Pay',
+  'Net Pay',
+  'Payout',
+  'Cash Rounding',
+  'Auto Clock-Out',
+  'Open/Pending Clock',
+  'Item Memo',
+  'Total Cash',
+  'Total Check',
+  'Total ACH',
+  'Total Gross',
+  'Total Deductions',
+  'Total Net',
+  'Updated At',
+  'Run ID',
+  'Item ID',
 ]
 
 function buildEodSheetRow(report: EodSheetReport) {
@@ -175,6 +212,69 @@ function buildEodSheetRow(report: EodSheetReport) {
     report.updated_at,
     report.id,
   ]
+}
+
+function buildPayrollSheetRow(run: PayrollSheetRun, item: PayrollRunItem) {
+  return [
+    run.pay_date,
+    run.start_date,
+    run.end_date,
+    run.department,
+    run.memo ?? '',
+    item.payment_method.toUpperCase(),
+    item.employee_name,
+    item.role ?? '',
+    item.department,
+    Number(item.hours ?? 0).toFixed(2),
+    Number(item.tips ?? 0).toFixed(2),
+    Number(item.base_wages ?? 0).toFixed(2),
+    Number(item.guarantee_top_up ?? 0).toFixed(2),
+    Number(item.commission ?? 0).toFixed(2),
+    Number(item.deductions ?? 0).toFixed(2),
+    Number(item.gross_pay ?? 0).toFixed(2),
+    Number(item.net_pay ?? 0).toFixed(2),
+    Number(item.payout_amount ?? 0).toFixed(2),
+    Number(item.cash_rounding ?? 0).toFixed(2),
+    item.has_auto_clock_out ? 'Yes' : 'No',
+    item.has_open_clock ? 'Yes' : 'No',
+    item.memo ?? '',
+    Number(run.total_cash ?? 0).toFixed(2),
+    Number(run.total_check ?? 0).toFixed(2),
+    Number(run.total_ach ?? 0).toFixed(2),
+    Number(run.total_gross ?? 0).toFixed(2),
+    Number(run.total_deductions ?? 0).toFixed(2),
+    Number(run.total_net ?? 0).toFixed(2),
+    run.updated_at,
+    run.id,
+    item.id,
+  ]
+}
+
+async function ensurePayrollSheetHeaders(config: GoogleSheetsConfig, accessToken: string) {
+  const resolvedSheetName = await resolveSheetName(config, accessToken, config.payrollSheetName, ['Payroll'])
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  const headerRange = `${encodedSheetName}!A1:AE1`
+
+  const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${headerRange}`,
+    accessToken,
+  )
+  const currentHeaders = headerCheck.values?.[0] ?? []
+  const headersMatch = PAYROLL_SHEET_HEADERS.length === currentHeaders.length && PAYROLL_SHEET_HEADERS.every((header, index) => currentHeaders[index] === header)
+
+  if (!headersMatch) {
+    await googleSheetsRequest(
+      `${baseUrl}/${headerRange}?valueInputOption=USER_ENTERED`,
+      accessToken,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ values: [PAYROLL_SHEET_HEADERS] }),
+      }
+    )
+  }
+
+  return resolvedSheetName
 }
 
 async function ensureEodSheetHeaders(config: GoogleSheetsConfig, accessToken: string) {
@@ -384,6 +484,67 @@ export async function syncCashBalanceEntryToGoogleSheet(entry: CashBalanceEntry,
 
   const action = await upsertCashLogRow(config, accessToken, row, entry.id)
   return { success: true, skipped: false, action }
+}
+
+export async function syncPayrollRunToGoogleSheet(run: PayrollSheetRun) {
+  const config = getConfig()
+  if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
+
+  const items = [...(run.payroll_run_items ?? [])].sort((left, right) => left.display_order - right.display_order || left.employee_name.localeCompare(right.employee_name))
+  if (items.length === 0) {
+    return { success: true, skipped: true, reason: 'Payroll run has no items.' }
+  }
+
+  const accessToken = await getAccessToken(config)
+  const resolvedSheetName = await ensurePayrollSheetHeaders(config, accessToken)
+  const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
+  const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
+  const itemIdColumn = await googleSheetsRequest<{ values?: string[][] }>(
+    `${baseUrl}/${encodedSheetName}!AE2:AE`,
+    accessToken,
+  )
+
+  let updated = 0
+  let appended = 0
+  const existingItemRows = new Map(
+    (itemIdColumn.values ?? [])
+      .map((row, index) => [row[0], index + 2] as const)
+      .filter(([itemId]) => Boolean(itemId))
+  )
+
+  const appendRows: string[][] = []
+
+  for (const item of items) {
+    const row = buildPayrollSheetRow(run, item)
+    const existingRowNumber = existingItemRows.get(item.id)
+    if (existingRowNumber) {
+      await googleSheetsRequest(
+        `${baseUrl}/${encodedSheetName}!A${existingRowNumber}:AE${existingRowNumber}?valueInputOption=USER_ENTERED`,
+        accessToken,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ values: [row] }),
+        }
+      )
+      updated += 1
+    } else {
+      appendRows.push(row)
+    }
+  }
+
+  if (appendRows.length > 0) {
+    await googleSheetsRequest(
+      `${baseUrl}/${encodedSheetName}!A:AE:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      accessToken,
+      {
+        method: 'POST',
+        body: JSON.stringify({ values: appendRows }),
+      }
+    )
+    appended = appendRows.length
+  }
+
+  return { success: true, skipped: false, action: updated > 0 && appended === 0 ? 'updated' : appended > 0 && updated === 0 ? 'appended' : 'upserted', updated, appended, sheetName: resolvedSheetName }
 }
 
 export async function syncEodCashCountToGoogleSheet(report: {
