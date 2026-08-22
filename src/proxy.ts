@@ -17,18 +17,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(session ? getHomePathForRole(session.role) : '/admin', request.url))
   }
 
-  if (pathname === '/') {
-    return NextResponse.next()
-  }
-
   if (session || hasAdminSession) {
     return NextResponse.next()
   }
 
   const loginUrl = new URL('/login', request.url)
-  if (pathname !== '/') {
-    loginUrl.searchParams.set('next', pathname)
-  }
+  loginUrl.searchParams.set('next', pathname)
   return NextResponse.redirect(loginUrl)
 }
 

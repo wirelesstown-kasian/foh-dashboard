@@ -9,13 +9,26 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
-import { CashBalanceEntry, Employee, EodReport, PayrollRun, ShiftClock } from '@/lib/types'
+import { CashBalanceEntry, Employee, EodReport, PayrollRun, PayrollRunItem, ShiftClock, TipDistribution } from '@/lib/types'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, ReceiptText, Truck, Wallet } from 'lucide-react'
 
 type DashboardPeriod = 'weekly' | 'monthly' | 'yearly' | 'custom'
 
-type MetricKey = 'net' | 'tips' | 'wages' | 'tax' | 'cashFlow' | 'cash' | 'card' | 'delivery'
+type MetricKey =
+  | 'net'
+  | 'collectedTip'
+  | 'tipOut'
+  | 'payrollOut'
+  | 'totalPayrollOut'
+  | 'cashPayrollOut'
+  | 'checkPayrollOut'
+  | 'achPayrollOut'
+  | 'tax'
+  | 'cashFlow'
+  | 'cash'
+  | 'card'
+  | 'delivery'
 
 type MetricTotals = Record<MetricKey, number>
 
@@ -111,11 +124,57 @@ function getCardRevenue(report: EodReport) {
   return Math.max(0, Number(report.batch_total ?? 0) - Number(report.delivery_order_amount ?? 0))
 }
 
-function sumReports(reports: EodReport[], cashEntries: CashBalanceEntry[], wageSpend: number): MetricTotals {
+function sumTipDistributions(reports: Array<EodReport & { tip_distributions?: TipDistribution[] }>) {
+  return reports.reduce((sum, report) => (
+    sum + (report.tip_distributions ?? []).reduce((tipSum, distribution) => tipSum + Number(distribution.net_tip ?? 0), 0)
+  ), 0)
+}
+
+function summarizePayrollRuns(runs: Array<PayrollRun & { payroll_run_items?: PayrollRunItem[] }>) {
+  return runs.reduce(
+    (summary, run) => {
+      const runTipOut = (run.payroll_run_items ?? []).reduce((sum, item) => sum + Number(item.tips ?? 0), 0)
+      const runTotalPayrollOut = getPayrollRunTotal(run)
+
+      return {
+        tipOut: summary.tipOut + runTipOut,
+        payrollOut: summary.payrollOut + Math.max(0, runTotalPayrollOut - runTipOut),
+        totalPayrollOut: summary.totalPayrollOut + runTotalPayrollOut,
+        cashPayrollOut: summary.cashPayrollOut + Number(run.total_cash ?? 0),
+        checkPayrollOut: summary.checkPayrollOut + Number(run.total_check ?? 0),
+        achPayrollOut: summary.achPayrollOut + Number(run.total_ach ?? 0),
+      }
+    },
+    {
+      tipOut: 0,
+      payrollOut: 0,
+      totalPayrollOut: 0,
+      cashPayrollOut: 0,
+      checkPayrollOut: 0,
+      achPayrollOut: 0,
+    }
+  )
+}
+
+function sumReports(
+  reports: Array<EodReport & { tip_distributions?: TipDistribution[] }>,
+  cashEntries: CashBalanceEntry[],
+  payrollSummary: ReturnType<typeof summarizePayrollRuns>,
+  estimatedWageSpend: number,
+  hasSavedPayroll: boolean
+): MetricTotals {
+  const actualTipOut = hasSavedPayroll ? payrollSummary.tipOut : sumTipDistributions(reports)
+  const payrollOut = hasSavedPayroll ? payrollSummary.payrollOut : estimatedWageSpend
+  const totalPayrollOut = hasSavedPayroll ? payrollSummary.totalPayrollOut : estimatedWageSpend + actualTipOut
   const base = reports.reduce<MetricTotals>((sum, report) => ({
     net: sum.net + getNetRevenue(report),
-    tips: sum.tips + Number(report.tip_total ?? 0),
-    wages: sum.wages,
+    collectedTip: sum.collectedTip + Number(report.tip_total ?? 0),
+    tipOut: actualTipOut,
+    payrollOut,
+    totalPayrollOut,
+    cashPayrollOut: payrollSummary.cashPayrollOut,
+    checkPayrollOut: payrollSummary.checkPayrollOut,
+    achPayrollOut: payrollSummary.achPayrollOut,
     tax: sum.tax + Number(report.sales_tax ?? 0),
     cashFlow: sum.cashFlow,
     cash: sum.cash + Number(report.cash_total ?? 0),
@@ -123,8 +182,13 @@ function sumReports(reports: EodReport[], cashEntries: CashBalanceEntry[], wageS
     delivery: sum.delivery + Number(report.delivery_order_amount ?? 0),
   }), {
     net: 0,
-    tips: 0,
-    wages: 0,
+    collectedTip: 0,
+    tipOut: actualTipOut,
+    payrollOut,
+    totalPayrollOut,
+    cashPayrollOut: payrollSummary.cashPayrollOut,
+    checkPayrollOut: payrollSummary.checkPayrollOut,
+    achPayrollOut: payrollSummary.achPayrollOut,
     tax: 0,
     cashFlow: 0,
     cash: 0,
@@ -136,7 +200,7 @@ function sumReports(reports: EodReport[], cashEntries: CashBalanceEntry[], wageS
     sum + (entry.entry_type === 'cash_in' ? Number(entry.amount ?? 0) : Number(entry.amount ?? 0) * -1)
   ), 0)
 
-  return { ...base, wages: wageSpend, cashFlow }
+  return { ...base, cashFlow }
 }
 
 function getPayrollRunTotal(run: Pick<PayrollRun, 'total_cash' | 'total_check' | 'total_ach'>) {
@@ -189,10 +253,10 @@ function getBucketLabel(bucketKey: string, period: DashboardPeriod, rangeLength:
 
 function buildSeries(
   dates: string[],
-  reportsByDate: Map<string, EodReport>,
+  reportsByDate: Map<string, EodReport & { tip_distributions?: TipDistribution[] }>,
   closedDays: number[],
   period: DashboardPeriod,
-  valueGetter: (report: EodReport) => number
+  valueGetter: (report: EodReport & { tip_distributions?: TipDistribution[] }) => number
 ) {
   const rangeLength = dates.length
   const bucketMap = new Map<string, SeriesPoint>()
@@ -212,6 +276,18 @@ function buildSeries(
   }
 
   return [...bucketMap.values()]
+}
+
+function buildPayrollRunSeries(
+  runs: Array<PayrollRun & { payroll_run_items?: PayrollRunItem[] }>,
+  valueGetter: (summary: ReturnType<typeof summarizePayrollRuns>) => number
+) {
+  return runs.map(run => ({
+    label: run.pay_date,
+    date: run.pay_date,
+    value: valueGetter(summarizePayrollRuns([run])),
+    closed: false,
+  }))
 }
 
 function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color?: string }) {
@@ -474,12 +550,8 @@ export default function ReportingDashboardPage() {
     () => getEstimatedWageSpendForRange(clockRecords, employeeById, previousStartDate, previousEndDate),
     [clockRecords, employeeById, previousEndDate, previousStartDate]
   )
-  const currentWageSpend = hasCurrentSavedPayroll
-    ? currentPayrollRuns.reduce((sum, run) => sum + getPayrollRunTotal(run), 0)
-    : estimatedCurrentWageSpend
-  const previousWageSpend = hasPreviousSavedPayroll
-    ? previousPayrollRuns.reduce((sum, run) => sum + getPayrollRunTotal(run), 0)
-    : estimatedPreviousWageSpend
+  const currentPayrollSummary = useMemo(() => summarizePayrollRuns(currentPayrollRuns), [currentPayrollRuns])
+  const previousPayrollSummary = useMemo(() => summarizePayrollRuns(previousPayrollRuns), [previousPayrollRuns])
   const yearlyMonthlyOverview = useMemo(() => {
     const yearStart = startOfYear(new Date())
 
@@ -490,17 +562,16 @@ export default function ReportingDashboardPage() {
       const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
       const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd)
       const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
-      const savedPayroll = monthPayrollRuns.reduce((sum, run) => sum + getPayrollRunTotal(run), 0)
+      const monthPayrollSummary = summarizePayrollRuns(monthPayrollRuns)
+      const savedPayroll = monthPayrollSummary.totalPayrollOut
       const estimatedPayroll = getEstimatedWageSpendForRange(clockRecords, employeeById, monthStart, monthEnd)
       const revenue = monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0)
-      const tipOut = monthReports.reduce((sum, report) => sum + Number(report.tip_total ?? 0), 0)
 
       return {
         key: format(monthDate, 'yyyy-MM'),
         label: format(monthDate, 'MMM'),
         hasData: monthReports.length > 0 || monthPayrollRuns.length > 0 || monthClockRecords.length > 0,
         revenue,
-        tipOut,
         payroll: monthPayrollRuns.length > 0 ? savedPayroll : estimatedPayroll,
         source: monthPayrollRuns.length > 0 ? 'Worksheet' : 'Estimate',
       }
@@ -517,12 +588,16 @@ export default function ReportingDashboardPage() {
   }, [currentPayrollRuns])
 
   const currentTotals = useMemo(
-    () => sumReports(currentReports, currentCashEntries, currentWageSpend),
-    [currentCashEntries, currentReports, currentWageSpend]
+    () => sumReports(currentReports, currentCashEntries, currentPayrollSummary, estimatedCurrentWageSpend, hasCurrentSavedPayroll),
+    [currentCashEntries, currentPayrollSummary, currentReports, estimatedCurrentWageSpend, hasCurrentSavedPayroll]
+  )
+  const currentGrossRevenue = useMemo(
+    () => currentReports.reduce((sum, report) => sum + Number(report.revenue_total ?? 0), 0),
+    [currentReports]
   )
   const previousTotals = useMemo(
-    () => sumReports(previousReports, previousCashEntries, previousWageSpend),
-    [previousCashEntries, previousReports, previousWageSpend]
+    () => sumReports(previousReports, previousCashEntries, previousPayrollSummary, estimatedPreviousWageSpend, hasPreviousSavedPayroll),
+    [estimatedPreviousWageSpend, hasPreviousSavedPayroll, previousCashEntries, previousPayrollSummary, previousReports]
   )
   const reportsByDate = useMemo(
     () => new Map(currentReports.map(report => [report.session_date, report])),
@@ -548,9 +623,15 @@ export default function ReportingDashboardPage() {
     () => buildSeries(currentDates, reportsByDate, closedDays, period, getNetRevenue),
     [closedDays, currentDates, period, reportsByDate]
   )
-  const tipsSeries = useMemo(
+  const collectedTipSeries = useMemo(
     () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.tip_total ?? 0)),
     [closedDays, currentDates, period, reportsByDate]
+  )
+  const tipOutSeries = useMemo(
+    () => hasCurrentSavedPayroll
+      ? buildPayrollRunSeries(currentPayrollRuns, summary => summary.tipOut)
+      : buildSeries(currentDates, reportsByDate, closedDays, period, report => sumTipDistributions([report])),
+    [closedDays, currentDates, currentPayrollRuns, hasCurrentSavedPayroll, period, reportsByDate]
   )
   const taxSeries = useMemo(
     () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.sales_tax ?? 0)),
@@ -568,14 +649,9 @@ export default function ReportingDashboardPage() {
     () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.delivery_order_amount ?? 0)),
     [closedDays, currentDates, period, reportsByDate]
   )
-  const wagesSeries = useMemo(() => {
+  const payrollOutSeries = useMemo(() => {
     if (hasCurrentSavedPayroll) {
-      return currentPayrollRuns.map(run => ({
-        label: run.pay_date,
-        date: run.pay_date,
-        value: Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0),
-        closed: false,
-      }))
+      return buildPayrollRunSeries(currentPayrollRuns, summary => summary.payrollOut)
     }
     const rangeLength = currentDates.length
     const bucketMap = new Map<string, SeriesPoint>()
@@ -599,6 +675,30 @@ export default function ReportingDashboardPage() {
     }
     return [...bucketMap.values()]
   }, [clockRecords, closedDays, currentDates, currentPayrollRuns, employeeById, hasCurrentSavedPayroll, period])
+  const totalPayrollOutSeries = useMemo(() => {
+    if (hasCurrentSavedPayroll) {
+      return buildPayrollRunSeries(currentPayrollRuns, summary => summary.totalPayrollOut)
+    }
+    const tipOutByDate = new Map(
+      currentReports.map(report => [report.session_date, sumTipDistributions([report])])
+    )
+    return payrollOutSeries.map(point => ({
+      ...point,
+      value: point.value + (tipOutByDate.get(point.date) ?? 0),
+    }))
+  }, [currentPayrollRuns, currentReports, hasCurrentSavedPayroll, payrollOutSeries])
+  const cashPayrollOutSeries = useMemo(
+    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.cashPayrollOut),
+    [currentPayrollRuns]
+  )
+  const checkPayrollOutSeries = useMemo(
+    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.checkPayrollOut),
+    [currentPayrollRuns]
+  )
+  const achPayrollOutSeries = useMemo(
+    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.achPayrollOut),
+    [currentPayrollRuns]
+  )
   const cashFlowSeries = useMemo(() => {
     const rangeLength = currentDates.length
     const bucketMap = new Map<string, SeriesPoint>()
@@ -620,16 +720,21 @@ export default function ReportingDashboardPage() {
   }, [closedDays, currentCashEntries, currentDates, period])
 
   const metricCards = [
-    { key: 'tips' as const, label: 'Tips', value: currentTotals.tips, previous: previousTotals.tips, points: tipsSeries, color: '#16a34a', icon: DollarSign },
-    { key: 'wages' as const, label: 'Wages Spend', value: currentTotals.wages, previous: previousTotals.wages, points: wagesSeries, color: '#7c3aed', icon: Wallet },
-    { key: 'tax' as const, label: 'Tax', value: currentTotals.tax, previous: previousTotals.tax, points: taxSeries, color: '#dc2626', icon: ReceiptText },
-    { key: 'cashFlow' as const, label: 'Cash In / Out', value: currentTotals.cashFlow, previous: previousTotals.cashFlow, points: cashFlowSeries, color: '#0891b2', icon: Banknote },
     { key: 'cash' as const, label: 'Cash Sales', value: currentTotals.cash, previous: previousTotals.cash, points: cashSeries, color: '#0f766e', icon: Banknote },
     { key: 'card' as const, label: 'Credit Card', value: currentTotals.card, previous: previousTotals.card, points: cardSeries, color: '#2563eb', icon: CreditCard },
-    { key: 'delivery' as const, label: 'Delivery Sales', value: currentTotals.delivery, previous: previousTotals.delivery, points: deliverySeries, color: '#f97316', icon: Truck },
+    { key: 'delivery' as const, label: 'Delivery', value: currentTotals.delivery, previous: previousTotals.delivery, points: deliverySeries, color: '#f97316', icon: Truck },
+    { key: 'tax' as const, label: 'Tax', value: currentTotals.tax, previous: previousTotals.tax, points: taxSeries, color: '#dc2626', icon: ReceiptText },
+    { key: 'collectedTip' as const, label: 'Collected Tip', value: currentTotals.collectedTip, previous: previousTotals.collectedTip, points: collectedTipSeries, color: '#16a34a', icon: DollarSign },
+    { key: 'tipOut' as const, label: 'Tip Out', value: currentTotals.tipOut, previous: previousTotals.tipOut, points: tipOutSeries, color: '#059669', icon: DollarSign },
+    { key: 'payrollOut' as const, label: 'Payroll Out', value: currentTotals.payrollOut, previous: previousTotals.payrollOut, points: payrollOutSeries, color: '#7c3aed', icon: Wallet },
+    { key: 'totalPayrollOut' as const, label: 'Total Payroll Out', value: currentTotals.totalPayrollOut, previous: previousTotals.totalPayrollOut, points: totalPayrollOutSeries, color: '#6d28d9', icon: Wallet },
+    { key: 'cashPayrollOut' as const, label: 'Cash Payroll Out', value: currentTotals.cashPayrollOut, previous: previousTotals.cashPayrollOut, points: cashPayrollOutSeries, color: '#0f766e', icon: Banknote },
+    { key: 'checkPayrollOut' as const, label: 'Check Payroll Out', value: currentTotals.checkPayrollOut, previous: previousTotals.checkPayrollOut, points: checkPayrollOutSeries, color: '#475569', icon: ReceiptText },
+    { key: 'achPayrollOut' as const, label: 'ACH Payroll', value: currentTotals.achPayrollOut, previous: previousTotals.achPayrollOut, points: achPayrollOutSeries, color: '#2563eb', icon: CreditCard },
+    { key: 'cashFlow' as const, label: 'Cash In / Out', value: currentTotals.cashFlow, previous: previousTotals.cashFlow, points: cashFlowSeries, color: '#0891b2', icon: Banknote },
   ]
   const mixTotal = currentTotals.cash + currentTotals.card + currentTotals.delivery
-  const payrollRatio = currentTotals.net > 0 ? (currentTotals.wages / currentTotals.net) * 100 : null
+  const payrollRatio = currentTotals.net > 0 ? (currentTotals.totalPayrollOut / currentTotals.net) * 100 : null
 
   return (
     <div className="p-6">
@@ -711,24 +816,20 @@ export default function ReportingDashboardPage() {
             <p className="text-xs font-medium uppercase text-muted-foreground">Current Year Monthly Overview</p>
             <h2 className="text-lg font-semibold text-slate-950">{format(new Date(), 'yyyy')} revenue and payroll</h2>
           </div>
-          <Badge variant="outline">Rev / Tips / Payroll</Badge>
+          <Badge variant="outline">Rev / Payroll</Badge>
         </div>
         {yearlyMonthlyOverview.length > 0 ? (
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {yearlyMonthlyOverview.map(month => (
-              <div key={month.key} className="rounded-lg border bg-slate-50 px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-slate-900">{month.label}</span>
-                  <span className="text-[10px] uppercase text-slate-400">{month.source}</span>
+              <div key={month.key} className="rounded-lg border bg-slate-50 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2 leading-none">
+                  <span className="text-xs font-semibold text-slate-900">{month.label}</span>
+                  <span className="text-[9px] uppercase text-slate-400">{month.source}</span>
                 </div>
-                <div className="mt-1 grid grid-cols-3 gap-2 text-xs">
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] leading-tight">
                   <div>
                     <div className="text-slate-400">Rev</div>
                     <div className="font-semibold text-slate-900">{formatCurrency(month.revenue)}</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-400">Tip Out</div>
-                    <div className="font-semibold text-emerald-700">{formatCurrency(month.tipOut)}</div>
                   </div>
                   <div>
                     <div className="text-slate-400">Payroll</div>
@@ -747,11 +848,16 @@ export default function ReportingDashboardPage() {
 
       <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]">
         <div>
-          <div className="mb-4 grid gap-4 md:grid-cols-3">
+          <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-xl border bg-white p-4">
               <p className="text-xs font-medium uppercase text-muted-foreground">Actual Net Revenue</p>
               <p className="mt-1 text-3xl font-semibold text-slate-950">{formatCurrency(currentTotals.net)}</p>
               <p className="mt-2 text-xs text-muted-foreground">{currentReports.length} EOD reports in range</p>
+            </div>
+            <div className="rounded-xl border bg-white p-4">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Gross Revenue</p>
+              <p className="mt-1 text-3xl font-semibold text-emerald-700">{formatCurrency(currentGrossRevenue)}</p>
+              <p className="mt-2 text-xs text-muted-foreground">Cash + credit + tax + tips collected</p>
             </div>
             <div className="rounded-xl border bg-white p-4">
               <p className="text-xs font-medium uppercase text-muted-foreground">Projected Close</p>
@@ -784,13 +890,13 @@ export default function ReportingDashboardPage() {
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border bg-emerald-50 p-3">
-              <div className="text-xs font-medium uppercase text-emerald-700">Tip Out</div>
-              <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(currentTotals.tips)}</div>
+              <div className="text-xs font-medium uppercase text-emerald-700">Collected Tip</div>
+              <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(currentTotals.collectedTip)}</div>
               <div className="mt-0.5 text-[11px] text-emerald-700">Current range</div>
             </div>
             <div className="rounded-lg border bg-violet-50 p-3">
-              <div className="text-xs font-medium uppercase text-violet-700">Payroll</div>
-              <div className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(currentTotals.wages)}</div>
+              <div className="text-xs font-medium uppercase text-violet-700">Total Payroll Out</div>
+              <div className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(currentTotals.totalPayrollOut)}</div>
               <div className="mt-0.5 text-[11px] text-violet-700">{hasCurrentSavedPayroll ? 'Saved worksheet' : 'Clock estimate'}</div>
             </div>
             <div className="rounded-lg border bg-slate-50 p-3">
