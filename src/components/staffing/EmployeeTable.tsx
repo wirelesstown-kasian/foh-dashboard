@@ -78,7 +78,7 @@ const EMPTY_FORM: FormState = {
   meal_break_threshold_hours: '7.5',
   commission_enabled: false,
   commission_note: '',
-  payment_method: DEFAULT_PAYMENT_METHOD,
+  payment_method: '',
   birth_date: '',
   pin: '',
   login_enabled: 'disabled',
