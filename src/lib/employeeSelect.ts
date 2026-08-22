@@ -83,9 +83,9 @@ export function withMealBreakThresholdHours<T extends object>(employees: T[]) {
 export function withPaymentMethod<T extends object>(employees: T[]) {
   return employees.map(employee => ({
     ...employee,
-    payment_method: 'payment_method' in employee
-      ? (employee.payment_method as string | null)
-      : null,
+    payment_method: 'payment_method' in employee && employee.payment_method
+      ? (employee.payment_method as string)
+      : 'cash',
   }))
 }
 

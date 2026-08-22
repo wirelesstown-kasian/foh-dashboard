@@ -300,13 +300,6 @@ export default function WageWorksheetPage() {
     setRows(currentRows => currentRows.filter(row => row.employee_id !== employeeId))
   }
 
-  const applyPaymentMethodToAllRows = (paymentMethod: PaymentMethod) => {
-    setRows(currentRows => sortPayrollRows(currentRows.map(row => {
-      const next = { ...row, payment_method: paymentMethod }
-      return { ...next, ...calculatePayrollAmounts(next) }
-    })))
-  }
-
   const addEmployee = () => {
     const employee = employees.find(item => item.id === employeeToAdd)
     if (!employee) return
@@ -608,7 +601,6 @@ export default function WageWorksheetPage() {
               </Select>
             </div>
             <Button variant="outline" onClick={addEmployee} disabled={!employeeToAdd}>Add</Button>
-            <Button variant="outline" onClick={() => applyPaymentMethodToAllRows('cash')} disabled={rows.length === 0}>Set All Cash</Button>
             <Button
               onClick={() => setConfirmOpen(true)}
               disabled={rows.length === 0 || missingPaymentRows.length > 0}

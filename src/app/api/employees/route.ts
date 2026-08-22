@@ -23,6 +23,7 @@ import {
   withScheduleDepartments,
   withTipPoolHourlyRate,
 } from '@/lib/employeeSelect'
+import { DEFAULT_PAYMENT_METHOD } from '@/lib/payroll'
 
 const EMPLOYEE_ADMIN_SELECT = `${EMPLOYEE_PUBLIC_SELECT}, pin_code`
 const EMPLOYEE_ADMIN_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD = `${EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD}, pin_code`
@@ -70,6 +71,11 @@ async function getValidScheduleDepartments(scheduleDepartments: unknown) {
 function normalizePaymentMethod(paymentMethod: unknown): PaymentMethod | null {
   if (paymentMethod !== 'cash' && paymentMethod !== 'check' && paymentMethod !== 'ach') return null
   return paymentMethod
+}
+
+function getPaymentMethodOrDefault(paymentMethod: unknown): PaymentMethod | null {
+  if (paymentMethod === null || paymentMethod === undefined || paymentMethod === '') return DEFAULT_PAYMENT_METHOD
+  return normalizePaymentMethod(paymentMethod)
 }
 
 function withoutTipPoolHourlyRate<T extends { tip_pool_hourly_rate?: unknown }>(payload: T) {
@@ -370,8 +376,8 @@ export async function POST(req: NextRequest) {
   if (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0) {
     return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
-  const paymentMethod = normalizePaymentMethod(payment_method)
-  if (payment_method && !paymentMethod) {
+  const paymentMethod = getPaymentMethodOrDefault(payment_method)
+  if (!paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
   if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
@@ -469,8 +475,8 @@ export async function PATCH(req: NextRequest) {
   if (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0) {
     return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
-  const paymentMethod = normalizePaymentMethod(payment_method)
-  if (payment_method && !paymentMethod) {
+  const paymentMethod = getPaymentMethodOrDefault(payment_method)
+  if (!paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
   if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
@@ -491,7 +497,7 @@ export async function PATCH(req: NextRequest) {
     meal_break_threshold_hours: number
     commission_enabled: boolean
     commission_note: string | null
-    payment_method: PaymentMethod | null
+    payment_method: PaymentMethod
     birth_date: string | null
     login_enabled: boolean
     pin_hash?: string

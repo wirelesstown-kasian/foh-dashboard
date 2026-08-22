@@ -18,7 +18,7 @@ import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleEmployee } from '@/lib/tipEligibility'
-import { DEFAULT_PAYMENT_METHOD, paymentMethodLabel } from '@/lib/payroll'
+import { paymentMethodLabel } from '@/lib/payroll'
 import type { Employee, PaymentMethod } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
@@ -447,7 +447,7 @@ export default function WageReportPage() {
           totalEarnings,
           tipRate: hours > 0 ? tips / hours : null,
           effectiveRate: hours > 0 ? totalEarnings / hours : null,
-          paymentMethod: emp.payment_method ?? DEFAULT_PAYMENT_METHOD,
+          paymentMethod: getReportPaymentMethod(emp.payment_method),
           hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
           hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
           hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),

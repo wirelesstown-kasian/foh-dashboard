@@ -32,6 +32,7 @@ import { isBirthdayToday } from '@/lib/dateUtils'
 import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 import { useAppSettings } from '@/components/useAppSettings'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
+import { DEFAULT_PAYMENT_METHOD } from '@/lib/payroll'
 
 interface FormState {
   first_name: string
@@ -77,7 +78,7 @@ const EMPTY_FORM: FormState = {
   meal_break_threshold_hours: '7.5',
   commission_enabled: false,
   commission_note: '',
-  payment_method: '',
+  payment_method: DEFAULT_PAYMENT_METHOD,
   birth_date: '',
   pin: '',
   login_enabled: 'disabled',
@@ -217,7 +218,7 @@ export function EmployeeTable() {
       meal_break_threshold_hours: String(emp.meal_break_threshold_hours ?? 7.5),
       commission_enabled: emp.commission_enabled === true,
       commission_note: emp.commission_note ?? '',
-      payment_method: emp.payment_method ?? '',
+      payment_method: emp.payment_method ?? DEFAULT_PAYMENT_METHOD,
       birth_date: emp.birth_date ?? '',
       pin: '',
       login_enabled: emp.login_enabled ? 'enabled' : 'disabled',
@@ -233,6 +234,10 @@ export function EmployeeTable() {
     if (!name) return
     if (form.schedule_departments.length === 0) {
       setSaveError('Select at least one schedule department')
+      return
+    }
+    if (!form.payment_method) {
+      setSaveError('Select cash, check, or ACH payment method')
       return
     }
     if (form.tip_cap_enabled && !form.tip_pool_hourly_rate.trim()) {
@@ -332,6 +337,7 @@ export function EmployeeTable() {
     (!editTarget || !resetPinMode || /^\d{4}$/.test(form.pin)) &&
     (Boolean(editTarget) || /^\d{4}$/.test(form.pin)) &&
     form.schedule_departments.length > 0 &&
+    Boolean(form.payment_method) &&
     (!form.tip_cap_enabled || Boolean(form.tip_pool_hourly_rate.trim())) &&
     (!form.guaranteed_enabled || Boolean(form.guaranteed_hourly.trim())) &&
     (!form.commission_enabled || Boolean(form.commission_note.trim())) &&
@@ -563,7 +569,7 @@ export function EmployeeTable() {
                 </Select>
               </div>
               <div>
-                <Label>Paid By</Label>
+                <Label>Paid By *</Label>
                 <Select value={form.payment_method || undefined} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
                   <SelectTrigger className="w-full">
                     <span className={form.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(form.payment_method || null)}</span>
