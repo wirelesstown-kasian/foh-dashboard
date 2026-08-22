@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { calculateTips } from '@/lib/tipCalc'
@@ -56,6 +56,7 @@ type WageSummaryRow = {
   effectiveRate: number | null
   hasAutoClockOut: boolean
   hasOpenClock: boolean
+  hasMissingMealBreak: boolean
 }
 
 type DailyTipPreview = {
@@ -390,6 +391,9 @@ export default function WageReportPage() {
             is_active: true,
             created_at: item.created_at,
           }
+          const matchingClocks = clockRecords.filter(
+            record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate
+          )
           return {
             emp,
             hours: Number(item.hours ?? 0),
@@ -403,6 +407,7 @@ export default function WageReportPage() {
             effectiveRate: Number(item.hours ?? 0) > 0 ? Number(item.payout_amount ?? item.net_pay ?? 0) / Number(item.hours ?? 0) : null,
             hasAutoClockOut: item.has_auto_clock_out,
             hasOpenClock: item.has_open_clock,
+            hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
           }
         })
     }
@@ -432,6 +437,7 @@ export default function WageReportPage() {
           effectiveRate: hours > 0 ? totalEarnings / hours : null,
           hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
           hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
+          hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
         }
       })
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
@@ -617,6 +623,8 @@ export default function WageReportPage() {
                     <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge>
                   ) : row.hasAutoClockOut ? (
                     <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge>
+                  ) : row.hasMissingMealBreak ? (
+                    <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Break Audit</Badge>
                   ) : (
                     <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>
                   )}

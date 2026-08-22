@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
+import { isClockOnMealBreak } from '@/lib/clockUtils'
 
 interface Props {
   schedules: Schedule[]
@@ -15,9 +16,10 @@ interface Props {
 
 const CLOCK_IN_TITLE = 'Clock In'
 const CLOCK_OUT_TITLE = 'Clock Out'
+const MEAL_BREAK_TITLE = 'Meal Break (30 min)'
 
 export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Props) {
-  const [target, setTarget] = useState<'clock_in' | 'clock_out' | null>(null)
+  const [target, setTarget] = useState<'clock_in' | 'clock_out' | 'start_break' | 'end_break' | null>(null)
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -38,6 +40,14 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
   }, [schedules, today])
 
   const openClockCount = clockRecords.filter(record => !record.clock_out_at).length
+  const activeBreakCount = clockRecords.filter(record => !record.clock_out_at && isClockOnMealBreak(record)).length
+  const breakButtonLabel = activeBreakCount > 0 ? 'End Break' : MEAL_BREAK_TITLE
+
+  const openDialog = (nextTarget: NonNullable<typeof target>) => {
+    setTarget(nextTarget)
+    setError(null)
+    setPin('')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -51,7 +61,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
       setCameraReady(false)
     }
 
-    if (!target) {
+    if (!target || (target !== 'clock_in' && target !== 'clock_out')) {
       stopCamera()
       return
     }
@@ -108,8 +118,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
       return
     }
 
-    const photo = skipPhoto ? null : captureFrame()
-    if (!skipPhoto && !photo) {
+    const needsPhoto = target === 'clock_in' || target === 'clock_out'
+    const photo = skipPhoto || !needsPhoto ? null : captureFrame()
+    if (!skipPhoto && needsPhoto && !photo) {
       setError('Camera preview is not ready yet')
       return
     }
@@ -127,8 +138,14 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
           skip_photo: skipPhoto,
         }),
       })
-      const data = (await res.json().catch(() => ({}))) as { error?: string }
-      if (!res.ok) throw new Error(data.error ?? 'Failed to save clock event')
+      const data = (await res.json().catch(() => ({}))) as { error?: string; available_at?: string }
+      if (!res.ok) {
+        if (data.available_at) {
+          const available = new Date(data.available_at)
+          throw new Error(`${data.error ?? 'Meal break is not complete yet'} You can clock back in at ${available.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.`)
+        }
+        throw new Error(data.error ?? 'Failed to save clock event')
+      }
 
       setTarget(null)
       setPin('')
@@ -147,9 +164,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
           size="sm"
           className="h-9 bg-emerald-600 px-4 text-sm font-semibold hover:bg-emerald-700"
           onClick={() => {
-            setTarget('clock_in')
-            setError(null)
-            setPin('')
+            openDialog('clock_in')
           }}
         >
           {CLOCK_IN_TITLE}
@@ -159,16 +174,29 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
           variant="outline"
           className="h-9 px-4 text-sm font-semibold"
           onClick={() => {
-            setTarget('clock_out')
-            setError(null)
-            setPin('')
+            openDialog('clock_out')
           }}
         >
           {CLOCK_OUT_TITLE}
         </Button>
+        <Button
+          size="sm"
+          variant={activeBreakCount > 0 ? 'default' : 'outline'}
+          className="h-9 px-4 text-sm font-semibold"
+          onClick={() => {
+            openDialog(activeBreakCount > 0 ? 'end_break' : 'start_break')
+          }}
+        >
+          {breakButtonLabel}
+        </Button>
         {openClockCount > 0 && (
           <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
             {openClockCount} clocked in
+          </span>
+        )}
+        {activeBreakCount > 0 && (
+          <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
+            {activeBreakCount} on break
           </span>
         )}
       </div>
@@ -185,28 +213,39 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{target === 'clock_out' ? 'Clock Out With Photo' : 'Clock In With Photo'}</DialogTitle>
+            <DialogTitle>
+              {target === 'clock_out'
+                ? 'Clock Out With Photo'
+                : target === 'clock_in'
+                  ? 'Clock In With Photo'
+                  : target === 'end_break'
+                    ? 'End Meal Break'
+                    : 'Start Meal Break'}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              {target === 'clock_in'
-                ? `First shift starts at ${firstShift ? formatTime(firstShift.schedule.start_time) : '—'}`
-                : `Final shift ends at ${lastShift ? formatTime(lastShift.schedule.end_time) : '—'}`}
+              {target === 'clock_in' && `First shift starts at ${firstShift ? formatTime(firstShift.schedule.start_time) : '—'}`}
+              {target === 'clock_out' && `Final shift ends at ${lastShift ? formatTime(lastShift.schedule.end_time) : '—'}`}
+              {target === 'start_break' && 'Start a 30 minute meal break. You must end the break before clocking out.'}
+              {target === 'end_break' && 'Enter your PIN to end break and resume your shift.'}
             </div>
-            <div className="mx-auto w-[180px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-900 shadow-sm">
-              <div className="flex h-[220px] items-center justify-center">
-                <video
-                  ref={videoRef}
-                  muted
-                  playsInline
-                  autoPlay
-                  className="h-full w-full object-cover"
-                />
+            {(target === 'clock_in' || target === 'clock_out') && (
+              <div className="mx-auto w-[180px] overflow-hidden rounded-2xl border border-slate-300 bg-slate-900 shadow-sm">
+                <div className="flex h-[220px] items-center justify-center">
+                  <video
+                    ref={videoRef}
+                    muted
+                    playsInline
+                    autoPlay
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="border-t border-slate-700 bg-slate-950 px-3 py-2 text-center text-xs text-slate-200">
+                  {cameraReady ? 'Front camera ready' : 'Starting camera…'}
+                </div>
               </div>
-              <div className="border-t border-slate-700 bg-slate-950 px-3 py-2 text-center text-xs text-slate-200">
-                {cameraReady ? 'Front camera ready' : 'Starting camera…'}
-              </div>
-            </div>
+            )}
             <div className="space-y-2">
               <label className="text-sm font-medium">PIN</label>
               <input
@@ -224,8 +263,16 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh }: Prop
                 {error}
               </div>
             )}
-            <Button className="w-full" onClick={() => void handleSubmit(false)} disabled={submitting || !cameraReady}>
-              {submitting ? 'Saving…' : target === 'clock_out' ? CLOCK_OUT_TITLE : CLOCK_IN_TITLE}
+            <Button className="w-full" onClick={() => void handleSubmit(false)} disabled={submitting || ((target === 'clock_in' || target === 'clock_out') && !cameraReady)}>
+              {submitting
+                ? 'Saving…'
+                : target === 'clock_out'
+                  ? CLOCK_OUT_TITLE
+                  : target === 'clock_in'
+                    ? CLOCK_IN_TITLE
+                    : target === 'end_break'
+                      ? 'End Break'
+                      : MEAL_BREAK_TITLE}
             </Button>
             {target === 'clock_in' && (
               <Button

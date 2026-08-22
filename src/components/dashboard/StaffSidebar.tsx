@@ -26,19 +26,11 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
 
   const businessDate = getBusinessDate()
   const staffOnToday = useMemo(() => {
-    const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
-    const clockActivityEmployeeIds = new Set(clockRecords.map(record => record.employee_id))
-    const staffIds = Array.from(new Set([...scheduledEmployeeIds, ...clockActivityEmployeeIds]))
-
-    return staffIds.map((employeeId): StaffEntry | null => {
-      const employee = employees.find(item => item.id === employeeId)
+    const scheduledEntries = schedules.map((schedule): StaffEntry | null => {
+      const employee = employees.find(item => item.id === schedule.employee_id) ?? schedule.employee ?? null
       if (!employee) return null
-      const employeeSchedules = schedules
-        .filter(item => item.employee_id === employeeId)
-        .sort((a, b) => a.start_time.localeCompare(b.start_time))
-      const schedule = employeeSchedules[0] ?? null
       const record = [...clockRecords]
-        .filter(item => item.employee_id === employeeId)
+        .filter(item => item.employee_id === schedule.employee_id)
         .sort((a, b) => {
           if (!a.clock_out_at && b.clock_out_at) return -1
           if (a.clock_out_at && !b.clock_out_at) return 1
@@ -47,6 +39,31 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
       const department = schedule?.department ?? getFallbackScheduleDepartment(employee)
       return { employee, schedule, record, department }
     }).filter((entry): entry is StaffEntry => entry !== null)
+
+    const scheduledEmployeeIds = new Set(schedules.map(schedule => schedule.employee_id))
+    const clockOnlyEntries = Array.from(new Set(
+      clockRecords
+        .filter(record => !scheduledEmployeeIds.has(record.employee_id))
+        .map(record => record.employee_id)
+    )).map((employeeId): StaffEntry | null => {
+      const employee = employees.find(item => item.id === employeeId)
+      if (!employee) return null
+      const record = [...clockRecords]
+        .filter(item => item.employee_id === employeeId)
+        .sort((a, b) => {
+          if (!a.clock_out_at && b.clock_out_at) return -1
+          if (a.clock_out_at && !b.clock_out_at) return 1
+          return b.clock_in_at.localeCompare(a.clock_in_at)
+        })[0] ?? null
+      return {
+        employee,
+        schedule: null,
+        record,
+        department: getFallbackScheduleDepartment(employee),
+      }
+    }).filter((entry): entry is StaffEntry => entry !== null)
+
+    return [...scheduledEntries, ...clockOnlyEntries]
   }, [clockRecords, employees, schedules])
 
   const groupedStaff = useMemo(() => {

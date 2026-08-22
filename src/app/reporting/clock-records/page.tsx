@@ -14,13 +14,13 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportDepartment, ReportPeriod, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { calculateClockHours, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { calculateClockHours, getEffectiveClockHours, getMealBreakThresholdHours, isClockPending, shouldWarnMissingMealBreak } from '@/lib/clockUtils'
 import { Employee, ShiftClock } from '@/lib/types'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { supabase } from '@/lib/supabase'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
-import { Plus } from 'lucide-react'
+import { AlertTriangle, Plus } from 'lucide-react'
 
 type ClockEditState = {
   sessionDate: string
@@ -65,11 +65,15 @@ function getEmployeeNameById(employees: Employee[], employeeId: string) {
 }
 
 function getClockRecordEmployeeName(record: ShiftClock, employees: Employee[]) {
+  return getClockRecordEmployee(record, employees)?.name ?? 'Unknown Staff'
+}
+
+function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
   const relatedEmployee = record.employee as Employee | Employee[] | undefined
   if (Array.isArray(relatedEmployee)) {
-    return relatedEmployee[0]?.name ?? getEmployeeNameById(employees, record.employee_id) ?? 'Unknown Staff'
+    return relatedEmployee[0] ?? employees.find(employee => employee.id === record.employee_id) ?? null
   }
-  return relatedEmployee?.name ?? getEmployeeNameById(employees, record.employee_id) ?? 'Unknown Staff'
+  return relatedEmployee ?? employees.find(employee => employee.id === record.employee_id) ?? null
 }
 
 export default function ClockRecordsPage() {
@@ -386,7 +390,9 @@ export default function ClockRecordsPage() {
           </TableHeader>
           <TableBody>
             {filteredClockRecords.map(record => {
-              const employeeName = getClockRecordEmployeeName(record, employees)
+              const employee = getClockRecordEmployee(record, employees)
+              const employeeName = employee?.name ?? 'Unknown Staff'
+              const missingBreakWarning = shouldWarnMissingMealBreak(record, employee)
               const currentEdit = clockEdits[record.id] ?? {
                 sessionDate: record.session_date,
                 clockIn: isoToTimeInput(record.clock_in_at),
@@ -413,9 +419,20 @@ export default function ClockRecordsPage() {
                   </TableCell>
                   <TableCell>{employeeName}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={record.auto_clock_out ? 'border-orange-300 bg-orange-50 text-orange-800' : record.clock_out_at ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>
-                      {record.auto_clock_out ? 'Auto Clock-Out' : record.clock_out_at ? 'Closed' : 'Open'}
-                    </Badge>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant="outline" className={record.auto_clock_out ? 'border-orange-300 bg-orange-50 text-orange-800' : record.clock_out_at ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>
+                        {record.auto_clock_out ? 'Auto Clock-Out' : record.clock_out_at ? 'Closed' : 'Open'}
+                      </Badge>
+                      {missingBreakWarning && (
+                        <Badge
+                          variant="outline"
+                          className="border-amber-300 bg-amber-50 text-amber-800"
+                          title={`${employeeName} worked ${getEffectiveClockHours(record).toFixed(2)} hours with no completed 30 minute meal break. Alert threshold: ${getMealBreakThresholdHours(employee).toFixed(2)} hours.`}
+                        >
+                          <AlertTriangle className="mr-1 h-3 w-3" /> Break Audit
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     {isEditing ? <Input type="time" value={currentEdit.clockIn} onChange={event => setClockEdits(prev => ({ ...prev, [record.id]: { ...currentEdit, clockIn: event.target.value } }))} className="ml-auto h-8 w-28 text-right" /> : format(new Date(record.clock_in_at), 'p')}

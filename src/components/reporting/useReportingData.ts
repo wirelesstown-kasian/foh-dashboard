@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, EodReport, PayrollRun, PayrollRunItem, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingAddressColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withPaymentMethod, withStaffingProfileFields, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD, isMissingAddressColumn, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withStaffingProfileFields, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const REPORTING_REFRESH_EVENT = 'reporting-data-refresh'
 
@@ -21,7 +21,13 @@ export function useEmployees({ includeArchived = false }: { includeArchived?: bo
       let query = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).order('name')
       if (!includeArchived) query = query.eq('is_active', true)
       const initial = await query
-      const res = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error) || isMissingAddressColumn(initial.error))
+      const res = initial.error && isMissingMealBreakThresholdColumn(initial.error)
+        ? await (() => {
+            let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD).order('name')
+            if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
+            return fallbackQuery
+          })()
+        : initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error) || isMissingAddressColumn(initial.error))
         ? await (() => {
             let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).order('name')
             if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
@@ -29,7 +35,7 @@ export function useEmployees({ includeArchived = false }: { includeArchived?: bo
           })()
         : initial
       if (!mounted) return
-      setEmployees(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(res.data ?? []))) as Employee[])
+      setEmployees(withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(res.data ?? [])))) as Employee[])
     })()
     return () => {
       mounted = false

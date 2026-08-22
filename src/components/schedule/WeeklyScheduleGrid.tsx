@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
 import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 interface WeeklyScheduleGridProps {
   department: ScheduleDepartment
@@ -39,12 +39,12 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     const endDate = formatDate(days[6])
     const loadEmployees = async () => {
       const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
-      const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error))
+      const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error) || isMissingMealBreakThresholdColumn(initial.error))
         ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
         : initial
       return {
         ...result,
-        data: withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate(result.data ?? []))) as Employee[],
+        data: withMealBreakThresholdHours(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate(result.data ?? [])))) as Employee[],
       }
     }
 

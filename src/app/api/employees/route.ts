@@ -11,10 +11,13 @@ import {
   EMPLOYEE_PUBLIC_SELECT,
   EMPLOYEE_PUBLIC_SELECT_FALLBACK,
   EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS,
+  EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD,
   isMissingAddressColumn,
+  isMissingMealBreakThresholdColumn,
   isMissingPaymentMethodColumn,
   isMissingScheduleDepartmentsColumn,
   isMissingTipPoolRateColumn,
+  withMealBreakThresholdHours,
   withStaffingProfileFields,
   withPaymentMethod,
   withScheduleDepartments,
@@ -22,6 +25,7 @@ import {
 } from '@/lib/employeeSelect'
 
 const EMPLOYEE_ADMIN_SELECT = `${EMPLOYEE_PUBLIC_SELECT}, pin_code`
+const EMPLOYEE_ADMIN_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD = `${EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD}, pin_code`
 
 async function requireAdmin() {
   const cookieStore = await cookies()
@@ -71,6 +75,12 @@ function normalizePaymentMethod(paymentMethod: unknown): PaymentMethod | null {
 function withoutTipPoolHourlyRate<T extends { tip_pool_hourly_rate?: unknown }>(payload: T) {
   const fallbackPayload: Partial<T> = { ...payload }
   delete fallbackPayload.tip_pool_hourly_rate
+  return fallbackPayload
+}
+
+function withoutMealBreakThresholdHours<T extends { meal_break_threshold_hours?: unknown }>(payload: T) {
+  const fallbackPayload: Partial<T> = { ...payload }
+  delete fallbackPayload.meal_break_threshold_hours
   return fallbackPayload
 }
 
@@ -187,7 +197,7 @@ async function writeEmployeeWithOptionalFallback(
 ) {
   let nextPayload = payload
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const result = operation === 'insert'
       ? await supabaseAdmin.from('employees').insert(nextPayload)
       : await supabaseAdmin.from('employees').update(nextPayload).eq('id', id)
@@ -206,6 +216,11 @@ async function writeEmployeeWithOptionalFallback(
 
     if (isMissingTipPoolRateColumn(result.error) && 'tip_pool_hourly_rate' in nextPayload) {
       nextPayload = withoutTipPoolHourlyRate(nextPayload)
+      continue
+    }
+
+    if (isMissingMealBreakThresholdColumn(result.error) && 'meal_break_threshold_hours' in nextPayload) {
+      nextPayload = withoutMealBreakThresholdHours(nextPayload)
       continue
     }
 
@@ -244,6 +259,16 @@ export async function GET() {
     const fallbackResult = await supabaseAdmin
       .from('employees')
       .select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS)
+      .eq('is_active', true)
+      .order('name')
+    data = fallbackResult.data as unknown[] | null
+    error = fallbackResult.error
+  }
+
+  if (error && isMissingMealBreakThresholdColumn(error)) {
+    const fallbackResult = await supabaseAdmin
+      .from('employees')
+      .select(EMPLOYEE_ADMIN_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD)
       .eq('is_active', true)
       .order('name')
     data = fallbackResult.data as unknown[] | null
@@ -294,7 +319,7 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ employees: withStaffingProfileFields(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[])))) })
+  return NextResponse.json({ employees: withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[]))))) })
 }
 
 export async function POST(req: NextRequest) {
@@ -302,7 +327,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
+  const { name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
@@ -332,6 +357,7 @@ export async function POST(req: NextRequest) {
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
   const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
+  const mealBreakThresholdHours = typeof meal_break_threshold_hours === 'number' ? meal_break_threshold_hours : typeof meal_break_threshold_hours === 'string' && meal_break_threshold_hours.trim() ? Number(meal_break_threshold_hours) : 7.5
   if (hourlyWage !== null && (Number.isNaN(hourlyWage) || hourlyWage < 0)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
@@ -340,6 +366,9 @@ export async function POST(req: NextRequest) {
   }
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
     return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
+  }
+  if (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0) {
+    return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
   const paymentMethod = normalizePaymentMethod(payment_method)
   if (!paymentMethod) {
@@ -371,6 +400,7 @@ export async function POST(req: NextRequest) {
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    meal_break_threshold_hours: mealBreakThresholdHours,
     commission_enabled: commission_enabled === true,
     commission_note: commission_enabled === true && typeof commission_note === 'string' && commission_note.trim() ? commission_note.trim() : null,
     payment_method: paymentMethod,
@@ -395,7 +425,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
+  const { id, name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -426,6 +456,7 @@ export async function PATCH(req: NextRequest) {
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
   const tipPoolHourlyRate = typeof tip_pool_hourly_rate === 'number' ? tip_pool_hourly_rate : typeof tip_pool_hourly_rate === 'string' && tip_pool_hourly_rate.trim() ? Number(tip_pool_hourly_rate) : null
+  const mealBreakThresholdHours = typeof meal_break_threshold_hours === 'number' ? meal_break_threshold_hours : typeof meal_break_threshold_hours === 'string' && meal_break_threshold_hours.trim() ? Number(meal_break_threshold_hours) : 7.5
   if (hourlyWage !== null && (Number.isNaN(hourlyWage) || hourlyWage < 0)) {
     return NextResponse.json({ error: 'Invalid hourly wage' }, { status: 400 })
   }
@@ -434,6 +465,9 @@ export async function PATCH(req: NextRequest) {
   }
   if (tipPoolHourlyRate !== null && (Number.isNaN(tipPoolHourlyRate) || tipPoolHourlyRate < 0)) {
     return NextResponse.json({ error: 'Invalid tip pool hourly rate' }, { status: 400 })
+  }
+  if (Number.isNaN(mealBreakThresholdHours) || mealBreakThresholdHours <= 0) {
+    return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
   const paymentMethod = normalizePaymentMethod(payment_method)
   if (!paymentMethod) {
@@ -454,6 +488,7 @@ export async function PATCH(req: NextRequest) {
     hourly_wage: number | null
     guaranteed_hourly: number | null
     tip_pool_hourly_rate: number | null
+    meal_break_threshold_hours: number
     commission_enabled: boolean
     commission_note: string | null
     payment_method: PaymentMethod
@@ -473,6 +508,7 @@ export async function PATCH(req: NextRequest) {
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    meal_break_threshold_hours: mealBreakThresholdHours,
     commission_enabled: commission_enabled === true,
     commission_note: commission_enabled === true && typeof commission_note === 'string' && commission_note.trim() ? commission_note.trim() : null,
     payment_method: paymentMethod,

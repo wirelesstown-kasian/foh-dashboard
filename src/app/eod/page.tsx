@@ -7,7 +7,7 @@ import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateU
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingTipPoolRateColumn, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 import { isTipEligibleEmployee } from '@/lib/tipEligibility'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -248,12 +248,12 @@ export default function EodPage() {
   const load = useCallback(async () => {
     const loadEmployees = async () => {
       const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
-      const result = initial.error && isMissingTipPoolRateColumn(initial.error)
+      const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingMealBreakThresholdColumn(initial.error))
         ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
         : initial
       return {
         ...result,
-        data: withTipPoolHourlyRate(result.data ?? []) as Employee[],
+        data: withMealBreakThresholdHours(withTipPoolHourlyRate(result.data ?? [])) as Employee[],
       }
     }
 

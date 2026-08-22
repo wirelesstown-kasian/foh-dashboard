@@ -20,7 +20,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronU
 import { useAppSettings } from '@/components/useAppSettings'
 import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 import type { EmailSettings } from '@/lib/appSettings'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 type ShiftDraft = {
   id?: string
@@ -303,12 +303,12 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const key = `${draftKey(days[0])}_${department}`
     const loadEmployees = async () => {
       const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true).order('name')
-      const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error))
+      const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error) || isMissingMealBreakThresholdColumn(initial.error))
         ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name')
         : initial
       return {
         ...result,
-        data: withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate(result.data ?? []))) as Employee[],
+        data: withMealBreakThresholdHours(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate(result.data ?? [])))) as Employee[],
       }
     }
 

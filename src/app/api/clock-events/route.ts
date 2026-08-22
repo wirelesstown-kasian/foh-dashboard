@@ -4,7 +4,7 @@ import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { CLOCK_PHOTO_BUCKET, calculateClockHours, dataUrlToArrayBuffer, getSessionCutoffIso } from '@/lib/clockUtils'
+import { CLOCK_PHOTO_BUCKET, calculateClockHours, calculateClockHoursAfterBreak, dataUrlToArrayBuffer, getClockBreakMinutes, getMealBreakState, getSessionCutoffIso, setMealBreakManagerNote } from '@/lib/clockUtils'
 import { ShiftClock } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -46,6 +46,8 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/heic': 'heic',
   'image/heif': 'heif',
 }
+
+const MEAL_BREAK_MINUTES = 30
 
 function getPhotoExtension(dataUrl: string): string {
   const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/)
@@ -268,7 +270,7 @@ export async function POST(req: NextRequest) {
   await processOverdueClockRecords()
 
   const payload = await req.json() as {
-    action?: 'clock_in' | 'clock_out' | 'manual_add'
+    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break'
     pin?: string
     session_date?: string
     employee_id?: string
@@ -312,6 +314,69 @@ export async function POST(req: NextRequest) {
   const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.${ext}`
   const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
 
+  if (action === 'start_break' || action === 'end_break') {
+    if (!existingRecord?.clock_in_at) {
+      return NextResponse.json({ error: 'No active clock-in found for this employee today' }, { status: 400 })
+    }
+    if (existingRecord.clock_out_at) {
+      return NextResponse.json({ error: 'This shift is already clocked out' }, { status: 400 })
+    }
+
+    if (action === 'start_break') {
+      const breakState = getMealBreakState(existingRecord)
+      if (breakState.startedAt && !breakState.endedAt) {
+        return NextResponse.json({ error: 'You are already on meal break' }, { status: 400 })
+      }
+      if (breakState.startedAt && breakState.endedAt) {
+        return NextResponse.json({ error: 'Meal break has already been used for this shift' }, { status: 400 })
+      }
+
+      const { error } = await supabaseAdmin
+        .from('shift_clocks')
+        .update({
+          manager_note: setMealBreakManagerNote(existingRecord.manager_note, { startedAt: nowIso, minutes: 0 }),
+          updated_at: nowIso,
+        })
+        .eq('id', existingRecord.id)
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ success: true, employee, break_started_at: nowIso })
+    }
+
+    const breakState = getMealBreakState(existingRecord)
+    if (!breakState.startedAt || breakState.endedAt) {
+      return NextResponse.json({ error: 'No active meal break found' }, { status: 400 })
+    }
+
+    const elapsedMinutes = Math.floor((new Date(nowIso).getTime() - new Date(breakState.startedAt).getTime()) / 60_000)
+    if (elapsedMinutes < MEAL_BREAK_MINUTES) {
+      const availableAt = new Date(new Date(breakState.startedAt).getTime() + MEAL_BREAK_MINUTES * 60_000).toISOString()
+      return NextResponse.json({
+        error: `Meal break must be at least ${MEAL_BREAK_MINUTES} minutes.`,
+        available_at: availableAt,
+      }, { status: 400 })
+    }
+
+    const { error } = await supabaseAdmin
+      .from('shift_clocks')
+      .update({
+        manager_note: setMealBreakManagerNote(existingRecord.manager_note, {
+          startedAt: breakState.startedAt,
+          endedAt: nowIso,
+          minutes: elapsedMinutes,
+        }),
+        updated_at: nowIso,
+      })
+      .eq('id', existingRecord.id)
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    return NextResponse.json({ success: true, employee, break_minutes: elapsedMinutes })
+  }
+
   if (!allowPhotoSkip && !photo_data_url) {
     return NextResponse.json({ error: 'Photo is required for clock events' }, { status: 400 })
   }
@@ -352,8 +417,11 @@ export async function POST(req: NextRequest) {
   if (existingRecord.clock_out_at) {
     return NextResponse.json({ error: 'This shift is already clocked out' }, { status: 400 })
   }
+  if (getMealBreakState(existingRecord).startedAt && !getMealBreakState(existingRecord).endedAt) {
+    return NextResponse.json({ error: 'End meal break before clocking out' }, { status: 400 })
+  }
 
-  const approvedHours = calculateClockHours(existingRecord.clock_in_at, nowIso)
+  const approvedHours = calculateClockHoursAfterBreak(existingRecord.clock_in_at, nowIso, getClockBreakMinutes(existingRecord))
   const { error } = await supabaseAdmin
     .from('shift_clocks')
     .update({
@@ -426,7 +494,9 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Clock out must be after clock in' }, { status: 400 })
   }
 
-  const fallbackHours = nextClockOutAt ? calculateClockHours(nextClockInAt, nextClockOutAt) : 0
+  const fallbackHours = nextClockOutAt
+    ? calculateClockHoursAfterBreak(nextClockInAt, nextClockOutAt, getClockBreakMinutes(existing as ShiftClock))
+    : 0
   const update = {
     session_date: nextSessionDate,
     approval_status: 'approved',

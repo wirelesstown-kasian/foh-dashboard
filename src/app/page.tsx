@@ -12,7 +12,7 @@ import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format, startOfMonth } from 'date-fns'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withPaymentMethod, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
@@ -44,21 +44,26 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     try {
       setLoadError(null)
-      const monthStart = format(startOfMonth(businessDate), 'yyyy-MM-dd')
+      const monthStart = format(startOfMonth(new Date(`${today}T12:00:00`)), 'yyyy-MM-dd')
       const loadEmployees = async () => {
         const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true)
-        const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error))
+        const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error) || isMissingMealBreakThresholdColumn(initial.error))
           ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true)
           : initial
         return {
           ...result,
-          data: withPaymentMethod(withTipPoolHourlyRate(result.data ?? [])) as Employee[],
+          data: withMealBreakThresholdHours(withPaymentMethod(withTipPoolHourlyRate(result.data ?? []))) as Employee[],
         }
       }
 
       const [empRes, schRes, catRes, taskRes, compRes, monthCompRes, sessRes, clockRes] = await Promise.all([
         loadEmployees(),
-        supabase.from('schedules').select('*').eq('date', today),
+        supabase
+          .from('schedules')
+          .select('*, employee:employees(id, name, phone, email, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, birth_date, is_active, created_at)')
+          .eq('date', today)
+          .order('department')
+          .order('start_time'),
         supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
         supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),
         supabase.from('task_completions').select('*, employee:employees(*)').eq('session_date', today),

@@ -24,6 +24,7 @@ export interface Employee {
   hourly_wage: number | null
   guaranteed_hourly: number | null
   tip_pool_hourly_rate: number | null
+  meal_break_threshold_hours?: number | null
   commission_enabled?: boolean
   commission_note?: string | null
   payment_method?: PaymentMethod | null
@@ -133,6 +134,9 @@ export interface ShiftClock {
   clock_out_at: string | null
   clock_in_photo_path: string
   clock_out_photo_path: string | null
+  break_started_at?: string | null
+  break_ended_at?: string | null
+  break_minutes?: number
   auto_clock_out: boolean
   approval_status: ShiftClockApprovalStatus
   approved_hours: number | null

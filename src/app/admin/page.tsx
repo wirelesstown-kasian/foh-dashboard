@@ -13,7 +13,6 @@ const adminGroups = [
       { label: 'New Wage Worksheet', href: '/payroll/worksheet', icon: DollarSign },
       { label: 'Staffing', href: '/staffing', icon: Users },
       { label: 'Roles and Departments', href: '/roles-departments', icon: BriefcaseBusiness },
-      { label: 'Wage Report', href: '/reporting/wages', icon: DollarSign },
       { label: 'Clock In Records', href: '/reporting/clock-records', icon: FileClock },
     ],
   },
@@ -33,7 +32,7 @@ const adminGroups = [
     description: 'Sales, payroll, and email reporting controls.',
     links: [
       { label: 'Dashboard', href: '/reporting/dashboard', icon: LayoutDashboard },
-      { label: 'Email Settings', href: '/email-settings', icon: MailCheck },
+      { label: 'Wage Report', href: '/reporting/wages', icon: DollarSign },
     ],
   },
   {
@@ -42,6 +41,7 @@ const adminGroups = [
     description: 'Build, save, and publish department schedules.',
     links: [
       { label: 'Schedule Planner', href: '/schedule-planning', icon: CalendarDays },
+      { label: 'Email Settings', href: '/email-settings', icon: MailCheck },
     ],
   },
 ]
