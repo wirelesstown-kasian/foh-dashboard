@@ -178,6 +178,7 @@ const PAYROLL_SHEET_HEADERS = [
   'Total Cash',
   'Total Check',
   'Total ACH',
+  'Total Unknown',
   'Total Gross',
   'Total Deductions',
   'Total Net',
@@ -215,13 +216,17 @@ function buildEodSheetRow(report: EodSheetReport) {
 }
 
 function buildPayrollSheetRow(run: PayrollSheetRun, item: PayrollRunItem) {
+  const unknownTotal = (run.payroll_run_items ?? [])
+    .filter(row => !row.payment_method)
+    .reduce((sum, row) => sum + Number(row.payout_amount ?? 0), 0)
+
   return [
     run.pay_date,
     run.start_date,
     run.end_date,
     run.department,
     run.memo ?? '',
-    item.payment_method.toUpperCase(),
+    item.payment_method?.toUpperCase() ?? 'UNKNOWN',
     item.employee_name,
     item.role ?? '',
     item.department,
@@ -241,6 +246,7 @@ function buildPayrollSheetRow(run: PayrollSheetRun, item: PayrollRunItem) {
     Number(run.total_cash ?? 0).toFixed(2),
     Number(run.total_check ?? 0).toFixed(2),
     Number(run.total_ach ?? 0).toFixed(2),
+    unknownTotal.toFixed(2),
     Number(run.total_gross ?? 0).toFixed(2),
     Number(run.total_deductions ?? 0).toFixed(2),
     Number(run.total_net ?? 0).toFixed(2),
@@ -254,7 +260,7 @@ async function ensurePayrollSheetHeaders(config: GoogleSheetsConfig, accessToken
   const resolvedSheetName = await resolveSheetName(config, accessToken, config.payrollSheetName, ['Payroll'])
   const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
-  const headerRange = `${encodedSheetName}!A1:AE1`
+  const headerRange = `${encodedSheetName}!A1:AF1`
 
   const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(
     `${baseUrl}/${headerRange}`,
@@ -500,7 +506,7 @@ export async function syncPayrollRunToGoogleSheet(run: PayrollSheetRun) {
   const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
   const itemIdColumn = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!AE2:AE`,
+    `${baseUrl}/${encodedSheetName}!AF2:AF`,
     accessToken,
   )
 
@@ -519,7 +525,7 @@ export async function syncPayrollRunToGoogleSheet(run: PayrollSheetRun) {
     const existingRowNumber = existingItemRows.get(item.id)
     if (existingRowNumber) {
       await googleSheetsRequest(
-        `${baseUrl}/${encodedSheetName}!A${existingRowNumber}:AE${existingRowNumber}?valueInputOption=USER_ENTERED`,
+        `${baseUrl}/${encodedSheetName}!A${existingRowNumber}:AF${existingRowNumber}?valueInputOption=USER_ENTERED`,
         accessToken,
         {
           method: 'PUT',
@@ -534,7 +540,7 @@ export async function syncPayrollRunToGoogleSheet(run: PayrollSheetRun) {
 
   if (appendRows.length > 0) {
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A:AE:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      `${baseUrl}/${encodedSheetName}!A:AF:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
       accessToken,
       {
         method: 'POST',

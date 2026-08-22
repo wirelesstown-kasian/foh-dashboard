@@ -186,7 +186,7 @@ export interface PayrollRunItem {
   employee_name: string
   role: string | null
   department: string
-  payment_method: PaymentMethod
+  payment_method: PaymentMethod | null
   hours: number
   tips: number
   base_wages: number

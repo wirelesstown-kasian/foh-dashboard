@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
         commission: number
         deductions: number
         payout_amount: number
-        payment_method: string
+        payment_method: string | null
         has_auto_clock_out: boolean
         has_open_clock: boolean
         memo: string | null
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
         ` : ''}
         <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
           <tr><td><strong>Period</strong></td><td>${label}</td></tr>
-          <tr><td><strong>Paid By</strong></td><td>${String(payrollItem.payment_method).toUpperCase()}</td></tr>
+          <tr><td><strong>Paid By</strong></td><td>${payrollItem.payment_method ? String(payrollItem.payment_method).toUpperCase() : 'UNKNOWN'}</td></tr>
           <tr><td><strong>Hours Worked</strong></td><td>${hours.toFixed(2)} hrs</td></tr>
           <tr><td><strong>Tips Earned</strong></td><td>${formatCurrency(tips)}</td></tr>
           <tr><td><strong>Base Wages</strong></td><td>${formatCurrency(Number(payrollItem.base_wages ?? 0))}</td></tr>

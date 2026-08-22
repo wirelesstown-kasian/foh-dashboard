@@ -24,6 +24,7 @@ type MetricKey =
   | 'cashPayrollOut'
   | 'checkPayrollOut'
   | 'achPayrollOut'
+  | 'unknownPayrollOut'
   | 'tax'
   | 'cashFlow'
   | 'cash'
@@ -133,16 +134,29 @@ function sumTipDistributions(reports: Array<EodReport & { tip_distributions?: Ti
 function summarizePayrollRuns(runs: Array<PayrollRun & { payroll_run_items?: PayrollRunItem[] }>) {
   return runs.reduce(
     (summary, run) => {
-      const runTipOut = (run.payroll_run_items ?? []).reduce((sum, item) => sum + Number(item.tips ?? 0), 0)
-      const runTotalPayrollOut = getPayrollRunTotal(run)
+      const items = run.payroll_run_items ?? []
+      const runTipOut = items.reduce((sum, item) => sum + Number(item.tips ?? 0), 0)
+      const runItemPayrollOut = items.reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
+      const runTotalPayrollOut = runItemPayrollOut > 0 ? runItemPayrollOut : getPayrollRunTotal(run)
+      const cashPayrollOut = items.length > 0
+        ? items.filter(item => item.payment_method === 'cash').reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
+        : Number(run.total_cash ?? 0)
+      const checkPayrollOut = items.length > 0
+        ? items.filter(item => item.payment_method === 'check').reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
+        : Number(run.total_check ?? 0)
+      const achPayrollOut = items.length > 0
+        ? items.filter(item => item.payment_method === 'ach').reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
+        : Number(run.total_ach ?? 0)
+      const unknownPayrollOut = items.filter(item => !item.payment_method).reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
 
       return {
         tipOut: summary.tipOut + runTipOut,
         payrollOut: summary.payrollOut + Math.max(0, runTotalPayrollOut - runTipOut),
         totalPayrollOut: summary.totalPayrollOut + runTotalPayrollOut,
-        cashPayrollOut: summary.cashPayrollOut + Number(run.total_cash ?? 0),
-        checkPayrollOut: summary.checkPayrollOut + Number(run.total_check ?? 0),
-        achPayrollOut: summary.achPayrollOut + Number(run.total_ach ?? 0),
+        cashPayrollOut: summary.cashPayrollOut + cashPayrollOut,
+        checkPayrollOut: summary.checkPayrollOut + checkPayrollOut,
+        achPayrollOut: summary.achPayrollOut + achPayrollOut,
+        unknownPayrollOut: summary.unknownPayrollOut + unknownPayrollOut,
       }
     },
     {
@@ -152,6 +166,7 @@ function summarizePayrollRuns(runs: Array<PayrollRun & { payroll_run_items?: Pay
       cashPayrollOut: 0,
       checkPayrollOut: 0,
       achPayrollOut: 0,
+      unknownPayrollOut: 0,
     }
   )
 }
@@ -175,6 +190,7 @@ function sumReports(
     cashPayrollOut: payrollSummary.cashPayrollOut,
     checkPayrollOut: payrollSummary.checkPayrollOut,
     achPayrollOut: payrollSummary.achPayrollOut,
+    unknownPayrollOut: payrollSummary.unknownPayrollOut,
     tax: sum.tax + Number(report.sales_tax ?? 0),
     cashFlow: sum.cashFlow,
     cash: sum.cash + Number(report.cash_total ?? 0),
@@ -189,6 +205,7 @@ function sumReports(
     cashPayrollOut: payrollSummary.cashPayrollOut,
     checkPayrollOut: payrollSummary.checkPayrollOut,
     achPayrollOut: payrollSummary.achPayrollOut,
+    unknownPayrollOut: payrollSummary.unknownPayrollOut,
     tax: 0,
     cashFlow: 0,
     cash: 0,
@@ -699,6 +716,10 @@ export default function ReportingDashboardPage() {
     () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.achPayrollOut),
     [currentPayrollRuns]
   )
+  const unknownPayrollOutSeries = useMemo(
+    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.unknownPayrollOut),
+    [currentPayrollRuns]
+  )
   const cashFlowSeries = useMemo(() => {
     const rangeLength = currentDates.length
     const bucketMap = new Map<string, SeriesPoint>()
@@ -731,6 +752,7 @@ export default function ReportingDashboardPage() {
     { key: 'cashPayrollOut' as const, label: 'Cash Payroll Out', value: currentTotals.cashPayrollOut, previous: previousTotals.cashPayrollOut, points: cashPayrollOutSeries, color: '#0f766e', icon: Banknote },
     { key: 'checkPayrollOut' as const, label: 'Check Payroll Out', value: currentTotals.checkPayrollOut, previous: previousTotals.checkPayrollOut, points: checkPayrollOutSeries, color: '#475569', icon: ReceiptText },
     { key: 'achPayrollOut' as const, label: 'ACH Payroll', value: currentTotals.achPayrollOut, previous: previousTotals.achPayrollOut, points: achPayrollOutSeries, color: '#2563eb', icon: CreditCard },
+    { key: 'unknownPayrollOut' as const, label: 'Unknown Payroll', value: currentTotals.unknownPayrollOut, previous: previousTotals.unknownPayrollOut, points: unknownPayrollOutSeries, color: '#b45309', icon: ReceiptText },
     { key: 'cashFlow' as const, label: 'Cash In / Out', value: currentTotals.cashFlow, previous: previousTotals.cashFlow, points: cashFlowSeries, color: '#0891b2', icon: Banknote },
   ]
   const mixTotal = currentTotals.cash + currentTotals.card + currentTotals.delivery

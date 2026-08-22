@@ -235,10 +235,6 @@ export function EmployeeTable() {
       setSaveError('Select at least one schedule department')
       return
     }
-    if (!form.payment_method) {
-      setSaveError('Select cash, check, or ACH payment method')
-      return
-    }
     if (form.tip_cap_enabled && !form.tip_pool_hourly_rate.trim()) {
       setSaveError('Tip cap amount is required when Tip Cap is on')
       return
@@ -336,7 +332,6 @@ export function EmployeeTable() {
     (!editTarget || !resetPinMode || /^\d{4}$/.test(form.pin)) &&
     (Boolean(editTarget) || /^\d{4}$/.test(form.pin)) &&
     form.schedule_departments.length > 0 &&
-    Boolean(form.payment_method) &&
     (!form.tip_cap_enabled || Boolean(form.tip_pool_hourly_rate.trim())) &&
     (!form.guaranteed_enabled || Boolean(form.guaranteed_hourly.trim())) &&
     (!form.commission_enabled || Boolean(form.commission_note.trim())) &&
@@ -568,7 +563,7 @@ export function EmployeeTable() {
                 </Select>
               </div>
               <div>
-                <Label>Paid By *</Label>
+                <Label>Paid By</Label>
                 <Select value={form.payment_method || undefined} onValueChange={(v: string | null) => v && setForm(f => ({ ...f, payment_method: v as PaymentMethod }))}>
                   <SelectTrigger className="w-full">
                     <span className={form.payment_method ? '' : 'text-muted-foreground'}>{getPaymentMethodLabel(form.payment_method || null)}</span>

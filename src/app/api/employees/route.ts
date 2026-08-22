@@ -371,7 +371,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
   const paymentMethod = normalizePaymentMethod(payment_method)
-  if (!paymentMethod) {
+  if (payment_method && !paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
   if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
@@ -470,7 +470,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid meal break alert hours' }, { status: 400 })
   }
   const paymentMethod = normalizePaymentMethod(payment_method)
-  if (!paymentMethod) {
+  if (payment_method && !paymentMethod) {
     return NextResponse.json({ error: 'Select cash, check, or ACH payment method' }, { status: 400 })
   }
   if (commission_enabled === true && !(typeof commission_note === 'string' && commission_note.trim())) {
@@ -491,7 +491,7 @@ export async function PATCH(req: NextRequest) {
     meal_break_threshold_hours: number
     commission_enabled: boolean
     commission_note: string | null
-    payment_method: PaymentMethod
+    payment_method: PaymentMethod | null
     birth_date: string | null
     login_enabled: boolean
     pin_hash?: string

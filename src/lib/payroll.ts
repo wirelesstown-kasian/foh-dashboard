@@ -33,6 +33,8 @@ export type PayrollTotals = {
   net: number
 }
 
+export const DEFAULT_PAYMENT_METHOD: PaymentMethod = 'cash'
+
 export function paymentMethodLabel(paymentMethod: PaymentMethod | '' | null | undefined) {
   if (paymentMethod === 'ach') return 'ACH'
   if (paymentMethod === 'check') return 'Check'
@@ -120,7 +122,7 @@ export function buildPayrollDraftRows({
       const baseWages = normalizeMoney(hours * Number(employee.hourly_wage ?? 0))
       const guaranteeTarget = normalizeMoney(hours * Number(employee.guaranteed_hourly ?? 0))
       const guaranteeTopUp = normalizeMoney(Math.max(0, guaranteeTarget - (baseWages + tips)))
-      const paymentMethod: PaymentMethod | '' = employee.payment_method ?? ''
+      const paymentMethod: PaymentMethod = employee.payment_method ?? DEFAULT_PAYMENT_METHOD
       const baseRow = {
         employee_id: employee.id,
         employee_name: employee.name,
@@ -152,7 +154,7 @@ export function payrollItemToDraftRow(item: PayrollRunItem): PayrollDraftRow {
     employee_name: item.employee_name,
     role: item.role ?? '',
     department: item.department,
-    payment_method: item.payment_method,
+    payment_method: item.payment_method ?? '',
     hours: Number(item.hours ?? 0),
     tips: Number(item.tips ?? 0),
     base_wages: Number(item.base_wages ?? 0),

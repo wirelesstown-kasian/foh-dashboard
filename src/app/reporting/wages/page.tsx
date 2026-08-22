@@ -18,7 +18,8 @@ import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleEmployee } from '@/lib/tipEligibility'
-import type { Employee } from '@/lib/types'
+import { DEFAULT_PAYMENT_METHOD, paymentMethodLabel } from '@/lib/payroll'
+import type { Employee, PaymentMethod } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
   const sorted = [...items].sort((a, b) => getValue(b) - getValue(a))
@@ -31,6 +32,7 @@ function scoreFromRank(rank: number, count: number) {
 }
 
 type TipReportView = 'earnings' | 'tips'
+type ReportPaymentMethod = PaymentMethod | 'unknown'
 
 type WageDetailRow = {
   date: string
@@ -54,6 +56,7 @@ type WageSummaryRow = {
   totalEarnings: number
   tipRate: number | null
   effectiveRate: number | null
+  paymentMethod: ReportPaymentMethod
   hasAutoClockOut: boolean
   hasOpenClock: boolean
   hasMissingMealBreak: boolean
@@ -67,6 +70,14 @@ type DailyTipPreview = {
 type SavedDailyTip = {
   hours: number
   tips: number
+}
+
+function getReportPaymentMethod(paymentMethod: PaymentMethod | null | undefined): ReportPaymentMethod {
+  return paymentMethod ?? 'unknown'
+}
+
+function paymentMethodReportLabel(paymentMethod: ReportPaymentMethod) {
+  return paymentMethod === 'unknown' ? 'Unknown' : paymentMethodLabel(paymentMethod)
 }
 
 function calculateDailyTipPreview({
@@ -405,6 +416,7 @@ export default function WageReportPage() {
             totalEarnings: Number(item.payout_amount ?? item.net_pay ?? 0),
             tipRate: Number(item.hours ?? 0) > 0 ? Number(item.tips ?? 0) / Number(item.hours ?? 0) : null,
             effectiveRate: Number(item.hours ?? 0) > 0 ? Number(item.payout_amount ?? item.net_pay ?? 0) / Number(item.hours ?? 0) : null,
+            paymentMethod: getReportPaymentMethod(item.payment_method),
             hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
             hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
             hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
@@ -435,6 +447,7 @@ export default function WageReportPage() {
           totalEarnings,
           tipRate: hours > 0 ? tips / hours : null,
           effectiveRate: hours > 0 ? totalEarnings / hours : null,
+          paymentMethod: emp.payment_method ?? DEFAULT_PAYMENT_METHOD,
           hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
           hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
           hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
@@ -450,6 +463,7 @@ export default function WageReportPage() {
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
       <div class="summary">
         <div class="card"><strong>Hours</strong><div class="metric">${row.hours.toFixed(2)} hrs</div></div>
+        <div class="card"><strong>Paid By</strong><div class="metric">${paymentMethodReportLabel(row.paymentMethod)}</div></div>
         <div class="card"><strong>Tips</strong><div class="metric">${formatCurrency(row.tips)}</div></div>
         ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div class="metric">${formatCurrency(row.baseWages)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Deductions</strong><div class="metric">${formatCurrency(row.deductions)}</div></div>` : ''}
@@ -512,6 +526,13 @@ export default function WageReportPage() {
   const displayedRows = useMemo(
     () => (employeeFilter === 'all' ? rows : rows.filter(row => row.emp.id === employeeFilter)),
     [employeeFilter, rows]
+  )
+  const displayedPaymentTotals = useMemo(
+    () => displayedRows.reduce<Record<ReportPaymentMethod, number>>((totals, row) => {
+      totals[row.paymentMethod] += row.totalEarnings
+      return totals
+    }, { cash: 0, check: 0, ach: 0, unknown: 0 }),
+    [displayedRows]
   )
   const detailTarget = displayedRows.find(row => row.emp.id === detailEmployeeId) ?? null
   const detailRows = detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : []
@@ -588,11 +609,30 @@ export default function WageReportPage() {
             </>
           }
         />
+        <div className="mb-4 grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border bg-emerald-50 p-3">
+            <p className="text-xs font-medium uppercase text-emerald-700">Cash Pay Out</p>
+            <p className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(displayedPaymentTotals.cash)}</p>
+          </div>
+          <div className="rounded-lg border bg-slate-50 p-3">
+            <p className="text-xs font-medium uppercase text-slate-500">Check Pay Out</p>
+            <p className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(displayedPaymentTotals.check)}</p>
+          </div>
+          <div className="rounded-lg border bg-blue-50 p-3">
+            <p className="text-xs font-medium uppercase text-blue-700">ACH Pay Out</p>
+            <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(displayedPaymentTotals.ach)}</p>
+          </div>
+          <div className="rounded-lg border bg-amber-50 p-3">
+            <p className="text-xs font-medium uppercase text-amber-700">Unknown Pay Out</p>
+            <p className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(displayedPaymentTotals.unknown)}</p>
+          </div>
+        </div>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Paid By</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Hours</TableHead>
               <TableHead className="text-right">Tips</TableHead>
@@ -618,6 +658,7 @@ export default function WageReportPage() {
                   </button>
                 </TableCell>
                 <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
+                <TableCell>{paymentMethodReportLabel(row.paymentMethod)}</TableCell>
                 <TableCell>
                   {row.hasOpenClock ? (
                     <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge>
@@ -659,7 +700,7 @@ export default function WageReportPage() {
             ))}
             {displayedRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={view === 'earnings' ? 12 : 7} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
+                <TableCell colSpan={view === 'earnings' ? 13 : 8} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -667,6 +708,7 @@ export default function WageReportPage() {
             <tfoot>
               <TableRow>
                 <TableCell className="font-semibold">Period Total</TableCell>
+                <TableCell />
                 <TableCell />
                 <TableCell />
                 <TableCell className="text-right font-semibold">{displayedRows.reduce((sum, row) => sum + row.hours, 0).toFixed(2)}h</TableCell>
