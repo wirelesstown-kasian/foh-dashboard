@@ -6,6 +6,7 @@ import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -14,7 +15,11 @@ import {
 } from '@/components/ui/select'
 import type { EmailSettings } from '@/lib/appSettings'
 
-const EMPTY_SETTINGS: EmailSettings = {
+type SettingsForm = EmailSettings & {
+  time_clock_announcement: string
+}
+
+const EMPTY_SETTINGS: SettingsForm = {
   from_name: '',
   from_email: '',
   reply_to: '',
@@ -28,6 +33,7 @@ const EMPTY_SETTINGS: EmailSettings = {
   weekly_summary_emails_enabled: true,
   weekly_summary_recipient: '',
   wage_report_emails_enabled: true,
+  time_clock_announcement: '',
 }
 
 const WEEKDAY_OPTIONS = [
@@ -61,7 +67,7 @@ function BooleanSelect({
 }
 
 export default function EmailSettingsPage() {
-  const [settings, setSettings] = useState<EmailSettings>(EMPTY_SETTINGS)
+  const [settings, setSettings] = useState<SettingsForm>(EMPTY_SETTINGS)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,14 +78,14 @@ export default function EmailSettingsPage() {
 
     void (async () => {
       const res = await fetch('/api/app-settings', { cache: 'no-store' })
-      const data = (await res.json().catch(() => ({}))) as { settings?: EmailSettings; error?: string }
+      const data = (await res.json().catch(() => ({}))) as { settings?: Partial<SettingsForm>; error?: string }
       if (!mounted) return
       if (!res.ok || !data.settings) {
         setError(data.error ?? 'Failed to load email settings')
         setLoading(false)
         return
       }
-      setSettings(data.settings)
+      setSettings({ ...EMPTY_SETTINGS, ...data.settings })
       setLoading(false)
     })()
 
@@ -99,14 +105,14 @@ export default function EmailSettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       })
-      const data = (await res.json().catch(() => ({}))) as { settings?: EmailSettings; error?: string }
+      const data = (await res.json().catch(() => ({}))) as { settings?: Partial<SettingsForm>; error?: string }
       if (!res.ok || !data.settings) {
         setError(data.error ?? 'Failed to save email settings')
         return
       }
-      setSettings(data.settings)
+      setSettings({ ...EMPTY_SETTINGS, ...data.settings })
       window.dispatchEvent(new Event('app-settings-updated'))
-      setSaved('Email settings saved')
+      setSaved('Settings saved')
     } finally {
       setSaving(false)
     }
@@ -150,6 +156,20 @@ export default function EmailSettingsPage() {
                 <Label>EOD Summary Recipient</Label>
                 <Input value={settings.eod_report_email} onChange={(event) => setSettings((prev) => ({ ...prev, eod_report_email: event.target.value }))} className="mt-1" />
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-semibold">Time Clock Announcement</h2>
+            <p className="mt-1 text-sm text-muted-foreground">This appears on the clock-in screen above the clock action buttons.</p>
+            <div className="mt-4">
+              <Label>Announcement</Label>
+              <Textarea
+                value={settings.time_clock_announcement}
+                onChange={(event) => setSettings((prev) => ({ ...prev, time_clock_announcement: event.target.value }))}
+                className="mt-1 min-h-24"
+                placeholder="Example: Patio section open tonight. Check with manager before breaks."
+              />
             </div>
           </div>
 
@@ -253,7 +273,7 @@ export default function EmailSettingsPage() {
 
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : 'Save Email Settings'}
+              {saving ? 'Saving…' : 'Save Settings'}
             </Button>
           </div>
         </div>

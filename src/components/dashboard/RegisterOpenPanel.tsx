@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, DailySession } from '@/lib/types'
+import { Employee, DailySession, ShiftClock } from '@/lib/types'
 import { format } from 'date-fns'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -20,7 +20,19 @@ const EMPTY_DENOMS = Object.fromEntries(
   [...COIN_KEYS, ...BILL_KEYS].map(k => [k, { count: '', amount: '' }])
 )
 
-function CoinTotalRow({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) {
+function CoinTotalRow({
+  computed,
+  override,
+  setOverride,
+  disabled,
+  onLockedAttempt,
+}: {
+  computed: number
+  override: string
+  setOverride: (v: string) => void
+  disabled: boolean
+  onLockedAttempt: () => void
+}) {
   return (
     <div className="mt-2 pt-2 border-t border-dashed">
       <div className="flex items-center gap-1.5">
@@ -30,9 +42,10 @@ function CoinTotalRow({ computed, override, setOverride }: { computed: number; o
         <Input
           type="text" inputMode="decimal"
           value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
-          onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
-          onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
+          onChange={e => { if (disabled) { onLockedAttempt(); return } const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
+          onFocus={e => { if (disabled) { onLockedAttempt(); return } if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
           onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
+          disabled={disabled}
           placeholder="0.00"
           className="h-8 w-20 text-center text-xs px-1 font-semibold"
         />
@@ -41,16 +54,29 @@ function CoinTotalRow({ computed, override, setOverride }: { computed: number; o
   )
 }
 
-function BillTotalRow({ computed, override, setOverride }: { computed: number; override: string; setOverride: (v: string) => void }) {
+function BillTotalRow({
+  computed,
+  override,
+  setOverride,
+  disabled,
+  onLockedAttempt,
+}: {
+  computed: number
+  override: string
+  setOverride: (v: string) => void
+  disabled: boolean
+  onLockedAttempt: () => void
+}) {
   return (
     <div className="mt-4 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-4 shadow-sm">
       <p className="text-sm font-extrabold text-emerald-900 text-center mb-3">Bill Total</p>
       <Input
         type="text" inputMode="decimal"
         value={override !== '' ? override : (computed > 0 ? computed.toFixed(2) : '')}
-        onChange={e => { const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
-        onFocus={e => { if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
+        onChange={e => { if (disabled) { onLockedAttempt(); return } const v = e.target.value; if (/^\d*\.?\d{0,2}$/.test(v)) setOverride(v) }}
+        onFocus={e => { if (disabled) { onLockedAttempt(); return } if (override === '') { setOverride(computed > 0 ? computed.toFixed(2) : ''); requestAnimationFrame(() => e.target.select()) } }}
         onBlur={e => { const v = e.target.value.trim(); if (v) setOverride((parseFloat(v) || 0).toFixed(2)) }}
+        disabled={disabled}
         placeholder="0.00"
         className="h-14 w-full text-center text-xl px-3 font-extrabold border-2 border-emerald-500 bg-white shadow-sm"
       />
@@ -64,17 +90,47 @@ function BillTotalRow({ computed, override, setOverride }: { computed: number; o
 interface Props {
   session: DailySession | null
   employees: Employee[]
+  clockRecords: ShiftClock[]
   today: string
   businessDate: Date
   onComplete: () => void
 }
 
-export function RegisterOpenPanel({ session, employees, today, businessDate, onComplete }: Props) {
+function isRegisterOpener(employee: Employee) {
+  const department = (employee.primary_department ?? '').trim().toLowerCase()
+  const role = (employee.role ?? '').trim().toLowerCase()
+  return department === 'server' || department === 'manager' || role === 'server' || role === 'manager'
+}
+
+export function RegisterOpenPanel({ session, employees, clockRecords, today, businessDate, onComplete }: Props) {
   const [openedBy, setOpenedBy] = useState<string>(session?.register_opened_by ?? '')
   const [coinOverride, setCoinOverride] = useState<string>('')
   const [billOverride, setBillOverride] = useState<string>('')
   const [denoms, setDenoms] = useState<Record<string, { count: string; amount: string }>>(EMPTY_DENOMS)
   const [saving, setSaving] = useState(false)
+  const [openByWarning, setOpenByWarning] = useState<string | null>(null)
+  const clockedInEmployeeIds = useMemo(() => new Set(
+    clockRecords
+      .filter(record => record.session_date === today && record.clock_in_at && !record.clock_out_at)
+      .map(record => record.employee_id)
+  ), [clockRecords, today])
+  const eligibleOpeners = useMemo(
+    () => employees.filter(employee => isRegisterOpener(employee) && clockedInEmployeeIds.has(employee.id)),
+    [clockedInEmployeeIds, employees]
+  )
+  const hasAvailableOpeners = eligibleOpeners.length > 0
+  const selectedOpener = eligibleOpeners.find(e => e.id === openedBy) ?? null
+  const selectedOpenerName = selectedOpener?.name ?? 'Unknown'
+  const effectiveOpenedBy = selectedOpener?.id ?? ''
+  const cashEntryLocked = !effectiveOpenedBy
+
+  const requireOpenedBy = () => {
+    const message = hasAvailableOpeners
+      ? 'Select Opened by before entering drawer count.'
+      : 'A server or manager must clock in before opening the register.'
+    setOpenByWarning(message)
+    return false
+  }
 
   const computedCoin = COIN_KEYS.reduce((s, k) => s + (parseInt(denoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
   const computedBill = BILL_KEYS.reduce((s, k) => s + (parseInt(denoms[k]?.count) || 0) * DENOM_VALUES[k], 0)
@@ -91,18 +147,27 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
         <Input
           type="text" inputMode="numeric" value={count}
           onChange={e => {
+            if (!effectiveOpenedBy) {
+              requireOpenedBy()
+              return
+            }
             const c = e.target.value.replace(/\D/g, '')
             const a = c ? ((parseInt(c) || 0) * value).toFixed(2) : ''
             setDenoms(nd => ({ ...nd, [key]: { count: c, amount: a } }))
             if (isCoin) setCoinOverride('')
             else setBillOverride('')
           }}
+          disabled={cashEntryLocked}
           placeholder="qty" className="h-8 w-16 text-center text-xs px-1"
         />
         <span className="text-xs text-muted-foreground shrink-0">×</span>
         <Input
           type="text" inputMode="decimal" value={amount}
           onChange={e => {
+            if (!effectiveOpenedBy) {
+              requireOpenedBy()
+              return
+            }
             const raw = e.target.value
             if (!/^\d*\.?\d{0,2}$/.test(raw)) return
             const c = raw ? String(Math.round((parseFloat(raw) || 0) / value)) : ''
@@ -110,6 +175,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
             if (isCoin) setCoinOverride('')
             else setBillOverride('')
           }}
+          disabled={cashEntryLocked}
           placeholder="amt" className="h-8 w-20 text-center text-xs px-1"
         />
       </div>
@@ -117,11 +183,15 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
   }
 
   const handleOpen = async () => {
+    if (!effectiveOpenedBy) {
+      requireOpenedBy()
+      return
+    }
     setSaving(true)
     const payload = {
       session_date: today,
       starting_cash: startingCash,
-      register_opened_by: openedBy || null,
+      register_opened_by: effectiveOpenedBy,
       current_phase: 'pre_shift' as const,
     }
     if (session) {
@@ -144,23 +214,44 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
           </div>
           <div className="flex items-center gap-3">
             <Label className="text-sm font-medium shrink-0">Opened by</Label>
-            <Select value={openedBy} onValueChange={(v: string | null) => setOpenedBy(v ?? '')}>
-              <SelectTrigger className="w-44">
-                <span className={openedBy ? '' : 'text-muted-foreground'}>
-                  {openedBy ? (employees.find(e => e.id === openedBy)?.name ?? 'Unknown') : 'Select staff'}
+            <Select
+              value={effectiveOpenedBy}
+              onValueChange={(v: string | null) => {
+                setOpenedBy(v ?? '')
+                setOpenByWarning(null)
+              }}
+            >
+              <SelectTrigger className="w-56 bg-white" disabled={!hasAvailableOpeners}>
+                <span className={effectiveOpenedBy ? '' : 'text-muted-foreground'}>
+                  {effectiveOpenedBy ? selectedOpenerName : hasAvailableOpeners ? 'Select clocked-in staff' : 'Clock in first'}
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                {eligibleOpeners.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
         </div>
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {hasAvailableOpeners
+            ? 'Select Opened by first. Only clocked-in Server or Manager department staff can open the register.'
+            : 'Opened by is unavailable. A Server or Manager department employee must clock in before entering register information.'}
+        </div>
+        {openByWarning && (
+          <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+            {openByWarning}
+          </div>
+        )}
       </div>
 
       <div className="mx-auto w-full max-w-2xl p-6 space-y-5">
         {/* Calculator */}
-        <div className="rounded-xl border bg-white p-5 shadow-sm">
+        <div
+          className={`rounded-xl border bg-white p-5 shadow-sm ${cashEntryLocked ? 'opacity-60' : ''}`}
+          onMouseDown={() => {
+            if (cashEntryLocked) requireOpenedBy()
+          }}
+        >
           <h2 className="font-semibold mb-4">Count Drawer</h2>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
             <div>
@@ -173,7 +264,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
                   { key: 'c1',  label: '¢1',  value: 0.01 },
                 ].map(({ key, label, value }) => renderRow(key, label, value, true))}
               </div>
-              <CoinTotalRow computed={computedCoin} override={coinOverride} setOverride={setCoinOverride} />
+              <CoinTotalRow computed={computedCoin} override={coinOverride} setOverride={setCoinOverride} disabled={cashEntryLocked} onLockedAttempt={requireOpenedBy} />
             </div>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Bills</p>
@@ -189,7 +280,7 @@ export function RegisterOpenPanel({ session, employees, today, businessDate, onC
               </div>
             </div>
           </div>
-          <BillTotalRow computed={computedBill} override={billOverride} setOverride={setBillOverride} />
+          <BillTotalRow computed={computedBill} override={billOverride} setOverride={setBillOverride} disabled={cashEntryLocked} onLockedAttempt={requireOpenedBy} />
 
           {/* Drawer total summary */}
           <div className="mt-4 flex items-center gap-3 rounded-lg bg-slate-100 px-4 py-3 text-sm flex-wrap">

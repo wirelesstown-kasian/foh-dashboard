@@ -183,6 +183,7 @@ export default function DashboardPage() {
         <RegisterOpenPanel
           session={session}
           employees={employees}
+          clockRecords={clockRecords}
           today={today}
           businessDate={businessDate}
           onComplete={load}

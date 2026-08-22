@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { ShiftClock, Schedule } from '@/lib/types'
+import { Employee, ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
-import { isClockOnMealBreak } from '@/lib/clockUtils'
+import { isClockOnMealBreak, isClockOnUnpaidBreak } from '@/lib/clockUtils'
 import { cn } from '@/lib/utils'
-import { ArrowLeft, Camera, Clock3, Coffee, LogIn, LogOut, Utensils } from 'lucide-react'
+import { ArrowLeft, Bell, Camera, Clock3, Coffee, LogIn, LogOut, Sparkles, Utensils } from 'lucide-react'
 
 interface Props {
   schedules: Schedule[]
@@ -43,6 +43,14 @@ type EmployeeClockLookup = {
   employee: { id: string; name: string; role: string }
   status: ClockStatus
 }
+type AvailableStaff = {
+  id: string
+  name: string
+  label: string
+  clockedIn: boolean
+  unscheduledClockIn: boolean
+  onBreak: boolean
+}
 
 function formatStatusTime(value: string | null | undefined) {
   if (!value) return '-'
@@ -68,8 +76,12 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   const [lookupLoading, setLookupLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
+  const [announcementText, setAnnouncementText] = useState('')
+  const [announcementIsNew, setAnnouncementIsNew] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const visibleAnnouncement = announcementText.trim() || 'No announcement posted.'
+  const hasAnnouncement = announcementText.trim().length > 0
 
   const firstShift = useMemo(() => {
     return schedules
@@ -83,8 +95,82 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       .sort((a, b) => b.at.getTime() - a.at.getTime())[0] ?? null
   }, [schedules, today])
 
-  const openClockCount = clockRecords.filter(record => !record.clock_out_at).length
-  const activeBreakCount = clockRecords.filter(record => !record.clock_out_at && isClockOnMealBreak(record)).length
+  const openClockRecords = useMemo(
+    () => clockRecords.filter(record => record.session_date === today && !record.clock_out_at),
+    [clockRecords, today]
+  )
+  const openClockCount = openClockRecords.length
+  const activeBreakCount = openClockRecords.filter(record => isClockOnMealBreak(record) || isClockOnUnpaidBreak(record)).length
+  const availableStaff = useMemo<AvailableStaff[]>(() => {
+    const staffById = new Map<string, AvailableStaff>()
+    const clockedInIds = new Set(openClockRecords.map(record => record.employee_id))
+
+    for (const schedule of schedules) {
+      if (!schedule.employee) continue
+      staffById.set(schedule.employee_id, {
+        id: schedule.employee_id,
+        name: schedule.employee.name,
+        label: schedule.department ? String(schedule.department) : schedule.employee.primary_department ?? schedule.employee.role ?? 'Scheduled',
+        clockedIn: clockedInIds.has(schedule.employee_id),
+        unscheduledClockIn: false,
+        onBreak: false,
+      })
+    }
+
+    for (const record of openClockRecords) {
+      const employee = record.employee as Employee | Employee[] | undefined
+      const resolvedEmployee = Array.isArray(employee) ? employee[0] : employee
+      const existing = staffById.get(record.employee_id)
+      const onBreak = isClockOnMealBreak(record) || isClockOnUnpaidBreak(record)
+      if (existing) {
+        staffById.set(record.employee_id, { ...existing, clockedIn: true, onBreak })
+      } else {
+        staffById.set(record.employee_id, {
+          id: record.employee_id,
+          name: resolvedEmployee?.name ?? 'Clocked-in staff',
+          label: resolvedEmployee?.primary_department ?? resolvedEmployee?.role ?? 'Unscheduled',
+          clockedIn: true,
+          unscheduledClockIn: true,
+          onBreak,
+        })
+      }
+    }
+
+    return [...staffById.values()].sort((a, b) => {
+      if (a.clockedIn !== b.clockedIn) return a.clockedIn ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  }, [openClockRecords, schedules])
+
+  useEffect(() => {
+    if (!hasAnnouncement || typeof window === 'undefined') {
+      setAnnouncementIsNew(false)
+      return
+    }
+    const storageKey = 'foh-last-clock-announcement'
+    const previous = window.localStorage.getItem(storageKey)
+    const current = announcementText.trim()
+    setAnnouncementIsNew(previous !== current)
+    window.localStorage.setItem(storageKey, current)
+  }, [announcementText, hasAnnouncement])
+
+  useEffect(() => {
+    let mounted = true
+
+    const loadAnnouncement = async () => {
+      const res = await fetch('/api/app-settings', { cache: 'no-store' })
+      const data = (await res.json().catch(() => ({}))) as { settings?: { time_clock_announcement?: string } }
+      if (!mounted) return
+      setAnnouncementText(data.settings?.time_clock_announcement ?? '')
+    }
+
+    void loadAnnouncement()
+    window.addEventListener('app-settings-updated', loadAnnouncement)
+    return () => {
+      mounted = false
+      window.removeEventListener('app-settings-updated', loadAnnouncement)
+    }
+  }, [])
 
   const resetPanel = () => {
     setPanelOpen(false)
@@ -99,6 +185,16 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     setPin(nextPin)
     setLookup(null)
     setError(null)
+  }
+
+  const handlePinInput = (nextPin: string) => {
+    const sanitized = nextPin.replace(/\D/g, '').slice(0, 4)
+    setPin(sanitized)
+    setLookup(null)
+    setError(null)
+    if (sanitized.length === 4) {
+      void lookupClockStatus(sanitized)
+    }
   }
 
   useEffect(() => {
@@ -161,10 +257,10 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     return canvas.toDataURL('image/jpeg', 0.9)
   }
 
-  const lookupClockStatus = async () => {
+  const lookupClockStatus = async (pinOverride = pin) => {
     setError(null)
 
-    if (!/^\d{4}$/.test(pin)) {
+    if (!/^\d{4}$/.test(pinOverride)) {
       setError('Enter a valid 4-digit PIN')
       return null
     }
@@ -176,7 +272,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'lookup_status',
-          pin,
+          pin: pinOverride,
           session_date: today,
         }),
       })
@@ -184,6 +280,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       if (!res.ok || !data.employee || !data.status) {
         throw new Error(data.error ?? 'Failed to load clock status')
       }
+      setPin(pinOverride)
       const nextLookup = { employee: data.employee, status: data.status }
       setLookup(nextLookup)
       return nextLookup
@@ -343,7 +440,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                 <div className="w-full max-w-sm">
                   <div className="mb-6 text-center">
                     <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Staff PIN</p>
-                    <p className="mt-2 text-3xl font-bold">Enter 4 digits</p>
+                    <p className="mt-2 text-4xl font-bold">Enter 4 digits</p>
                   </div>
                   <input
                     type="password"
@@ -351,40 +448,42 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                     autoFocus
                     maxLength={4}
                     value={pin}
-                    onChange={event => clearLookup(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    onChange={event => handlePinInput(event.target.value)}
                     onKeyDown={event => {
                       if (event.key === 'Enter') {
                         event.preventDefault()
                         void lookupClockStatus()
                       }
                     }}
-                    className="mb-5 h-16 w-full rounded-lg border border-white/20 bg-white px-4 text-center font-mono text-3xl tracking-[0.55em] text-slate-950 shadow-sm"
+                    className="mb-6 h-20 w-full rounded-lg border border-white/20 bg-white px-4 text-center font-mono text-4xl tracking-[0.6em] text-slate-950 shadow-sm"
                     placeholder="••••"
                   />
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-3">
                     {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(value => (
                       <Button
                         key={value}
-                        className="h-14 bg-white text-2xl font-bold text-slate-950 hover:bg-amber-100"
-                        onClick={() => clearLookup(`${pin}${value}`.replace(/\D/g, '').slice(0, 4))}
+                        className="h-20 bg-white text-4xl font-bold text-slate-950 hover:bg-amber-100"
+                        onClick={() => handlePinInput(`${pin}${value}`)}
                       >
                         {value}
                       </Button>
                     ))}
-                    <Button variant="outline" className="h-14 border-white/20 bg-white/10 text-white hover:bg-white/20" onClick={() => clearLookup(pin.slice(0, -1))}>
+                    <Button variant="outline" className="h-20 border-white/20 bg-white/10 text-lg font-bold text-white hover:bg-white/20" onClick={() => clearLookup(pin.slice(0, -1))}>
                       Delete
                     </Button>
-                    <Button className="h-14 bg-white text-2xl font-bold text-slate-950 hover:bg-amber-100" onClick={() => clearLookup(`${pin}0`.slice(0, 4))}>
+                    <Button className="h-20 bg-white text-4xl font-bold text-slate-950 hover:bg-amber-100" onClick={() => handlePinInput(`${pin}0`)}>
                       0
                     </Button>
                     <Button
-                      className="h-14 bg-amber-500 font-bold text-white hover:bg-amber-400"
-                      onClick={() => void lookupClockStatus()}
-                      disabled={lookupLoading || pin.length !== 4}
+                      variant="outline"
+                      className="h-20 border-white/20 bg-white/10 text-lg font-bold text-white hover:bg-white/20"
+                      onClick={() => clearLookup('')}
+                      disabled={lookupLoading || pin.length === 0}
                     >
-                      {lookupLoading ? 'Checking' : 'Next'}
+                      Clear
                     </Button>
                   </div>
+                  {lookupLoading && <p className="mt-4 text-center text-sm font-semibold text-amber-300">Checking PIN...</p>}
                   {error && (
                     <div className="mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
                       {error}
@@ -396,9 +495,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
           ) : (
             <div className="flex h-full flex-col bg-slate-100">
               <div className="flex h-14 items-center justify-between border-b bg-slate-950 px-4 text-white">
-                <div>
-                  <div className="text-sm font-semibold text-amber-300">Announcement</div>
-                  <div className="max-w-[56vw] truncate text-sm text-slate-100">No announcement posted.</div>
+                <div className="flex items-center gap-2 font-semibold">
+                  <Clock3 className="h-5 w-5 text-amber-400" />
+                  Time Clock
                 </div>
                 <Button variant="ghost" className="text-white hover:bg-white/10" onClick={resetPanel}>
                   Cancel
@@ -422,6 +521,21 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                 </div>
 
                 <div className="flex min-h-0 flex-col justify-center gap-3">
+                  <div
+                    className={cn(
+                      'rounded-lg border-2 p-4 shadow-sm',
+                      hasAnnouncement
+                        ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100'
+                        : 'border-slate-200 bg-white text-slate-700',
+                      announcementIsNew && 'animate-pulse'
+                    )}
+                  >
+                    <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.14em]">
+                      {hasAnnouncement ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
+                      Announcement
+                    </div>
+                    <div className="mt-2 text-lg font-bold leading-snug">{visibleAnnouncement}</div>
+                  </div>
                   <Button
                     className="h-16 bg-emerald-600 text-lg font-bold hover:bg-emerald-700"
                     onClick={() => void handleSubmit('clock_in')}
@@ -461,6 +575,33 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     Back to PIN
                   </Button>
+                  <div className="rounded-lg border bg-white p-3 shadow-sm">
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Today&apos;s Staff</div>
+                    <div className="mt-2 max-h-36 space-y-1.5 overflow-auto">
+                      {availableStaff.length > 0 ? availableStaff.map(staff => (
+                        <div key={staff.id} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2.5 py-1.5 text-sm">
+                          <div className="min-w-0">
+                            <div className="truncate font-semibold text-slate-900">{staff.name}</div>
+                            <div className="text-xs text-slate-500">{staff.unscheduledClockIn ? 'Clocked in - not scheduled' : staff.label}</div>
+                          </div>
+                          <span
+                            className={cn(
+                              'shrink-0 rounded-full px-2 py-0.5 text-xs font-bold',
+                              staff.clockedIn
+                                ? staff.onBreak
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-emerald-100 text-emerald-700'
+                                : 'bg-slate-200 text-slate-500'
+                            )}
+                          >
+                            {staff.clockedIn ? staff.onBreak ? 'Break' : 'Here' : 'Scheduled'}
+                          </span>
+                        </div>
+                      )) : (
+                        <div className="rounded-md bg-slate-50 px-2.5 py-2 text-sm text-slate-500">No scheduled or clocked-in staff found.</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="min-h-0 overflow-auto rounded-lg border bg-white p-4 shadow-sm">

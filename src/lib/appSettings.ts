@@ -37,6 +37,7 @@ export interface DepartmentDefinition {
 export interface AppSettings extends EmailSettings {
   role_definitions: RoleDefinition[]
   primary_department_definitions: DepartmentDefinition[]
+  time_clock_announcement: string
 }
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -53,6 +54,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   weekly_summary_emails_enabled: true,
   weekly_summary_recipient: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
   wage_report_emails_enabled: true,
+  time_clock_announcement: '',
   role_definitions: [
     { key: 'manager', label: 'Manager', description: 'Admin access and oversight', color: '#8b5cf6', is_active: true, display_order: 0 },
     { key: 'server', label: 'Server', description: 'Guest-facing service and table management', color: '#0ea5e9', is_active: true, display_order: 1 },
