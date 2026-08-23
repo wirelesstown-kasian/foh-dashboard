@@ -25,6 +25,16 @@ function formatStatus(item: PayrollRunItem) {
   return 'Verified'
 }
 
+function buildItemSummary(items: PayrollRunItem[]) {
+  const hours = items.reduce((sum, item) => sum + Number(item.hours ?? 0), 0)
+  const tips = items.reduce((sum, item) => sum + Number(item.tips ?? 0), 0)
+  const baseWages = items.reduce((sum, item) => sum + Number(item.base_wages ?? 0), 0)
+  const topUp = items.reduce((sum, item) => sum + Number(item.guarantee_top_up ?? 0), 0)
+  const commission = items.reduce((sum, item) => sum + Number(item.commission ?? 0), 0)
+  const employeeCount = items.filter(item => Number(item.hours ?? 0) > 0 || Number(item.payout_amount ?? 0) > 0).length
+  return { hours, tips, baseWages, topUp, commission, employeeCount }
+}
+
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies()
   if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
@@ -62,6 +72,7 @@ export async function POST(req: NextRequest) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
     const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
     const periodLabel = `${run.start_date} to ${run.end_date}`
+    const summary = buildItemSummary(items)
     const rowHtml = items.map(item => `
       <tr>
         <td>${escapeHtml(item.employee_name)}</td>
@@ -82,13 +93,19 @@ export async function POST(req: NextRequest) {
     const html = renderEmailShell(logoUrl, `
       <h2 style="color:#111827;margin:0 0 6px">Payroll Worksheet Summary</h2>
       <p style="margin:0 0 14px;color:#4b5563">${escapeHtml(periodLabel)} | Pay date ${escapeHtml(run.pay_date)} | Department ${escapeHtml(run.department)}</p>
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0">
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Cash</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_cash ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Check</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_check ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">ACH</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_ach ?? 0))}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0">
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Staff</div><div style="font-size:20px;font-weight:700">${summary.employeeCount}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Hours</div><div style="font-size:20px;font-weight:700">${summary.hours.toFixed(2)}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Tips</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.tips)}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Base Wages</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.baseWages)}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Top-Up</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.topUp)}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Commission</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.commission)}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#047857">Cash Payout</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_cash ?? 0))}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Check Payout</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_check ?? 0))}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#1d4ed8">ACH Payout</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_ach ?? 0))}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Net Payroll</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_net ?? 0))}</div></div>
         <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Gross</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_gross ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Deductions</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_deductions ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Net</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_net ?? 0))}</div></div>
+        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#b91c1c">Deductions</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_deductions ?? 0))}</div></div>
       </div>
       ${run.memo ? `<p style="margin:0 0 12px"><strong>Memo:</strong> ${escapeHtml(run.memo)}</p>` : ''}
       <table border="1" cellpadding="7" style="border-collapse:collapse;width:100%;font-size:11px">

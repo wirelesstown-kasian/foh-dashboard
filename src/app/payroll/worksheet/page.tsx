@@ -103,6 +103,25 @@ function sortPayrollRows(rows: PayrollDraftRow[]) {
   }).map((row, index) => ({ ...row, display_order: index }))
 }
 
+function buildWorksheetSummary(rows: PayrollDraftRow[]) {
+  const hours = rows.reduce((sum, row) => sum + Number(row.hours ?? 0), 0)
+  const tips = rows.reduce((sum, row) => sum + Number(row.tips ?? 0), 0)
+  const baseWages = rows.reduce((sum, row) => sum + Number(row.base_wages ?? 0), 0)
+  const topUp = rows.reduce((sum, row) => sum + Number(row.guarantee_top_up ?? 0), 0)
+  const commission = rows.reduce((sum, row) => sum + Number(row.commission ?? 0), 0)
+  const employeeCount = rows.filter(row => row.hours > 0 || row.payout_amount > 0).length
+  return { hours, tips, baseWages, topUp, commission, employeeCount }
+}
+
+function escapePrintValue(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function printSummary({
   rows,
   totals,
@@ -122,6 +141,7 @@ function printSummary({
 }) {
   const printWindow = window.open('', '_blank', 'width=1200,height=800')
   if (!printWindow) return
+  const summary = buildWorksheetSummary(rows)
 
   printWindow.document.write(`
     <html>
@@ -131,7 +151,7 @@ function printSummary({
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; color: #111827; }
           h1 { margin: 0 0 4px; }
           .muted { color: #64748b; font-size: 12px; }
-          .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0; }
+          .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 18px 0; }
           .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; }
           .metric { font-size: 22px; font-weight: 800; margin-top: 4px; }
           table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -143,12 +163,19 @@ function printSummary({
       </head>
       <body>
         <h1>Payroll Summary</h1>
-        <div class="muted">${department.toUpperCase()} | ${startDate} - ${endDate} | Pay date ${payDate}</div>
-        ${memo ? `<div class="note">${memo}</div>` : ''}
+        <div class="muted">${escapePrintValue(department.toUpperCase())} | ${startDate} - ${endDate} | Pay date ${payDate}</div>
+        ${memo ? `<div class="note">${escapePrintValue(memo)}</div>` : ''}
         <div class="cards">
-          <div class="card"><div class="muted">Cash</div><div class="metric">${formatCurrency(totals.cash)}</div></div>
-          <div class="card"><div class="muted">Check</div><div class="metric">${formatCurrency(totals.check)}</div></div>
-          <div class="card"><div class="muted">ACH</div><div class="metric">${formatCurrency(totals.ach)}</div></div>
+          <div class="card"><div class="muted">Staff</div><div class="metric">${summary.employeeCount}</div></div>
+          <div class="card"><div class="muted">Hours</div><div class="metric">${summary.hours.toFixed(2)}</div></div>
+          <div class="card"><div class="muted">Tips</div><div class="metric">${formatCurrency(summary.tips)}</div></div>
+          <div class="card"><div class="muted">Base Wages</div><div class="metric">${formatCurrency(summary.baseWages)}</div></div>
+          <div class="card"><div class="muted">Top-Up</div><div class="metric">${formatCurrency(summary.topUp)}</div></div>
+          <div class="card"><div class="muted">Commission</div><div class="metric">${formatCurrency(summary.commission)}</div></div>
+          <div class="card"><div class="muted">Cash Payout</div><div class="metric">${formatCurrency(totals.cash)}</div></div>
+          <div class="card"><div class="muted">Check Payout</div><div class="metric">${formatCurrency(totals.check)}</div></div>
+          <div class="card"><div class="muted">ACH Payout</div><div class="metric">${formatCurrency(totals.ach)}</div></div>
+          <div class="card"><div class="muted">Net Payroll</div><div class="metric">${formatCurrency(totals.net)}</div></div>
         </div>
         <table>
           <thead>
@@ -159,15 +186,15 @@ function printSummary({
           <tbody>
             ${rows.map(row => `
               <tr>
-                <td>${paymentMethodLabel(row.payment_method)}</td>
-                <td>${row.employee_name}</td>
+                <td>${escapePrintValue(paymentMethodLabel(row.payment_method))}</td>
+                <td>${escapePrintValue(row.employee_name)}</td>
                 <td class="right">${row.hours.toFixed(2)}</td>
                 <td class="right">${row.has_tip_data ? formatCurrency(row.tips) : ''}</td>
                 <td class="right">${formatCurrency(row.commission)}</td>
                 <td class="right">${formatCurrency(row.deductions)}</td>
                 <td class="right">${formatCurrency(row.net_pay)}</td>
                 <td class="right">${formatCurrency(row.payout_amount)}</td>
-                <td>${row.memo}</td>
+                <td>${escapePrintValue(row.memo)}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -229,15 +256,7 @@ export default function WageWorksheetPage() {
   ], [departmentDefinitions])
 
   const totals = useMemo(() => getPayrollTotals(rows), [rows])
-  const worksheetSummary = useMemo(() => {
-    const hours = rows.reduce((sum, row) => sum + Number(row.hours ?? 0), 0)
-    const tips = rows.reduce((sum, row) => sum + Number(row.tips ?? 0), 0)
-    const baseWages = rows.reduce((sum, row) => sum + Number(row.base_wages ?? 0), 0)
-    const topUp = rows.reduce((sum, row) => sum + Number(row.guarantee_top_up ?? 0), 0)
-    const commission = rows.reduce((sum, row) => sum + Number(row.commission ?? 0), 0)
-    const employeeCount = rows.filter(row => row.hours > 0 || row.payout_amount > 0).length
-    return { hours, tips, baseWages, topUp, commission, employeeCount }
-  }, [rows])
+  const worksheetSummary = useMemo(() => buildWorksheetSummary(rows), [rows])
   const missingPaymentRows = rows.filter(row => !row.payment_method)
   const hasClockFlags = rows.some(row => row.has_auto_clock_out || row.has_open_clock)
   const breakReviewCounts = useMemo(() => {
@@ -914,18 +933,46 @@ export default function WageWorksheetPage() {
           <DialogHeader>
             <DialogTitle>Payout Summary</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3">
-            <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border bg-emerald-50 p-4">
-              <p className="text-sm font-semibold uppercase text-emerald-700">Cash</p>
-              <p className="text-right text-2xl font-bold leading-none text-emerald-950">{formatCurrency(totals.cash)}</p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Staff</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{worksheetSummary.employeeCount}</div>
             </div>
-            <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border bg-slate-50 p-4">
-              <p className="text-sm font-semibold uppercase text-slate-500">Check</p>
-              <p className="text-right text-2xl font-bold leading-none text-slate-950">{formatCurrency(totals.check)}</p>
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Hours</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{worksheetSummary.hours.toFixed(2)}</div>
             </div>
-            <div className="flex min-w-0 items-center justify-between gap-4 rounded-xl border bg-blue-50 p-4">
-              <p className="text-sm font-semibold uppercase text-blue-700">ACH</p>
-              <p className="text-right text-2xl font-bold leading-none text-blue-950">{formatCurrency(totals.ach)}</p>
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Tips</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(worksheetSummary.tips)}</div>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Base Wages</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(worksheetSummary.baseWages)}</div>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Top-Up</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(worksheetSummary.topUp)}</div>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Commission</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(worksheetSummary.commission)}</div>
+            </div>
+            <div className="rounded-lg border bg-emerald-50 p-3">
+              <div className="text-xs uppercase text-emerald-700">Cash Payout</div>
+              <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(totals.cash)}</div>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Check Payout</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(totals.check)}</div>
+            </div>
+            <div className="rounded-lg border bg-blue-50 p-3">
+              <div className="text-xs uppercase text-blue-700">ACH Payout</div>
+              <div className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(totals.ach)}</div>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <div className="text-xs uppercase text-muted-foreground">Net Payroll</div>
+              <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(totals.net)}</div>
             </div>
           </div>
           <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 text-sm sm:grid-cols-3">
