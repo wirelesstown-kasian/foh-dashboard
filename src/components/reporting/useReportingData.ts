@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Employee, EodReport, PayrollRun, PayrollRunItem, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
+import { Employee, EodReport, PayrollRun, PayrollRunItem, Schedule, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD, isMissingAddressColumn, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withStaffingProfileFields, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const REPORTING_REFRESH_EVENT = 'reporting-data-refresh'
@@ -154,6 +154,27 @@ export function useScheduledDepartmentIds(startDate: string, endDate: string) {
   }, [startDate, endDate])
 
   return deptMap
+}
+
+export function useSchedulesByRange(startDate: string, endDate: string) {
+  const [schedules, setSchedules] = useState<Schedule[]>([])
+
+  useEffect(() => {
+    if (!startDate || !endDate) return
+    let mounted = true
+    void (async () => {
+      const res = await supabase
+        .from('schedules')
+        .select('id, employee_id, date, start_time, end_time, department, created_at')
+        .gte('date', startDate)
+        .lte('date', endDate)
+      if (!mounted) return
+      setSchedules((res.data ?? []) as Schedule[])
+    })()
+    return () => { mounted = false }
+  }, [endDate, startDate])
+
+  return schedules
 }
 
 export function useClockRecords({

@@ -18,7 +18,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download, Save } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getRoleColorTheme } from '@/lib/organization'
 import type { EmailSettings } from '@/lib/appSettings'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
@@ -329,9 +329,8 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       previousDraftOrderPromise,
     ])
     const activeEmployees = (empRes.data ?? []).filter(employee => employeeMatchesScheduleDepartment(employee, department))
-    // schedules query is already filtered by department — no role-based filtering needed
-    const departmentSchedules = ((schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>)
-      .filter(schedule => !schedule.employee || !schedule.employee.is_active || employeeMatchesScheduleDepartment(schedule.employee, department))
+    // The query is already filtered by the schedule row's department. Do not let profile role hide cross-department shifts.
+    const departmentSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
     const namesById = new Map<string, string>()
 
     for (const employee of activeEmployees) {
@@ -602,7 +601,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const title = `${departmentLabel} Planner`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = displayedEmployees.map(employee => {
-      const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
+      const roleTheme = getRoleColorTheme(department, roleDefinitions)
       const dayCells = days.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
@@ -622,7 +621,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
           <td style="border-left: 4px solid ${roleTheme.pdfShiftBorder};">
             <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
             <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
-              ${getRoleLabel(employee.role, roleDefinitions)}
+              ${departmentLabel}
             </div>
           </td>
           ${dayCells}
@@ -1137,7 +1136,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             </thead>
             <tbody>
               {displayedEmployees.map((emp, rowIndex) => {
-                const roleTheme = getRoleColorTheme(emp.role, roleDefinitions)
+                const roleTheme = getRoleColorTheme(department, roleDefinitions)
                 return (
                 <tr key={emp.id} className="border-b border-slate-200 hover:bg-slate-50/70">
                   <td className="border-l-4 p-3.5 align-top" style={roleTheme.rowAccentStyle}>
@@ -1163,7 +1162,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                           <div className="font-semibold text-[15px]">{employeeNamesById.get(emp.id) ?? emp.name}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5">
                             <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
-                              {getRoleLabel(emp.role, roleDefinitions)}
+                              {departmentLabel}
                             </span>
                             {!emp.is_active && (
                               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
@@ -1519,7 +1518,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {availableEmployeesToAdd.map(employee => {
                   const checked = staffToAdd.includes(employee.id)
-                  const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
+                  const roleTheme = getRoleColorTheme(department, roleDefinitions)
                   return (
                     <label
                       key={employee.id}
@@ -1529,7 +1528,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                         <div className="font-medium text-slate-900">{employee.name}</div>
                         <div className="mt-2">
                           <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
-                            {getRoleLabel(employee.role, roleDefinitions)}
+                            {departmentLabel}
                           </span>
                         </div>
                       </div>

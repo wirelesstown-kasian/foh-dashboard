@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { getEmailSettings } from '@/lib/appSettings'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleEmployee } from '@/lib/tipEligibility'
-import type { Employee, ShiftClock } from '@/lib/types'
+import { isTipEligibleForWork } from '@/lib/tipEligibility'
+import type { Employee, Schedule, ShiftClock } from '@/lib/types'
 
 type TipDist = {
   employee_id: string
-  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'tip_pool_hourly_rate'> | null
+  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate'> | null
   start_time: string | null
   end_time: string | null
   hours_worked: number
@@ -19,7 +19,7 @@ type TipDist = {
 }
 
 type ShiftClockWithEmployee = ShiftClock & {
-  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'tip_pool_hourly_rate'> | Array<Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'tip_pool_hourly_rate'>> | null
+  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate'> | Array<Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate'>> | null
 }
 
 function formatShiftTime(value: string | null) {
@@ -43,7 +43,7 @@ function isoToBusinessTime(value: string | null) {
   }).format(new Date(value))
 }
 
-function buildCalculatedTipDistributions(clockRecords: ShiftClockWithEmployee[], tipTotal: number): TipDist[] {
+function buildCalculatedTipDistributions(clockRecords: ShiftClockWithEmployee[], tipTotal: number, schedules: Schedule[] = []): TipDist[] {
   const grouped = new Map<string, {
     employee_id: string
     employee: NonNullable<TipDist['employee']>
@@ -54,7 +54,7 @@ function buildCalculatedTipDistributions(clockRecords: ShiftClockWithEmployee[],
 
   for (const record of clockRecords) {
     const employee = getClockEmployee(record)
-    if (!employee || !isTipEligibleEmployee(employee)) continue
+    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
 
     const hours = getEffectiveClockHours(record)
     if (hours <= 0) continue
@@ -149,18 +149,18 @@ export async function POST(req: NextRequest) {
     const [sessionSchedulesRes, shiftClocksRes] = await Promise.all([
       supabaseAdmin
         .from('schedules')
-        .select('employee_id, start_time, end_time')
+        .select('id, employee_id, date, start_time, end_time, department, created_at')
         .eq('date', report.session_date),
       supabaseAdmin
         .from('shift_clocks')
-        .select('*, employee:employees(id, name, email, role, primary_department, tip_pool_hourly_rate)')
+        .select('*, employee:employees(id, name, email, role, primary_department, schedule_departments, tip_pool_hourly_rate)')
         .eq('session_date', report.session_date),
     ])
-    const sessionSchedules = sessionSchedulesRes.data ?? []
+    const sessionSchedules = (sessionSchedulesRes.data ?? []) as Schedule[]
     const shiftClocks = (shiftClocksRes.data ?? []) as ShiftClockWithEmployee[]
 
     const scheduleByEmployee = new Map(
-      ((sessionSchedules ?? []) as Array<{ employee_id: string; start_time: string; end_time: string }>).map(schedule => [
+      ((sessionSchedules ?? []) as Array<Schedule>).map(schedule => [
         schedule.employee_id,
         schedule,
       ])
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
 
     const sourceTipDists = rawTipDists.length > 0
       ? rawTipDists
-      : buildCalculatedTipDistributions(shiftClocks, Number(report.tip_total ?? 0))
+      : buildCalculatedTipDistributions(shiftClocks, Number(report.tip_total ?? 0), sessionSchedules)
 
     const tipDists = sourceTipDists.map(dist => {
       const schedule = scheduleByEmployee.get(dist.employee_id)

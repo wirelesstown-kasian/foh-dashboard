@@ -949,24 +949,7 @@ export default function ReportingDashboardPage() {
             <MixBar label="Credit Card" value={currentTotals.card} total={mixTotal} color="#2563eb" />
             <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316" />
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border bg-emerald-50 p-3">
-              <div className="text-xs font-medium uppercase text-emerald-700">Collected Tip</div>
-              <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(currentTotals.collectedTip)}</div>
-              <div className="mt-0.5 text-[11px] text-emerald-700">Current range</div>
-            </div>
-            <div className="rounded-lg border bg-violet-50 p-3">
-              <div className="text-xs font-medium uppercase text-violet-700">Total Payroll Out</div>
-              <div className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(currentTotals.totalPayrollOut)}</div>
-              <div className="mt-0.5 text-[11px] text-violet-700">{hasCurrentSavedPayroll ? 'Saved worksheet' : 'Clock estimate'}</div>
-            </div>
-            <div className="rounded-lg border bg-slate-50 p-3">
-              <div className="text-xs font-medium uppercase text-slate-500">Payroll / Net</div>
-              <div className="mt-1 text-xl font-bold text-slate-950">{payrollRatio === null ? '—' : `${payrollRatio.toFixed(1)}%`}</div>
-              <div className="mt-0.5 text-[11px] text-slate-500">Current range</div>
-            </div>
-          </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <div className="mt-5 grid gap-2 sm:grid-cols-2">
             {[
               ['Kitchen Payroll', payrollPanel.kitchen],
               ['Server Payroll', payrollPanel.server],

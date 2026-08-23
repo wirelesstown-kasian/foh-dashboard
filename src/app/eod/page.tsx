@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, DailySession, EodReport, TipDistribution, ShiftClock } from '@/lib/types'
 import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
-import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import {
@@ -15,12 +15,13 @@ import {
   isMissingMealBreakThresholdColumn,
   isMissingPaymentMethodColumn,
   isMissingTipPoolRateColumn,
+  getEmployeeScheduleDepartments,
   withMealBreakThresholdHours,
   withPaymentMethod,
   withStaffingProfileFields,
   withTipPoolHourlyRate,
 } from '@/lib/employeeSelect'
-import { isTipEligibleEmployee } from '@/lib/tipEligibility'
+import { isTipEligibleDepartment, isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -54,7 +55,7 @@ function aggregateClockTipRows(records: ShiftClock[], employees: Employee[]): Ti
 
   for (const record of records) {
     const employee = employees.find(item => item.id === record.employee_id)
-    if (!employee || !isTipEligibleEmployee(employee)) continue
+    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee))) continue
 
     const existing = grouped.get(record.employee_id) ?? {
       employee_id: record.employee_id,
@@ -209,7 +210,10 @@ export default function EodPage() {
   })
   const [tipRows, setTipRows] = useState<TipRow[]>([])
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
-  const tipEligibleEmployees = employees.filter(employee => isTipEligibleEmployee(employee))
+  const tipEligibleEmployees = employees.filter(employee =>
+    isTipEligibleEmployee(employee) ||
+    getEmployeeScheduleDepartments(employee).some(department => isTipEligibleDepartment(department))
+  )
   const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
 
   const toFinancialForm = useCallback((value: Partial<{
@@ -300,7 +304,7 @@ export default function EodPage() {
       const savedTipRows = (eod.tip_distributions ?? [])
         .filter((d: TipDistribution & { employee?: Employee }) => {
           const employee = d.employee ?? (empRes.data ?? []).find((item: Employee) => item.id === d.employee_id)
-          return !!employee && isTipEligibleEmployee(employee)
+          return !!employee
         })
         .map((d: TipDistribution & { employee?: Employee }) => {
           const clockRow = clockRowsByEmployeeId.get(d.employee_id)

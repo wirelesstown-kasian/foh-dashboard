@@ -13,9 +13,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowLeft } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { useClockRecords, useEmployees, useEodReports, notifyReportingDataChanged } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEmployees, useEodReports, notifyReportingDataChanged, useSchedulesByRange } from '@/components/reporting/useReportingData'
 import { supabase } from '@/lib/supabase'
-import { shouldWarnMissingMealBreak } from '@/lib/clockUtils'
+import { clockMatchesWorkDepartment, shouldWarnMissingMealBreak } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { formatCurrency } from '@/lib/reporting'
 import {
@@ -158,7 +158,7 @@ function printSummary({
                 <td>${paymentMethodLabel(row.payment_method)}</td>
                 <td>${row.employee_name}</td>
                 <td class="right">${row.hours.toFixed(2)}</td>
-                <td class="right">${formatCurrency(row.tips)}</td>
+                <td class="right">${row.has_tip_data ? formatCurrency(row.tips) : ''}</td>
                 <td class="right">${formatCurrency(row.commission)}</td>
                 <td class="right">${formatCurrency(row.deductions)}</td>
                 <td class="right">${formatCurrency(row.net_pay)}</td>
@@ -210,6 +210,7 @@ export default function WageWorksheetPage() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
+  const schedules = useSchedulesByRange(startDate, endDate)
 
   const departmentOptions = useMemo(() => [
     { key: 'all', label: 'All' },
@@ -231,15 +232,24 @@ export default function WageWorksheetPage() {
     const counts = new Map<string, number>()
     for (const record of clockRecords) {
       if (record.session_date < startDate || record.session_date > endDate) continue
-      if (shouldWarnMissingMealBreak(record, employeeById.get(record.employee_id))) {
+      const employee = employeeById.get(record.employee_id)
+      if (department !== 'all' && !clockMatchesWorkDepartment(record, department, employee, schedules)) continue
+      if (shouldWarnMissingMealBreak(record, employee)) {
         counts.set(record.employee_id, (counts.get(record.employee_id) ?? 0) + 1)
       }
     }
     return counts
-  }, [clockRecords, employees, startDate, endDate])
+  }, [clockRecords, department, employees, endDate, schedules, startDate])
   const availableEmployees = employees.filter(employee => {
     if (rows.some(row => row.employee_id === employee.id)) return false
-    return department === 'all' || getEmployeeScheduleDepartments(employee).includes(department)
+    return department === 'all' ||
+      getEmployeeScheduleDepartments(employee).includes(department) ||
+      clockRecords.some(record =>
+        record.employee_id === employee.id &&
+        record.session_date >= startDate &&
+        record.session_date <= endDate &&
+        clockMatchesWorkDepartment(record, department, employee, schedules)
+      )
   })
 
   const applyPayrollPeriod = (cycle: PayrollCycle, nextPayDate = getDefaultPayDate(cycle)) => {
@@ -277,6 +287,7 @@ export default function WageWorksheetPage() {
       department,
       startDate,
       endDate,
+      schedules,
     }).filter(row => row.hours > 0)
     setRows(sortPayrollRows(nextRows))
     setStep('worksheet')
@@ -325,6 +336,7 @@ export default function WageWorksheetPage() {
       department,
       startDate,
       endDate,
+      schedules,
     })
     setRows(currentRows => sortPayrollRows([...currentRows, ...nextRows]))
     setEmployeeToAdd('')
@@ -700,7 +712,15 @@ export default function WageWorksheetPage() {
                         updateRow(row.employee_id, { hours })
                       }} />
                     </TableCell>
-                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.tips} onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="border-r p-1 align-middle">
+                      <Input
+                        className="h-8 w-full text-right"
+                        type="number"
+                        step="0.01"
+                        value={row.has_tip_data || row.tips > 0 ? row.tips : ''}
+                        onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value), has_tip_data: event.target.value.trim().length > 0 })}
+                      />
+                    </TableCell>
                     <TableCell className="border-r p-1 align-middle">
                       <Input className="h-8 w-full text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
                       <div className="mt-0.5 text-right text-[10px] leading-none text-muted-foreground">

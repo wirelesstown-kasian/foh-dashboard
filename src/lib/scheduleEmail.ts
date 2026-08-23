@@ -10,7 +10,6 @@ import {
 } from '@/lib/emailUtils'
 import { getEmailSettings } from '@/lib/appSettings'
 import type { ScheduleDepartment } from '@/lib/types'
-import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 
 type ScheduleEmailRow = {
   date: string
@@ -87,9 +86,7 @@ export async function sendWeeklyScheduleEmails({
   const empMap = new Map<string, EmpSchedule>()
   const scheduleRows = (schedules as ScheduleEmailRow[])
     .filter((schedule): schedule is ScheduleEmailRow & { employee: ScheduleEmailEmployee } => {
-      if (!schedule.employee) return false
-      const scheduleDepartment = normalizeScheduleDepartment(schedule.department)
-      return schedule.employee.is_active === false || employeeMatchesScheduleDepartment(schedule.employee, scheduleDepartment)
+      return !!schedule.employee
     })
 
   if (scheduleRows.length === 0) {

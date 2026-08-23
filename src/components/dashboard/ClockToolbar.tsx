@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Employee, ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
-import { isClockOnMealBreak, isClockOnUnpaidBreak } from '@/lib/clockUtils'
+import { getClockWorkDepartment, isClockOnMealBreak, isClockOnUnpaidBreak } from '@/lib/clockUtils'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { cn } from '@/lib/utils'
 import { ArrowLeft, Bell, Camera, Clock3, Coffee, LogIn, LogOut, Sparkles, Utensils } from 'lucide-react'
 
@@ -38,9 +39,10 @@ type ClockStatus = {
   unpaid_break_started_at?: string | null
   unpaid_break_ended_at?: string | null
   unpaid_break_minutes?: number
+  work_department?: string | null
 }
 type EmployeeClockLookup = {
-  employee: { id: string; name: string; role: string }
+  employee: Pick<Employee, 'id' | 'name' | 'role' | 'primary_department' | 'schedule_departments'>
   status: ClockStatus
 }
 type AvailableStaff = {
@@ -68,35 +70,71 @@ function formatStatusDateTime(value: string | null | undefined) {
 }
 
 function TodayStaffPanel({ staff }: { staff: AvailableStaff[] }) {
+  const showScrollCue = staff.length > 4
+
   return (
     <div className="rounded-lg border bg-white p-3 shadow-sm">
       <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Today&apos;s Staff</div>
-      <div className="mt-2 max-h-56 space-y-1.5 overflow-auto">
-        {staff.length > 0 ? staff.map(item => (
-          <div key={item.id} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2.5 py-1.5 text-sm">
-            <div className="min-w-0">
-              <div className="truncate font-semibold text-slate-900">{item.name}</div>
-              <div className="text-xs text-slate-500">{item.unscheduledClockIn ? 'Clocked in - not scheduled' : item.label}</div>
+      <div className="relative mt-2">
+        <div className={cn('max-h-56 space-y-1.5 overflow-auto pr-1', showScrollCue && 'pb-9')}>
+          {staff.length > 0 ? staff.map(item => (
+            <div key={item.id} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2.5 py-1.5 text-sm">
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-slate-900">{item.name}</div>
+                <div className="text-xs text-slate-500">{item.unscheduledClockIn ? `Clocked in - ${item.label}` : item.label}</div>
+              </div>
+              <span
+                className={cn(
+                  'shrink-0 rounded-full px-2 py-0.5 text-xs font-bold',
+                  item.clockedIn
+                    ? item.onBreak
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-emerald-100 text-emerald-700'
+                    : 'bg-slate-200 text-slate-500'
+                )}
+              >
+                {item.clockedIn ? item.onBreak ? 'Break' : 'Here' : 'Scheduled'}
+              </span>
             </div>
-            <span
-              className={cn(
-                'shrink-0 rounded-full px-2 py-0.5 text-xs font-bold',
-                item.clockedIn
-                  ? item.onBreak
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'bg-emerald-100 text-emerald-700'
-                  : 'bg-slate-200 text-slate-500'
-              )}
-            >
-              {item.clockedIn ? item.onBreak ? 'Break' : 'Here' : 'Scheduled'}
-            </span>
+          )) : (
+            <div className="rounded-md bg-slate-50 px-2.5 py-2 text-sm text-slate-500">No scheduled or clocked-in staff found.</div>
+          )}
+        </div>
+        {showScrollCue && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 rounded-b-md bg-gradient-to-t from-white via-white/95 to-transparent px-2 pb-1.5 pt-5 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Scroll for more ↓
           </div>
-        )) : (
-          <div className="rounded-md bg-slate-50 px-2.5 py-2 text-sm text-slate-500">No scheduled or clocked-in staff found.</div>
         )}
       </div>
     </div>
   )
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values
+    .map(value => typeof value === 'string' ? value.trim() : '')
+    .filter(Boolean)))
+}
+
+function getScheduledDepartments(employeeId: string, schedules: Schedule[]) {
+  return uniqueStrings(
+    schedules
+      .filter(schedule => schedule.employee_id === employeeId)
+      .sort((left, right) => left.start_time.localeCompare(right.start_time))
+      .map(schedule => schedule.department)
+  )
+}
+
+function getWorkDepartmentOptions(
+  employee: EmployeeClockLookup['employee'],
+  schedules: Schedule[]
+) {
+  return uniqueStrings([
+    ...getScheduledDepartments(employee.id, schedules),
+    ...getEmployeeScheduleDepartments(employee),
+    employee.primary_department,
+    employee.role,
+  ])
 }
 
 export function ClockToolbar({ schedules, clockRecords, today, onRefresh, variant = 'panel' }: Props) {
@@ -105,6 +143,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [lookup, setLookup] = useState<EmployeeClockLookup | null>(null)
+  const [selectedWorkDepartment, setSelectedWorkDepartment] = useState('')
   const [lookupLoading, setLookupLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
@@ -154,13 +193,14 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       const resolvedEmployee = Array.isArray(employee) ? employee[0] : employee
       const existing = staffById.get(record.employee_id)
       const onBreak = isClockOnMealBreak(record) || isClockOnUnpaidBreak(record)
+      const workDepartment = getClockWorkDepartment(record, resolvedEmployee, schedules)
       if (existing) {
-        staffById.set(record.employee_id, { ...existing, clockedIn: true, onBreak })
+        staffById.set(record.employee_id, { ...existing, label: workDepartment, clockedIn: true, onBreak })
       } else {
         staffById.set(record.employee_id, {
           id: record.employee_id,
           name: resolvedEmployee?.name ?? 'Clocked-in staff',
-          label: resolvedEmployee?.primary_department ?? resolvedEmployee?.role ?? 'Unscheduled',
+          label: workDepartment,
           clockedIn: true,
           unscheduledClockIn: true,
           onBreak,
@@ -209,6 +249,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     setTarget(null)
     setError(null)
     setLookup(null)
+    setSelectedWorkDepartment('')
     setLookupLoading(false)
     setPin('')
   }
@@ -216,6 +257,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   const clearLookup = (nextPin: string) => {
     setPin(nextPin)
     setLookup(null)
+    setSelectedWorkDepartment('')
     setError(null)
   }
 
@@ -223,6 +265,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     const sanitized = nextPin.replace(/\D/g, '').slice(0, 4)
     setPin(sanitized)
     setLookup(null)
+    setSelectedWorkDepartment('')
     setError(null)
     if (sanitized.length === 4) {
       void lookupClockStatus(sanitized)
@@ -313,11 +356,14 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
         throw new Error(data.error ?? 'Failed to load clock status')
       }
       setPin(pinOverride)
-      const nextLookup = { employee: data.employee, status: data.status }
+      const nextLookup = { employee: data.employee, status: data.status } as EmployeeClockLookup
+      const departmentOptions = getWorkDepartmentOptions(nextLookup.employee, schedules)
+      setSelectedWorkDepartment(nextLookup.status.work_department ?? departmentOptions[0] ?? '')
       setLookup(nextLookup)
       return nextLookup
     } catch (err) {
       setLookup(null)
+      setSelectedWorkDepartment('')
       setError(err instanceof Error ? err.message : 'Failed to load clock status')
       return null
     } finally {
@@ -349,6 +395,13 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       return
     }
 
+    const workDepartmentOptions = getWorkDepartmentOptions(currentLookup.employee, schedules)
+    const resolvedWorkDepartment = selectedWorkDepartment || currentLookup.status.work_department || workDepartmentOptions[0] || ''
+    if (nextTarget === 'clock_in' && workDepartmentOptions.length > 0 && !resolvedWorkDepartment) {
+      setError('Select a department before clocking in.')
+      return
+    }
+
     const needsPhoto = nextTarget === 'clock_in' || nextTarget === 'clock_out'
     const photo = skipPhoto || !needsPhoto ? null : captureFrame()
     if (!skipPhoto && needsPhoto && !photo) {
@@ -367,6 +420,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
           session_date: today,
           photo_data_url: photo,
           skip_photo: skipPhoto,
+          work_department: nextTarget === 'clock_in' ? resolvedWorkDepartment : undefined,
         }),
       })
       const data = (await res.json().catch(() => ({}))) as { error?: string; available_at?: string }
@@ -398,6 +452,8 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   const mealBreakActionLabel = lookup?.status.can_end_break ? 'End Meal Break' : 'Meal Break'
   const unpaidBreakActionLabel = lookup?.status.can_end_unpaid_break ? 'End Break' : 'Break'
   const isNav = variant === 'nav'
+  const workDepartmentOptions = lookup ? getWorkDepartmentOptions(lookup.employee, schedules) : []
+  const displayedWorkDepartment = lookup?.status.work_department ?? selectedWorkDepartment
 
   return (
     <>
@@ -418,6 +474,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
             setPanelOpen(true)
             setTarget(null)
             setLookup(null)
+            setSelectedWorkDepartment('')
             setError(null)
           }}
           aria-label="Open time clock"
@@ -568,6 +625,28 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                     </div>
                     <div className="mt-2 text-lg font-bold leading-snug">{visibleAnnouncement}</div>
                   </div>
+                  {lookup.status.can_clock_in && workDepartmentOptions.length > 1 && (
+                    <div className="rounded-lg border bg-white p-3 shadow-sm">
+                      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Clock In As</div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {workDepartmentOptions.map(department => (
+                          <button
+                            key={department}
+                            type="button"
+                            onClick={() => setSelectedWorkDepartment(department)}
+                            className={cn(
+                              'rounded-md border px-3 py-2 text-sm font-bold capitalize transition',
+                              selectedWorkDepartment === department
+                                ? 'border-amber-400 bg-amber-100 text-amber-950'
+                                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-amber-200 hover:bg-amber-50'
+                            )}
+                          >
+                            {department}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <Button
                     className="h-16 bg-emerald-600 text-lg font-bold hover:bg-emerald-700"
                     onClick={() => void handleSubmit('clock_in')}
@@ -603,7 +682,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                     <Coffee className="mr-2 h-5 w-5" />
                     {submitting && target === 'toggle_unpaid_break' ? 'Saving...' : unpaidBreakActionLabel}
                   </Button>
-                  <Button variant="ghost" className="h-11 text-slate-600" onClick={() => { setLookup(null); setError(null); setPin('') }}>
+                  <Button variant="ghost" className="h-11 text-slate-600" onClick={() => { setLookup(null); setSelectedWorkDepartment(''); setError(null); setPin('') }}>
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     Back to PIN
                   </Button>
@@ -615,6 +694,10 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                   <div className="mt-2 text-2xl font-bold text-slate-950">{lookup.employee.name}</div>
                   <div className="mt-1 rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">{statusLabel}</div>
                   <div className="mt-4 grid gap-2 text-sm">
+                    <div className="rounded-md border bg-slate-50 px-3 py-2">
+                      <div className="text-xs uppercase text-slate-400">Worked Department</div>
+                      <div className="font-semibold capitalize">{displayedWorkDepartment || '-'}</div>
+                    </div>
                     <div className="rounded-md border bg-slate-50 px-3 py-2">
                       <div className="text-xs uppercase text-slate-400">Clock In</div>
                       <div className="font-semibold">{formatStatusDateTime(lookup.status.clock_in_at)}</div>

@@ -1,8 +1,8 @@
-import { EodReport, Employee, PaymentMethod, PayrollRun, PayrollRunItem, ShiftClock } from '@/lib/types'
-import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { EodReport, Employee, PaymentMethod, PayrollRun, PayrollRunItem, Schedule, ShiftClock } from '@/lib/types'
+import { clockMatchesWorkDepartment, getClockWorkDepartment, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleEmployee } from '@/lib/tipEligibility'
+import { isTipEligibleForWork } from '@/lib/tipEligibility'
 
 export type PayrollDraftRow = {
   employee_id: string
@@ -22,6 +22,7 @@ export type PayrollDraftRow = {
   cash_rounding: number
   has_auto_clock_out: boolean
   has_open_clock: boolean
+  has_tip_data: boolean
   memo: string
   display_order: number
 }
@@ -98,14 +99,31 @@ function getSavedDailyTips(report: EodReport & { tip_distributions?: { employee_
   return savedTips
 }
 
-function getCalculatedDailyTips(report: EodReport, employees: Employee[], clockRecords: ShiftClock[]) {
+function employeeHasDepartmentClock(
+  employeeId: string,
+  sessionDate: string,
+  department: string,
+  employees: Employee[],
+  clockRecords: ShiftClock[],
+  schedules: Schedule[] = []
+) {
+  if (department === 'all') return true
+  const employee = employees.find(item => item.id === employeeId)
+  return clockRecords.some(record =>
+    record.employee_id === employeeId &&
+    record.session_date === sessionDate &&
+    clockMatchesWorkDepartment(record, department, employee, schedules)
+  )
+}
+
+function getCalculatedDailyTips(report: EodReport, employees: Employee[], clockRecords: ShiftClock[], schedules: Schedule[] = []) {
   const employeeById = new Map(employees.map(employee => [employee.id, employee]))
   const hoursByEmployee = new Map<string, number>()
 
   for (const record of clockRecords) {
     if (record.session_date !== report.session_date) continue
     const employee = employeeById.get(record.employee_id)
-    if (!employee || !isTipEligibleEmployee(employee)) continue
+    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
 
     const hours = getEffectiveClockHours(record)
     if (hours <= 0) continue
@@ -146,15 +164,18 @@ export function getSavedTipMap(
   startDate: string,
   endDate: string,
   employees: Employee[] = [],
-  clockRecords: ShiftClock[] = []
+  clockRecords: ShiftClock[] = [],
+  department = 'all',
+  schedules: Schedule[] = []
 ) {
   const tipsByEmployee = new Map<string, number>()
   for (const report of reports) {
     if (report.session_date < startDate || report.session_date > endDate) continue
     const savedTips = getSavedDailyTips(report)
-    const calculatedTips = getCalculatedDailyTips(report, employees, clockRecords)
+    const calculatedTips = getCalculatedDailyTips(report, employees, clockRecords, schedules)
     const dailyTips = shouldUseCalculatedDailyTips(savedTips, calculatedTips) ? calculatedTips : savedTips
     for (const [employeeId, tip] of dailyTips) {
+      if (!employeeHasDepartmentClock(employeeId, report.session_date, department, employees, clockRecords, schedules)) continue
       addTipToMap(tipsByEmployee, employeeId, tip.tips)
     }
   }
@@ -168,6 +189,7 @@ export function buildPayrollDraftRows({
   department,
   startDate,
   endDate,
+  schedules = [],
 }: {
   employees: Employee[]
   clockRecords: ShiftClock[]
@@ -175,21 +197,30 @@ export function buildPayrollDraftRows({
   department: string
   startDate: string
   endDate: string
+  schedules?: Schedule[]
 }) {
-  const tipsByEmployee = getSavedTipMap(eodReports, startDate, endDate, employees, clockRecords)
+  const tipsByEmployee = getSavedTipMap(eodReports, startDate, endDate, employees, clockRecords, department, schedules)
+  const employeeById = new Map(employees.map(employee => [employee.id, employee]))
   const clocksByEmployee = new Map<string, ShiftClock[]>()
 
   for (const record of clockRecords) {
     if (record.session_date < startDate || record.session_date > endDate) continue
+    const employee = employeeById.get(record.employee_id)
+    if (department !== 'all' && !clockMatchesWorkDepartment(record, department, employee, schedules)) continue
     if (!clocksByEmployee.has(record.employee_id)) clocksByEmployee.set(record.employee_id, [])
     clocksByEmployee.get(record.employee_id)!.push(record)
   }
 
   return employees
-    .filter(employee => department === 'all' || getEmployeeScheduleDepartments(employee).includes(department))
+    .filter(employee =>
+      department === 'all' ||
+      getEmployeeScheduleDepartments(employee).includes(department) ||
+      clocksByEmployee.has(employee.id)
+    )
     .map((employee, index): PayrollDraftRow => {
       const employeeClocks = clocksByEmployee.get(employee.id) ?? []
       const hours = normalizeMoney(employeeClocks.reduce((sum, record) => sum + getEffectiveClockHours(record), 0))
+      const hasTipData = tipsByEmployee.has(employee.id)
       const tips = normalizeMoney(tipsByEmployee.get(employee.id) ?? 0)
       const baseWages = normalizeMoney(hours * Number(employee.hourly_wage ?? 0))
       const guaranteeTarget = normalizeMoney(hours * Number(employee.guaranteed_hourly ?? 0))
@@ -213,6 +244,7 @@ export function buildPayrollDraftRows({
         cash_rounding: 0,
         has_auto_clock_out: employeeClocks.some(record => record.auto_clock_out),
         has_open_clock: employeeClocks.some(record => !record.clock_out_at || isClockPending(record)),
+        has_tip_data: hasTipData,
         memo: '',
         display_order: index,
       }
@@ -239,6 +271,7 @@ export function payrollItemToDraftRow(item: PayrollRunItem): PayrollDraftRow {
     cash_rounding: Number(item.cash_rounding ?? 0),
     has_auto_clock_out: item.has_auto_clock_out,
     has_open_clock: item.has_open_clock,
+    has_tip_data: Number(item.tips ?? 0) > 0,
     memo: item.memo ?? '',
     display_order: item.display_order,
   }

@@ -1,5 +1,5 @@
 import { createSign } from 'crypto'
-import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getClockWorkDepartment, getEffectiveClockHours, getVisibleManagerNote } from '@/lib/clockUtils'
 import type { CashBalanceEntry, EodReport, PayrollRun, PayrollRunItem, ShiftClock } from '@/lib/types'
 
 type GoogleSheetsConfig = {
@@ -661,13 +661,24 @@ export async function syncEodCashCountToGoogleSheet(report: {
 }
 
 type ClockSheetRecord = ShiftClock & {
-  employee?: { name?: string | null; role?: string | null } | Array<{ name?: string | null; role?: string | null }> | null
+  employee?: {
+    name?: string | null
+    role?: string | null
+    primary_department?: string | null
+    schedule_departments?: string[] | null
+  } | Array<{
+    name?: string | null
+    role?: string | null
+    primary_department?: string | null
+    schedule_departments?: string[] | null
+  }> | null
 }
 
 const CLOCK_RECORDS_SHEET_HEADERS = [
   'Session Date',
   'Employee',
   'Role',
+  'Worked Department',
   'Clock In',
   'Clock Out',
   'Worked Hours',
@@ -686,16 +697,24 @@ function getClockRecordEmployee(record: ClockSheetRecord) {
 
 function buildClockRecordSheetRow(record: ClockSheetRecord) {
   const employee = getClockRecordEmployee(record)
+  const workDepartmentEmployee = employee
+    ? {
+        role: employee.role ?? '',
+        primary_department: employee.primary_department ?? undefined,
+        schedule_departments: employee.schedule_departments ?? [],
+      }
+    : null
   return [
     record.session_date,
     employee?.name ?? '',
     employee?.role ?? '',
+    getClockWorkDepartment(record, workDepartmentEmployee),
     record.clock_in_at,
     record.clock_out_at ?? '',
     getEffectiveClockHours(record).toFixed(2),
     record.auto_clock_out ? 'Yes' : 'No',
     record.approval_status,
-    record.manager_note ?? '',
+    getVisibleManagerNote(record.manager_note),
     record.updated_at,
     record.id,
   ]
@@ -705,7 +724,7 @@ async function ensureClockRecordsSheetHeaders(config: GoogleSheetsConfig, access
   const resolvedSheetName = await resolveSheetName(config, accessToken, config.clockRecordsSheetName, ['Clock Records'])
   const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
-  const headerRange = `${encodedSheetName}!A1:K1`
+  const headerRange = `${encodedSheetName}!A1:L1`
   const headerCheck = await googleSheetsRequest<{ values?: string[][] }>(`${baseUrl}/${headerRange}`, accessToken)
   const currentHeaders = headerCheck.values?.[0] ?? []
   const headersMatch = CLOCK_RECORDS_SHEET_HEADERS.length === currentHeaders.length && CLOCK_RECORDS_SHEET_HEADERS.every((header, index) => currentHeaders[index] === header)
@@ -734,7 +753,7 @@ export async function syncClockRecordToGoogleSheet(record: ClockSheetRecord) {
   await ensureClockRecordsSheetHeaders(config, accessToken)
 
   const recordIdColumn = await googleSheetsRequest<{ values?: string[][] }>(
-    `${baseUrl}/${encodedSheetName}!K2:K`,
+    `${baseUrl}/${encodedSheetName}!L2:L`,
     accessToken,
   )
   const existingRowIndex = (recordIdColumn.values ?? []).findIndex(row => row[0] === record.id)
@@ -743,7 +762,7 @@ export async function syncClockRecordToGoogleSheet(record: ClockSheetRecord) {
   if (existingRowIndex >= 0) {
     const rowNumber = existingRowIndex + 2
     await googleSheetsRequest(
-      `${baseUrl}/${encodedSheetName}!A${rowNumber}:K${rowNumber}?valueInputOption=USER_ENTERED`,
+      `${baseUrl}/${encodedSheetName}!A${rowNumber}:L${rowNumber}?valueInputOption=USER_ENTERED`,
       accessToken,
       {
         method: 'PUT',
@@ -754,7 +773,7 @@ export async function syncClockRecordToGoogleSheet(record: ClockSheetRecord) {
   }
 
   await googleSheetsRequest(
-    `${baseUrl}/${encodedSheetName}!A:K:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    `${baseUrl}/${encodedSheetName}!A:L:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     accessToken,
     {
       method: 'POST',
@@ -769,7 +788,7 @@ export async function removeClockRecordFromGoogleSheet(recordId: string) {
   const config = getConfig()
   if (!config) return { success: true, skipped: true, reason: 'Google Sheets is not configured.' }
   const accessToken = await getAccessToken(config)
-  return deleteSheetRowByKey(config, accessToken, config.clockRecordsSheetName, 'K', recordId)
+  return deleteSheetRowByKey(config, accessToken, config.clockRecordsSheetName, 'L', recordId)
 }
 
 export async function resetClockRecordsSheetInGoogleSheet(records: ClockSheetRecord[]) {
@@ -781,7 +800,7 @@ export async function resetClockRecordsSheetInGoogleSheet(records: ClockSheetRec
   const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
 
-  await clearSheetColumns(config, accessToken, resolvedSheetName, 'A:K')
+  await clearSheetColumns(config, accessToken, resolvedSheetName, 'A:L')
 
   const sortedRecords = [...records].sort((left, right) => {
     if (left.session_date !== right.session_date) return left.session_date < right.session_date ? 1 : -1
@@ -790,7 +809,7 @@ export async function resetClockRecordsSheetInGoogleSheet(records: ClockSheetRec
   const values = [CLOCK_RECORDS_SHEET_HEADERS, ...sortedRecords.map(buildClockRecordSheetRow)]
 
   await googleSheetsRequest(
-    `${baseUrl}/${encodedSheetName}!A1:K?valueInputOption=USER_ENTERED`,
+    `${baseUrl}/${encodedSheetName}!A1:L?valueInputOption=USER_ENTERED`,
     accessToken,
     {
       method: 'PUT',

@@ -6,6 +6,7 @@ import { formatTime, calcHours, formatHours, getBusinessDate, isBirthdayToday } 
 import { getDepartmentLabel, getFallbackScheduleDepartment, getRoleLabel } from '@/lib/organization'
 import { ChevronDown, ChevronRight, Gift, Phone } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
+import { getClockWorkDepartment } from '@/lib/clockUtils'
 
 interface Props {
   schedules: Schedule[]
@@ -62,7 +63,7 @@ export function StaffSidebar({ schedules, employees, clockRecords }: Props) {
         employee,
         schedule: null,
         record,
-        department: getFallbackScheduleDepartment(employee),
+        department: getClockWorkDepartment(record, employee, schedules),
       }
     }).filter((entry): entry is StaffEntry => entry !== null)
 

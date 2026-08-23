@@ -1,5 +1,6 @@
 import { BUSINESS_DAY_CUTOFF_HOUR } from '@/lib/dateUtils'
-import { Employee, ShiftClock } from '@/lib/types'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
+import { Employee, Schedule, ShiftClock } from '@/lib/types'
 
 export const CLOCK_PHOTO_BUCKET = 'clock-photos'
 export const BUSINESS_TIMEZONE = 'America/Chicago'
@@ -7,6 +8,7 @@ export const DEFAULT_MEAL_BREAK_THRESHOLD_HOURS = 7.5
 export const MINIMUM_MEAL_BREAK_MINUTES = 30
 const MEAL_BREAK_TOKEN_PATTERN = /\s*\[meal_break_(?:started_at|ended_at|minutes)=[^\]]*\]/g
 const UNPAID_BREAK_TOKEN_PATTERN = /\s*\[unpaid_break_(?:started_at|ended_at|minutes)=[^\]]*\]/g
+const WORK_DEPARTMENT_TOKEN_PATTERN = /\s*\[work_department=[^\]]*\]/g
 
 function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
   const formatter = new Intl.DateTimeFormat('en-US', {
@@ -163,7 +165,54 @@ export function getVisibleManagerNote(note: string | null | undefined) {
   return (note ?? '')
     .replace(MEAL_BREAK_TOKEN_PATTERN, '')
     .replace(UNPAID_BREAK_TOKEN_PATTERN, '')
+    .replace(WORK_DEPARTMENT_TOKEN_PATTERN, '')
     .trim()
+}
+
+export function getClockWorkDepartmentFromNote(note: string | null | undefined) {
+  return (note ?? '').match(/\[work_department=([^\]]*)\]/)?.[1]?.trim() || null
+}
+
+export function setClockWorkDepartmentManagerNote(note: string | null | undefined, department: string | null | undefined) {
+  const baseNote = (note ?? '').replace(WORK_DEPARTMENT_TOKEN_PATTERN, '').trim()
+  const normalizedDepartment = typeof department === 'string' ? department.trim() : ''
+  return [baseNote, normalizedDepartment ? `[work_department=${normalizedDepartment}]` : ''].filter(Boolean).join(' ')
+}
+
+export function getClockWorkDepartment(
+  record: ShiftClock,
+  employee?: Pick<Employee, 'role' | 'primary_department' | 'schedule_departments'> | null,
+  schedules: Array<Pick<Schedule, 'employee_id' | 'date' | 'department'>> = []
+) {
+  const directDepartment = (record as ShiftClock & { work_department?: unknown }).work_department
+  if (typeof directDepartment === 'string' && directDepartment.trim()) return directDepartment.trim()
+
+  const noteDepartment = getClockWorkDepartmentFromNote(record.manager_note)
+  if (noteDepartment) return noteDepartment
+
+  const scheduledDepartments = Array.from(new Set(
+    schedules
+      .filter(schedule => schedule.employee_id === record.employee_id && schedule.date === record.session_date && typeof schedule.department === 'string' && schedule.department.trim())
+      .map(schedule => String(schedule.department).trim())
+  ))
+  if (scheduledDepartments.length === 1) return scheduledDepartments[0]
+
+  const relatedEmployee = employee ?? (Array.isArray(record.employee) ? record.employee[0] : record.employee)
+  if (relatedEmployee) {
+    return getEmployeeScheduleDepartments(relatedEmployee)[0] ?? relatedEmployee.primary_department ?? relatedEmployee.role ?? 'staff'
+  }
+
+  return 'staff'
+}
+
+export function clockMatchesWorkDepartment(
+  record: ShiftClock,
+  department: string,
+  employee?: Pick<Employee, 'role' | 'primary_department' | 'schedule_departments'> | null,
+  schedules: Array<Pick<Schedule, 'employee_id' | 'date' | 'department'>> = []
+) {
+  if (!department || department === 'all') return true
+  return getClockWorkDepartment(record, employee, schedules).trim().toLowerCase() === department.trim().toLowerCase()
 }
 
 export function getEffectiveClockHours(record: ShiftClock) {

@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getRoleColorTheme } from '@/lib/organization'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 interface WeeklyScheduleGridProps {
@@ -55,9 +55,8 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     ])
 
     const activeEmployees = (empRes.data ?? []).filter(employee => employeeMatchesScheduleDepartment(employee, department))
-    // schedules query is already filtered by department — no role-based filtering needed
-    const departmentSchedules = ((schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>)
-      .filter(schedule => !schedule.employee || !schedule.employee.is_active || employeeMatchesScheduleDepartment(schedule.employee, department))
+    // The query is already filtered by the schedule row's department. Do not let profile role hide cross-department shifts.
+    const departmentSchedules = (schRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
     const namesById = new Map<string, string>()
 
     for (const employee of activeEmployees) {
@@ -140,7 +139,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     const title = `${departmentLabel} Schedule`
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = employees.map(employee => {
-      const roleTheme = getRoleColorTheme(employee.role, roleDefinitions)
+      const roleTheme = getRoleColorTheme(department, roleDefinitions)
       const dayCells = renderedDays.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
@@ -160,7 +159,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
           <td style="border-left: 4px solid ${roleTheme.pdfShiftBorder};">
             <div class="employee-name">${employeeNamesById.get(employee.id) ?? employee.name}</div>
             <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
-              ${getRoleLabel(employee.role, roleDefinitions)}
+              ${departmentLabel}
             </div>
           </td>
           ${dayCells}
@@ -289,14 +288,14 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             </thead>
             <tbody>
               {employees.map(emp => {
-                const roleTheme = getRoleColorTheme(emp.role, roleDefinitions)
+                const roleTheme = getRoleColorTheme(department, roleDefinitions)
                 return (
                   <tr key={emp.id} className={`border-b border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-slate-100`}>
                     <td className="sticky left-0 z-[1] border-l-4 border-r border-slate-200 bg-inherit p-3.5 align-top" style={roleTheme.rowAccentStyle}>
                       <div className="font-semibold text-[15px] text-slate-900">{employeeNamesById.get(emp.id) ?? emp.name}</div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
-                          {getRoleLabel(emp.role, roleDefinitions)}
+                          {departmentLabel}
                         </span>
                         {!emp.is_active && (
                           <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">

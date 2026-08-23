@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { format } from 'date-fns'
+import { addDays, format, parseISO } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
@@ -12,10 +12,11 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
-import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { formatCurrency } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleEmployee } from '@/lib/tipEligibility'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
+import { isTipEligibleDepartment, isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
 import { Employee } from '@/lib/types'
 import { ArrowLeft, Plus, Save } from 'lucide-react'
 
@@ -31,6 +32,10 @@ type EditorRow = {
 
 function todayKey() {
   return format(new Date(), 'yyyy-MM-dd')
+}
+
+function shiftDateKey(date: string, days: number) {
+  return format(addDays(parseISO(date), days), 'yyyy-MM-dd')
 }
 
 function roundMoney(value: number) {
@@ -49,7 +54,7 @@ function buildClockRows(date: string, employees: Employee[], clockRecords: Retur
   for (const record of clockRecords) {
     if (record.session_date !== date) continue
     const employee = employeeById.get(record.employee_id)
-    if (!employee || !isTipEligibleEmployee(employee)) continue
+    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee))) continue
 
     const hours = getEffectiveClockHours(record)
     if (hours <= 0) continue
@@ -150,13 +155,24 @@ export default function TipDistributionEditorPage() {
   const houseTotal = roundMoney((Number.isFinite(totalTip) ? totalTip : 0) * 0.15)
   const ruleTotal = roundMoney(distributedTotal + houseTotal)
   const eligibleEmployees = employees.filter(employee => (
-    isTipEligibleEmployee(employee) && !currentRows.some(row => row.employee_id === employee.id)
+    (
+      isTipEligibleEmployee(employee) ||
+      getEmployeeScheduleDepartments(employee).some(department => isTipEligibleDepartment(department))
+    ) &&
+    !currentRows.some(row => row.employee_id === employee.id)
   ))
   const hasAdjustmentWithoutMemo = currentRows.some(row => row.adjustment !== 0 && row.memo.trim().length === 0)
 
   const loadClockRows = () => {
     setRows(clockRows)
     setTotalTipInput(report ? String(Number(report.tip_total ?? 0)) : '')
+    setMessage(null)
+  }
+
+  const selectDate = (date: string) => {
+    setSelectedDate(date)
+    setRows(null)
+    setTotalTipInput('')
     setMessage(null)
   }
 
@@ -262,28 +278,49 @@ export default function TipDistributionEditorPage() {
         backLabel="Back to Admin Board"
       />
 
-      <div className="grid gap-5 xl:grid-cols-[320px_1fr]">
+      <div className="grid gap-4">
         <div className="rounded-lg border bg-white p-4">
-          <div className="grid gap-4">
-            <div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-44">
               <Label>Date</Label>
-              <Input type="date" value={selectedDate} onChange={event => { setSelectedDate(event.target.value); setRows(null); setTotalTipInput(''); setMessage(null) }} />
+              <Input type="date" value={selectedDate} onChange={event => selectDate(event.target.value)} />
             </div>
-            <div>
+            <Button variant="outline" onClick={() => selectDate(shiftDateKey(selectedDate, -1))}>Day Before</Button>
+            <Button variant="outline" onClick={() => selectDate(shiftDateKey(todayKey(), -1))}>Yesterday</Button>
+            <Button variant="outline" onClick={() => selectDate(shiftDateKey(selectedDate, 1))}>Day After</Button>
+            <div className="min-w-52">
               <Label>Total Collected Tip</Label>
               <Input type="number" step="0.01" value={totalTipInput === '' ? Number(report?.tip_total ?? 0) : totalTipInput} onChange={event => setTotalTipInput(event.target.value)} />
             </div>
-            <div className="rounded-lg border bg-slate-50 p-3 text-sm">
-              <div className="flex justify-between"><span>House 15%</span><strong>{formatCurrency(houseTotal)}</strong></div>
-              <div className="flex justify-between"><span>Distributed</span><strong>{formatCurrency(distributedTotal)}</strong></div>
-              <div className="mt-2 flex justify-between border-t pt-2"><span>Total Check</span><strong>{formatCurrency(ruleTotal)}</strong></div>
-            </div>
             <Button variant="outline" onClick={loadClockRows} disabled={!report}>Reload From Clock Records</Button>
             {!report && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 No EOD report exists for this date.
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="grid gap-2 rounded-lg border bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">Clocked Staff</div>
+            <div className="text-lg font-bold text-slate-950">{clockRows.length}</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">Total Hours</div>
+            <div className="text-lg font-bold text-slate-950">{currentRows.reduce((sum, row) => sum + row.hours_worked, 0).toFixed(2)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">House 15%</div>
+            <div className="text-lg font-bold text-slate-950">{formatCurrency(houseTotal)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">Distributed</div>
+            <div className="text-lg font-bold text-slate-950">{formatCurrency(distributedTotal)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase text-muted-foreground">Total Check</div>
+            <div className="text-lg font-bold text-slate-950">{formatCurrency(ruleTotal)}</div>
           </div>
         </div>
 

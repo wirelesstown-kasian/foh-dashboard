@@ -4,7 +4,20 @@ import { verifyPin } from '@/lib/pin'
 import { getSupabaseAdminConfigError, supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { CLOCK_PHOTO_BUCKET, calculateClockHours, calculateClockHoursAfterBreak, dataUrlToArrayBuffer, getClockBreakMinutes, getMealBreakState, getSessionCutoffIso, getUnpaidBreakState, setMealBreakManagerNote, setUnpaidBreakManagerNote } from '@/lib/clockUtils'
+import {
+  CLOCK_PHOTO_BUCKET,
+  calculateClockHours,
+  calculateClockHoursAfterBreak,
+  dataUrlToArrayBuffer,
+  getClockBreakMinutes,
+  getClockWorkDepartment,
+  getMealBreakState,
+  getSessionCutoffIso,
+  getUnpaidBreakState,
+  setClockWorkDepartmentManagerNote,
+  setMealBreakManagerNote,
+  setUnpaidBreakManagerNote,
+} from '@/lib/clockUtils'
 import { ShiftClock } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -29,7 +42,7 @@ function isMissingPinCodeColumn(error: { message?: string; code?: string } | nul
 async function verifyEmployeeByPin(pin: string) {
   const directResult = await supabaseAdmin
     .from('employees')
-    .select('id, name, role, pin_hash, pin_code')
+    .select('id, name, role, primary_department, schedule_departments, pin_hash, pin_code')
     .eq('is_active', true)
     .eq('pin_code', pin)
     .maybeSingle()
@@ -41,7 +54,7 @@ async function verifyEmployeeByPin(pin: string) {
 
   const { data: employees, error } = await supabaseAdmin
     .from('employees')
-    .select('id, name, role, pin_hash')
+    .select('id, name, role, primary_department, schedule_departments, pin_hash')
     .eq('is_active', true)
 
   if (error) throw new Error(error.message)
@@ -78,7 +91,7 @@ const MIME_TO_EXT: Record<string, string> = {
 
 const MEAL_BREAK_MINUTES = 30
 
-function getClockStatus(record: ShiftClock | null) {
+function getClockStatus(record: ShiftClock | null, employee?: Parameters<typeof getClockWorkDepartment>[1]) {
   if (!record?.clock_in_at) {
     return {
       state: 'clocked_out',
@@ -116,6 +129,7 @@ function getClockStatus(record: ShiftClock | null) {
     unpaid_break_started_at: unpaidBreakState.startedAt,
     unpaid_break_ended_at: unpaidBreakState.endedAt,
     unpaid_break_minutes: unpaidBreakState.minutes,
+    work_department: getClockWorkDepartment(record, employee),
   }
 }
 
@@ -167,7 +181,7 @@ async function addSignedUrls(records: ShiftClock[]) {
 async function processOverdueClockRecords() {
   const { data, error } = await supabaseAdmin
     .from('shift_clocks')
-    .select('*')
+    .select('*, employee:employees!shift_clocks_employee_id_fkey(id, role, primary_department, schedule_departments)')
     .is('clock_out_at', null)
 
   if (error || !data) return
@@ -184,7 +198,10 @@ async function processOverdueClockRecords() {
         auto_clock_out: true,
         approval_status: 'pending_review',
         approved_hours: null,
-        manager_note: 'Auto clock-out triggered at business cutoff. Manager approval required.',
+        manager_note: setClockWorkDepartmentManagerNote(
+          'Auto clock-out triggered at business cutoff. Manager approval required.',
+          getClockWorkDepartment(record, Array.isArray(record.employee) ? record.employee[0] : record.employee)
+        ),
         updated_at: new Date().toISOString(),
       })
       .eq('id', record.id)
@@ -222,12 +239,13 @@ async function createManualClockRecord(payload: {
   clock_in_at?: string | null
   clock_out_at?: string | null
   manager_note?: string | null
+  work_department?: string | null
 }) {
   if (!(await requireAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { employee_id, session_date, clock_in_at, clock_out_at, manager_note } = payload
+  const { employee_id, session_date, clock_in_at, clock_out_at, manager_note, work_department } = payload
   if (!employee_id || !session_date || !clock_in_at || !clock_out_at) {
     return NextResponse.json({ error: 'Employee, date, clock in, and clock out are required' }, { status: 400 })
   }
@@ -262,7 +280,7 @@ async function createManualClockRecord(payload: {
       auto_clock_out: false,
       approval_status: 'adjusted',
       approved_hours: calculateClockHours(clock_in_at, clock_out_at),
-      manager_note: manager_note?.trim() || 'Manual hours added by manager.',
+      manager_note: setClockWorkDepartmentManagerNote(manager_note?.trim() || 'Manual hours added by manager.', work_department),
       manager_approved_by: null,
       manager_approved_at: nowIso,
       updated_at: nowIso,
@@ -356,8 +374,9 @@ export async function POST(req: NextRequest) {
     photo_data_url?: string
     task_id?: string
     skip_photo?: boolean
+    work_department?: string | null
   }
-  const { action, pin, session_date, photo_data_url, task_id, skip_photo } = payload
+  const { action, pin, session_date, photo_data_url, task_id, skip_photo, work_department } = payload
 
   if (action === 'manual_add') {
     return createManualClockRecord(payload)
@@ -390,13 +409,16 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'lookup_status') {
-    return NextResponse.json({ success: true, employee, status: getClockStatus(existingRecord) })
+    return NextResponse.json({ success: true, employee, status: getClockStatus(existingRecord, employee) })
   }
 
   const nowIso = new Date().toISOString()
   const ext = photo_data_url ? getPhotoExtension(photo_data_url) : 'jpg'
   const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.${ext}`
   const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
+  const selectedWorkDepartment = typeof work_department === 'string' && work_department.trim()
+    ? work_department.trim()
+    : null
 
   if (action === 'start_break' || action === 'end_break' || action === 'toggle_break' || action === 'start_unpaid_break' || action === 'end_unpaid_break' || action === 'toggle_unpaid_break') {
     if (!existingRecord?.clock_in_at) {
@@ -548,7 +570,7 @@ export async function POST(req: NextRequest) {
       clock_in_at: nowIso,
       clock_in_photo_path: photo_data_url ? photoPath : '',
       approval_status: 'open',
-      manager_note: allowPhotoSkip ? 'Manager clock-in without photo.' : null,
+      manager_note: setClockWorkDepartmentManagerNote(allowPhotoSkip ? 'Manager clock-in without photo.' : null, selectedWorkDepartment),
     })
 
     if (error) {
@@ -603,13 +625,14 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, approved_hours, manager_note, clock_in_at, clock_out_at, session_date } = await req.json() as {
+  const { id, approved_hours, manager_note, clock_in_at, clock_out_at, session_date, work_department } = await req.json() as {
     id?: string
     approved_hours?: number | string | null
     manager_note?: string | null
     clock_in_at?: string | null
     clock_out_at?: string | null
     session_date?: string | null
+    work_department?: string | null
   }
 
   if (!id) {
@@ -657,7 +680,10 @@ export async function PATCH(req: NextRequest) {
     session_date: nextSessionDate,
     approval_status: 'approved',
     approved_hours: numericHours ?? fallbackHours,
-    manager_note: setMealBreakManagerNote(manager_note?.trim() || null, getMealBreakState(existing as ShiftClock)) || null,
+    manager_note: setClockWorkDepartmentManagerNote(
+      setMealBreakManagerNote(manager_note?.trim() || null, getMealBreakState(existing as ShiftClock)),
+      work_department ?? getClockWorkDepartment(existing as ShiftClock)
+    ) || null,
     clock_in_at: nextClockInAt,
     clock_out_at: nextClockOutAt,
     auto_clock_out: false,

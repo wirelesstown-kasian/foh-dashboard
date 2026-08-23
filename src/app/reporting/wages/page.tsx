@@ -5,7 +5,7 @@ import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns, useScheduledDepartmentIds, useTaskCompletions } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns, useScheduledDepartmentIds, useSchedulesByRange, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -13,13 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { clockMatchesWorkDepartment, getClockWorkDepartment, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleEmployee } from '@/lib/tipEligibility'
+import { isTipEligibleForWork } from '@/lib/tipEligibility'
 import { paymentMethodLabel } from '@/lib/payroll'
-import type { Employee, PaymentMethod } from '@/lib/types'
+import type { Employee, PaymentMethod, Schedule, ShiftClock } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
   const sorted = [...items].sort((a, b) => getValue(b) - getValue(a))
@@ -80,13 +80,48 @@ function paymentMethodReportLabel(paymentMethod: ReportPaymentMethod) {
   return paymentMethod === 'unknown' ? 'Unknown' : paymentMethodLabel(paymentMethod)
 }
 
+function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
+  const relatedEmployee = record.employee as Employee | Employee[] | undefined
+  if (Array.isArray(relatedEmployee)) {
+    return relatedEmployee[0] ?? employees.find(employee => employee.id === record.employee_id) ?? null
+  }
+  return relatedEmployee ?? employees.find(employee => employee.id === record.employee_id) ?? null
+}
+
+function recordMatchesDepartment(
+  record: ShiftClock,
+  employee: Employee | null | undefined,
+  department: ReportDepartment,
+  schedules: Schedule[] = []
+) {
+  return clockMatchesWorkDepartment(record, department, employee, schedules)
+}
+
+function employeeHasDepartmentClock(
+  employeeId: string,
+  date: string,
+  department: ReportDepartment,
+  employees: Employee[],
+  clockRecords: ShiftClock[],
+  schedules: Schedule[] = []
+) {
+  if (department === 'all') return true
+  return clockRecords.some(record =>
+    record.employee_id === employeeId &&
+    record.session_date === date &&
+    recordMatchesDepartment(record, getClockRecordEmployee(record, employees), department, schedules)
+  )
+}
+
 function calculateDailyTipPreview({
   employees,
   clockRecords,
+  schedules = [],
   report,
 }: {
   employees: Employee[]
   clockRecords: ReturnType<typeof useClockRecords>['clockRecords']
+  schedules?: Schedule[]
   report: ReturnType<typeof useEodReports>['eodReports'][number]
 }) {
   const employeeById = new Map(employees.map(employee => [employee.id, employee]))
@@ -95,7 +130,7 @@ function calculateDailyTipPreview({
   for (const record of clockRecords) {
     if (record.session_date !== report.session_date) continue
     const employee = employeeById.get(record.employee_id)
-    if (!employee || !isTipEligibleEmployee(employee)) continue
+    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
 
     const hours = getEffectiveClockHours(record)
     if (hours <= 0) continue
@@ -153,6 +188,9 @@ function getDailyWageDetail({
   emp,
   date,
   clockRecords,
+  employees,
+  department,
+  schedules,
   report,
   calculatedTip,
   savedTip,
@@ -161,21 +199,29 @@ function getDailyWageDetail({
   emp: Employee
   date: string
   clockRecords: ReturnType<typeof useClockRecords>['clockRecords']
+  employees: Employee[]
+  department: ReportDepartment
+  schedules: Schedule[]
   report?: ReturnType<typeof useEodReports>['eodReports'][number]
   calculatedTip?: DailyTipPreview
   savedTip?: SavedDailyTip
   useCalculatedTips: boolean
 }): WageDetailRow | null {
   const clockHours = clockRecords
-    .filter(record => record.employee_id === emp.id && record.session_date === date)
+    .filter(record =>
+      record.employee_id === emp.id &&
+      record.session_date === date &&
+      recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules)
+    )
     .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+  const hasDepartmentClock = employeeHasDepartmentClock(emp.id, date, department, employees, clockRecords, schedules)
   const calculatedHours = calculatedTip?.hours ?? 0
   const savedHours = savedTip?.hours ?? 0
   const hours = useCalculatedTips
-    ? (clockHours > 0 ? clockHours : calculatedHours)
-    : (savedHours > 0 ? savedHours : clockHours)
+    ? (clockHours > 0 ? clockHours : hasDepartmentClock ? calculatedHours : 0)
+    : (hasDepartmentClock && savedHours > 0 ? savedHours : clockHours)
   const tips = report
-    ? useCalculatedTips ? (calculatedTip?.tips ?? 0) : (savedTip?.tips ?? 0)
+    ? hasDepartmentClock ? (useCalculatedTips ? (calculatedTip?.tips ?? 0) : (savedTip?.tips ?? 0)) : 0
     : 0
 
   if (hours <= 0 && tips <= 0) return null
@@ -223,9 +269,17 @@ export default function WageReportPage() {
     [period, refDate, customStart, customEnd]
   )
   const scheduledDeptIds = useScheduledDepartmentIds(startDate, endDate)
+  const schedules = useSchedulesByRange(startDate, endDate)
   const filteredEmployees = useMemo(
     () => employees.filter(employee => {
       if (department === 'all') return true
+      const hasWorkedDepartment = clockRecords.some(record =>
+        record.employee_id === employee.id &&
+        record.session_date >= startDate &&
+        record.session_date <= endDate &&
+        recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? employee, department, schedules)
+      )
+      if (hasWorkedDepartment) return true
       const dept = employee.primary_department ?? ''
       if (dept === 'hybrid' || dept === 'foh' || dept === 'boh') {
         const scheduled = scheduledDeptIds.get(department)
@@ -233,11 +287,12 @@ export default function WageReportPage() {
       }
       return isEmployeeInDepartment(employee, department)
     }),
-    [employees, department, scheduledDeptIds]
+    [clockRecords, department, employees, endDate, scheduledDeptIds, schedules, startDate]
   )
 
   const monthStart = format(new Date(`${startDate}T12:00:00`), 'yyyy-MM-01')
   const monthEnd = format(new Date(new Date(`${endDate}T12:00:00`).getFullYear(), new Date(`${endDate}T12:00:00`).getMonth() + 1, 0), 'yyyy-MM-dd')
+  const monthSchedules = useSchedulesByRange(monthStart, monthEnd)
 
   const employeePerfStats = useMemo(() => {
     const filteredEmpIds = new Set(filteredEmployees.map(e => e.id))
@@ -249,16 +304,18 @@ export default function WageReportPage() {
     const monthTipsByEmp = new Map<string, number>()
     for (const r of clockRecords) {
       if (!filteredEmpIds.has(r.employee_id) || r.session_date < monthStart || r.session_date > monthEnd) continue
+      if (!recordMatchesDepartment(r, getClockRecordEmployee(r, employees), department, monthSchedules)) continue
       monthHoursByEmp.set(r.employee_id, (monthHoursByEmp.get(r.employee_id) ?? 0) + getEffectiveClockHours(r))
     }
     for (const eod of eodReports) {
       if (eod.session_date < monthStart || eod.session_date > monthEnd) continue
-      const calculatedTips = calculateDailyTipPreview({ employees, clockRecords, report: eod })
+      const calculatedTips = calculateDailyTipPreview({ employees, clockRecords, schedules: monthSchedules, report: eod })
       const savedTips = getSavedDailyTips(eod)
       const useCalculatedTips = shouldRecalculateTips(savedTips, calculatedTips)
       const dailyTips = useCalculatedTips ? calculatedTips : savedTips
       for (const [employeeId, tip] of dailyTips) {
         if (!filteredEmpIds.has(employeeId)) continue
+        if (!employeeHasDepartmentClock(employeeId, eod.session_date, department, employees, clockRecords, monthSchedules)) continue
         monthTipsByEmp.set(employeeId, (monthTipsByEmp.get(employeeId) ?? 0) + tip.tips)
       }
     }
@@ -266,6 +323,7 @@ export default function WageReportPage() {
     const workingDatesByEmp = new Map<string, Set<string>>()
     for (const r of clockRecords) {
       if (!filteredEmpIds.has(r.employee_id) || r.session_date < monthStart || r.session_date > monthEnd) continue
+      if (!recordMatchesDepartment(r, getClockRecordEmployee(r, employees), department, monthSchedules)) continue
       if (!workingDatesByEmp.has(r.employee_id)) workingDatesByEmp.set(r.employee_id, new Set())
       workingDatesByEmp.get(r.employee_id)!.add(r.session_date)
     }
@@ -312,7 +370,7 @@ export default function WageReportPage() {
     }).sort((a, b) => b.score - a.score || b.tasks - a.tasks)
 
     return new Map(scored.map((item, idx) => [item.empId, { ...item, overallRank: idx + 1, staffCount: scored.length }]))
-  }, [completions, clockRecords, employees, eodReports, filteredEmployees, monthStart, monthEnd])
+  }, [clockRecords, completions, department, employees, eodReports, filteredEmployees, monthEnd, monthSchedules, monthStart])
 
   const matchingPayrollRun = useMemo(() => {
     const exactDepartment = payrollRuns.find(run => (
@@ -336,6 +394,7 @@ export default function WageReportPage() {
       rangeReports.map(report => [report.session_date, calculateDailyTipPreview({
         employees,
         clockRecords,
+        schedules,
         report,
       })])
     )
@@ -358,7 +417,12 @@ export default function WageReportPage() {
             .filter(report => calculatedTipsByDate.get(report.session_date)?.has(emp.id))
             .map(report => report.session_date),
           ...clockRecords
-            .filter(record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate)
+            .filter(record =>
+              record.employee_id === emp.id &&
+              record.session_date >= startDate &&
+              record.session_date <= endDate &&
+              recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules)
+            )
             .map(record => record.session_date),
         ]))
 
@@ -367,6 +431,9 @@ export default function WageReportPage() {
             emp,
             date,
             clockRecords,
+            employees,
+            department,
+            schedules,
             report: reportByDate.get(date),
             calculatedTip: calculatedTipsByDate.get(date)?.get(emp.id),
             savedTip: savedTipsByDate.get(date)?.get(emp.id),
@@ -378,7 +445,7 @@ export default function WageReportPage() {
         return [emp.id, detailRows] as const
       })
     )
-  }, [clockRecords, employees, eodReports, filteredEmployees, endDate, startDate])
+  }, [clockRecords, department, employees, eodReports, filteredEmployees, endDate, schedules, startDate])
 
   const rows = useMemo(() => {
     if (matchingPayrollRun?.payroll_run_items?.length) {
@@ -404,7 +471,11 @@ export default function WageReportPage() {
             created_at: item.created_at,
           }
           const matchingClocks = clockRecords.filter(
-            record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate
+            record =>
+              record.employee_id === emp.id &&
+              record.session_date >= startDate &&
+              record.session_date <= endDate &&
+              recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules)
           )
           return {
             emp,
@@ -434,7 +505,11 @@ export default function WageReportPage() {
         const guaranteeTopUp = detailRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0)
         const totalEarnings = detailRows.reduce((sum, row) => sum + row.totalEarnings, 0)
         const matchingClocks = clockRecords.filter(
-          record => record.employee_id === emp.id && record.session_date >= startDate && record.session_date <= endDate
+          record =>
+            record.employee_id === emp.id &&
+            record.session_date >= startDate &&
+            record.session_date <= endDate &&
+            recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules)
         )
 
         return {
@@ -455,7 +530,7 @@ export default function WageReportPage() {
         }
       })
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
-  }, [clockRecords, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, matchingPayrollRun, startDate])
+  }, [clockRecords, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, matchingPayrollRun, schedules, startDate])
 
   const buildWageReportHtml = (row: WageSummaryRow) => {
     const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
@@ -535,6 +610,20 @@ export default function WageReportPage() {
     }, { cash: 0, check: 0, ach: 0, unknown: 0 }),
     [displayedRows]
   )
+  const tipSummary = useMemo(() => {
+    const totalCollected = eodReports
+      .filter(report => report.session_date >= startDate && report.session_date <= endDate)
+      .reduce((sum, report) => sum + Number(report.tip_total ?? 0), 0)
+    const houseTip = totalCollected * 0.15
+    const totalTipOut = displayedRows.reduce((sum, row) => sum + row.tips, 0)
+
+    return {
+      totalCollected,
+      houseTip,
+      totalTipOut,
+      distributionTotal: houseTip + totalTipOut,
+    }
+  }, [displayedRows, eodReports, endDate, startDate])
   const detailTarget = displayedRows.find(row => row.emp.id === detailEmployeeId) ?? null
   const detailRows = detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : []
   const selectedEmployeeName = employeeFilter === 'all'
@@ -636,6 +725,28 @@ export default function WageReportPage() {
             </>
           }
         />
+        <div className="mb-4 grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border bg-emerald-50 p-3">
+            <p className="text-xs font-medium uppercase text-emerald-700">Total Tip Collected</p>
+            <p className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(tipSummary.totalCollected)}</p>
+            <p className="mt-0.5 text-[11px] text-emerald-700">EOD total tips in range</p>
+          </div>
+          <div className="rounded-lg border bg-slate-50 p-3">
+            <p className="text-xs font-medium uppercase text-slate-500">15% House Tip</p>
+            <p className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(tipSummary.houseTip)}</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">House share from collected tips</p>
+          </div>
+          <div className="rounded-lg border bg-blue-50 p-3">
+            <p className="text-xs font-medium uppercase text-blue-700">Total Tip Out</p>
+            <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(tipSummary.totalTipOut)}</p>
+            <p className="mt-0.5 text-[11px] text-blue-700">Displayed wage rows</p>
+          </div>
+          <div className="rounded-lg border bg-violet-50 p-3">
+            <p className="text-xs font-medium uppercase text-violet-700">Distribution Summary</p>
+            <p className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(tipSummary.distributionTotal)}</p>
+            <p className="mt-0.5 text-[11px] text-violet-700">House + tip out</p>
+          </div>
+        </div>
         <div className="mb-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border bg-emerald-50 p-3">
             <p className="text-xs font-medium uppercase text-emerald-700">Cash Pay Out</p>

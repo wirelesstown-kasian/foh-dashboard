@@ -27,24 +27,24 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleEmployee } from '@/lib/tipEligibility'
+import { isTipEligibleForWork } from '@/lib/tipEligibility'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
-import { CashBalanceEntry, Employee, EodReport, ShiftClock } from '@/lib/types'
+import { CashBalanceEntry, Employee, EodReport, Schedule, ShiftClock } from '@/lib/types'
 import { getCashVariance, getExpectedCashDeposit } from '@/lib/eodVariance'
 
 function isEodCloserRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
 }
 
-function aggregateClockRowsByEmployee(records: ShiftClock[], employees: Employee[]) {
+function aggregateClockRowsByEmployee(records: ShiftClock[], employees: Employee[], schedules: Schedule[] = []) {
   const grouped = new Map<string, { employee_id: string; hours_worked: number; start_time: string | null; end_time: string | null }>()
 
   for (const record of records) {
     const employee = employees.find(item => item.id === record.employee_id)
-    if (!employee || !isTipEligibleEmployee(employee)) continue
+    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
 
     const existing = grouped.get(record.employee_id) ?? {
       employee_id: record.employee_id,
@@ -515,7 +515,15 @@ export default function EodHistoryPage() {
       }
 
       const clockRecords = (clockPayload.records ?? []) as ShiftClock[]
-      const eligibleRows = aggregateClockRowsByEmployee(clockRecords, employees)
+      const schedulesRes = await supabase
+        .from('schedules')
+        .select('id, employee_id, date, start_time, end_time, department, created_at')
+        .eq('date', form.session_date)
+      if (schedulesRes.error) {
+        setSaveError(schedulesRes.error.message)
+        return
+      }
+      const eligibleRows = aggregateClockRowsByEmployee(clockRecords, employees, (schedulesRes.data ?? []) as Schedule[])
 
       const tipResults = calculateTips(ccTip + cashTip, eligibleRows.map(row => ({
         employee_id: row.employee_id,
