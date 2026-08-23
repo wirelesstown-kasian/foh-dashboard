@@ -224,6 +224,14 @@ function getPayrollRunTotal(run: Pick<PayrollRun, 'total_cash' | 'total_check' |
   return Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0)
 }
 
+function getPayrollDepartmentGroup(department: string | null | undefined) {
+  const value = (department ?? '').toLowerCase()
+  if (value.includes('kitchen') || value.includes('cook')) return 'kitchen'
+  if (value.includes('server')) return 'server'
+  if (value.includes('manager')) return 'manager'
+  return 'other'
+}
+
 function getEstimatedWageSpendForRange(
   records: ShiftClock[],
   employeeById: Map<string, Employee>,
@@ -603,6 +611,37 @@ export default function ReportingDashboardPage() {
     }
     return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [currentPayrollRuns])
+  const payrollPanel = useMemo(() => {
+    const totals = {
+      kitchen: 0,
+      server: 0,
+      manager: 0,
+      other: 0,
+      tipOut: 0,
+      payroll: 0,
+      payrollWithTip: 0,
+    }
+
+    for (const run of currentPayrollRuns) {
+      for (const item of run.payroll_run_items ?? []) {
+        const payout = Number(item.payout_amount ?? 0)
+        const tips = Number(item.tips ?? 0)
+        const wageOnly = Math.max(0, payout - tips)
+        totals[getPayrollDepartmentGroup(item.department)] += wageOnly
+        totals.tipOut += tips
+        totals.payroll += wageOnly
+        totals.payrollWithTip += payout
+      }
+    }
+
+    if (currentPayrollRuns.length === 0) {
+      totals.payroll = estimatedCurrentWageSpend
+      totals.payrollWithTip = estimatedCurrentWageSpend + sumTipDistributions(currentReports)
+      totals.tipOut = sumTipDistributions(currentReports)
+    }
+
+    return totals
+  }, [currentPayrollRuns, currentReports, estimatedCurrentWageSpend])
 
   const currentTotals = useMemo(
     () => sumReports(currentReports, currentCashEntries, currentPayrollSummary, estimatedCurrentWageSpend, hasCurrentSavedPayroll),
@@ -925,6 +964,27 @@ export default function ReportingDashboardPage() {
               <div className="text-xs font-medium uppercase text-slate-500">Payroll / Net</div>
               <div className="mt-1 text-xl font-bold text-slate-950">{payrollRatio === null ? '—' : `${payrollRatio.toFixed(1)}%`}</div>
               <div className="mt-0.5 text-[11px] text-slate-500">Current range</div>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {[
+              ['Kitchen Payroll', payrollPanel.kitchen],
+              ['Server Payroll', payrollPanel.server],
+              ['Manager Payroll', payrollPanel.manager],
+              ['Other Payroll', payrollPanel.other],
+              ['Tip Out', payrollPanel.tipOut],
+              ['Total Payroll', payrollPanel.payroll],
+              ['Total Payroll With Tip', payrollPanel.payrollWithTip],
+              ['Total Tip Collected', currentTotals.collectedTip],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border bg-white px-3 py-2">
+                <div className="text-[10px] font-medium uppercase text-muted-foreground">{label}</div>
+                <div className="mt-0.5 text-lg font-bold text-slate-950">{formatCurrency(Number(value))}</div>
+              </div>
+            ))}
+            <div className="rounded-lg border bg-slate-950 px-3 py-2 text-white">
+              <div className="text-[10px] font-medium uppercase text-slate-300">Payroll / Net %</div>
+              <div className="mt-0.5 text-lg font-bold">{payrollRatio === null ? '-' : `${payrollRatio.toFixed(1)}%`}</div>
             </div>
           </div>
           <div className="mt-6 rounded-lg border bg-slate-50 p-3">

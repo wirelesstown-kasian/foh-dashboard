@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText } from 'lucide-react'
+import { ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText, HandCoins } from 'lucide-react'
 
 const adminGroups = [
   {
@@ -11,8 +11,8 @@ const adminGroups = [
     description: 'Employee setup, pay settings, payroll worksheet, and wage review.',
     links: [
       { label: 'New Wage Worksheet', href: '/payroll/worksheet', icon: DollarSign },
+      { label: 'Tip Distribution Editor', href: '/payroll/tip-distribution-editor', icon: HandCoins },
       { label: 'Staffing', href: '/staffing', icon: Users },
-      { label: 'Roles and Departments', href: '/roles-departments', icon: BriefcaseBusiness },
       { label: 'Clock In Records', href: '/reporting/clock-records', icon: FileClock },
     ],
   },
@@ -32,8 +32,9 @@ const adminGroups = [
     description: 'Sales, payroll, and email reporting controls.',
     links: [
       { label: 'Dashboard', href: '/reporting/dashboard', icon: LayoutDashboard },
-      { label: 'Sales Analysis', href: '/reporting/dashboard', icon: ReceiptText },
       { label: 'Wage Report', href: '/reporting/wages', icon: DollarSign },
+      { label: 'Roles and Departments', href: '/roles-departments', icon: BriefcaseBusiness },
+      { label: 'EOD History', href: '/reporting/eod-history', icon: ReceiptText },
     ],
   },
   {

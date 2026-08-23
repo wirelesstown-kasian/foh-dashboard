@@ -15,6 +15,7 @@ import { ArrowLeft } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
 import { useClockRecords, useEmployees, useEodReports, notifyReportingDataChanged } from '@/components/reporting/useReportingData'
 import { supabase } from '@/lib/supabase'
+import { shouldWarnMissingMealBreak } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { formatCurrency } from '@/lib/reporting'
 import {
@@ -225,6 +226,17 @@ export default function WageWorksheetPage() {
   const totals = useMemo(() => getPayrollTotals(rows), [rows])
   const missingPaymentRows = rows.filter(row => !row.payment_method)
   const hasClockFlags = rows.some(row => row.has_auto_clock_out || row.has_open_clock)
+  const breakReviewCounts = useMemo(() => {
+    const employeeById = new Map(employees.map(employee => [employee.id, employee]))
+    const counts = new Map<string, number>()
+    for (const record of clockRecords) {
+      if (record.session_date < startDate || record.session_date > endDate) continue
+      if (shouldWarnMissingMealBreak(record, employeeById.get(record.employee_id))) {
+        counts.set(record.employee_id, (counts.get(record.employee_id) ?? 0) + 1)
+      }
+    }
+    return counts
+  }, [clockRecords, employees, startDate, endDate])
   const availableEmployees = employees.filter(employee => {
     if (rows.some(row => row.employee_id === employee.id)) return false
     return department === 'all' || getEmployeeScheduleDepartments(employee).includes(department)
@@ -279,6 +291,9 @@ export default function WageWorksheetPage() {
       const hourlyRate = Number(employee?.hourly_wage ?? 0)
       const guaranteedRate = Number(employee?.guaranteed_hourly ?? 0)
       const next = { ...row, ...patch }
+      if (employee?.commission_enabled !== true) {
+        next.commission = 0
+      }
 
       if (patch.hours !== undefined && patch.base_wages === undefined) {
         next.base_wages = normalizeMoney(next.hours * hourlyRate)
@@ -610,33 +625,51 @@ export default function WageWorksheetPage() {
           </div>
 
           <div className="overflow-x-auto rounded-lg border bg-white">
-            <Table className="text-xs">
+            <Table className="min-w-[1280px] table-fixed border-collapse text-xs">
+              <colgroup>
+                <col className="w-28" />
+                <col className="w-40" />
+                <col className="w-28" />
+                <col className="w-32" />
+                <col className="w-20" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-28" />
+                <col className="w-28" />
+                <col className="w-28" />
+                <col className="w-44" />
+                <col className="w-24" />
+              </colgroup>
               <TableHeader>
-                <TableRow>
-                  <TableHead className="h-8 py-1">Paid By</TableHead>
-                  <TableHead className="h-8 py-1">Name</TableHead>
-                  <TableHead className="h-8 py-1">Status</TableHead>
-                  <TableHead className="h-8 py-1 text-right">Hours</TableHead>
-                  <TableHead className="h-8 py-1 text-right">Tips</TableHead>
-                  <TableHead className="h-8 py-1 text-right">Base</TableHead>
-                  <TableHead className="h-8 py-1 text-right">Top-Up</TableHead>
-                  <TableHead className="h-8 py-1 text-right">Commission</TableHead>
-                  <TableHead className="h-8 py-1 text-right">Deductions</TableHead>
-                  <TableHead className="h-8 py-1 text-right">Payout</TableHead>
-                  <TableHead className="h-8 py-1">Memo</TableHead>
-                  <TableHead className="h-8 py-1" />
+                <TableRow className="bg-slate-50 hover:bg-slate-50">
+                  <TableHead className="h-9 border-r px-2 py-1 align-middle">Paid By</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 align-middle">Name</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 align-middle">Status</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 align-middle">Breaktime Review</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Hours</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Tips</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Base</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Top-Up</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Commission</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Deductions</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Payout</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 align-middle">Memo</TableHead>
+                  <TableHead className="h-9 px-2 py-1 align-middle" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map(row => {
                   const employee = employees.find(item => item.id === row.employee_id)
                   const hourlyRate = Number(employee?.hourly_wage ?? 0)
+                  const commissionAvailable = employee?.commission_enabled === true
+                  const breakReviewCount = breakReviewCounts.get(row.employee_id) ?? 0
 
                   return (
-                  <TableRow key={row.employee_id}>
-                    <TableCell className="p-1">
+                  <TableRow key={row.employee_id} className="border-b">
+                    <TableCell className="border-r p-1 align-middle">
                       <Select value={row.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(row.employee_id, { payment_method: value as PaymentMethod })}>
-                        <SelectTrigger className="h-7 w-24"><span>{paymentMethodLabel(row.payment_method)}</span></SelectTrigger>
+                        <SelectTrigger className="h-8 w-full"><span>{paymentMethodLabel(row.payment_method)}</span></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
                           <SelectItem value="check">Check</SelectItem>
@@ -644,40 +677,60 @@ export default function WageWorksheetPage() {
                         </SelectContent>
                       </Select>
                     </TableCell>
-                    <TableCell className="p-1 font-medium">{row.employee_name}</TableCell>
-                    <TableCell className="p-1">
+                    <TableCell className="border-r px-2 py-1 align-middle font-medium">{row.employee_name}</TableCell>
+                    <TableCell className="border-r p-1 align-middle">
                       {row.has_open_clock ? (
                         <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Review</Badge>
                       ) : row.has_auto_clock_out ? (
                         <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Out</Badge>
                       ) : (
-                        <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">OK</Badge>
+                        <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>
                       )}
                     </TableCell>
-                    <TableCell className="p-1 text-right">
-                      <Input className="h-7 w-16 text-right" type="number" step="0.01" value={row.hours} onChange={event => {
+                    <TableCell className="border-r p-1 align-middle">
+                      {breakReviewCount > 0 ? (
+                        <Badge variant="outline" className="border-red-300 bg-red-50 text-red-700">{breakReviewCount} Review</Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">Clear</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="border-r p-1 text-right align-middle">
+                      <Input className="h-8 w-full text-right" type="number" step="0.01" value={row.hours} onChange={event => {
                         const hours = normalizeMoney(event.target.value)
                         updateRow(row.employee_id, { hours })
                       }} />
                     </TableCell>
-                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.tips} onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell className="p-1">
-                      <Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
+                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.tips} onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="border-r p-1 align-middle">
+                      <Input className="h-8 w-full text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
                       <div className="mt-0.5 text-right text-[10px] leading-none text-muted-foreground">
                         {formatCurrency(hourlyRate)}/hr
                       </div>
                     </TableCell>
-                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.guarantee_top_up} onChange={event => updateRow(row.employee_id, { guarantee_top_up: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.commission} onChange={event => updateRow(row.employee_id, { commission: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell className="p-1"><Input className="h-7 w-20 text-right" type="number" step="0.01" value={row.deductions} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
-                    <TableCell className="p-1 text-right font-semibold">
+                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.guarantee_top_up} onChange={event => updateRow(row.employee_id, { guarantee_top_up: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="border-r p-1 align-middle">
+                      <Input
+                        className="h-8 w-full text-right disabled:bg-slate-100"
+                        type="number"
+                        step="0.01"
+                        value={commissionAvailable ? row.commission : 0}
+                        disabled={!commissionAvailable}
+                        title={commissionAvailable ? undefined : 'Commission unavailable for this staffing profile'}
+                        onChange={event => updateRow(row.employee_id, { commission: normalizeMoney(event.target.value) })}
+                      />
+                      {!commissionAvailable && (
+                        <div className="mt-0.5 text-right text-[10px] leading-none text-muted-foreground">Unavailable</div>
+                      )}
+                    </TableCell>
+                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.deductions} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="border-r p-1 text-right align-middle font-semibold">
                       {formatCurrency(row.payout_amount)}
                       {row.payment_method === 'cash' && row.cash_rounding > 0 && (
                         <div className="text-[10px] leading-none text-muted-foreground">rounded {formatCurrency(row.cash_rounding)}</div>
                       )}
                     </TableCell>
-                    <TableCell className="p-1"><Input className="h-7 w-40" value={row.memo} onChange={event => updateRow(row.employee_id, { memo: event.target.value })} /></TableCell>
-                    <TableCell className="p-1"><Button variant="ghost" size="sm" onClick={() => removeRow(row.employee_id)}>Remove</Button></TableCell>
+                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full" value={row.memo} onChange={event => updateRow(row.employee_id, { memo: event.target.value })} /></TableCell>
+                    <TableCell className="p-1 align-middle"><Button variant="ghost" size="sm" onClick={() => removeRow(row.employee_id)}>Remove</Button></TableCell>
                   </TableRow>
                   )
                 })}

@@ -20,22 +20,30 @@ export function useEmployees({ includeArchived = false }: { includeArchived?: bo
     void (async () => {
       let query = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).order('name')
       if (!includeArchived) query = query.eq('is_active', true)
-      const initial = await query
-      const res = initial.error && isMissingMealBreakThresholdColumn(initial.error)
-        ? await (() => {
-            let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD).order('name')
-            if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
-            return fallbackQuery
-          })()
-        : initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error) || isMissingAddressColumn(initial.error))
+      let res = await query as { data: object[] | null; error: { message?: string; code?: string } | null }
+      if (res.error && isMissingMealBreakThresholdColumn(res.error)) {
+        res = await (() => {
+          let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD).order('name')
+          if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
+          return fallbackQuery
+        })() as { data: object[] | null; error: { message?: string; code?: string } | null }
+      }
+      if (res.error && (isMissingTipPoolRateColumn(res.error) || isMissingPaymentMethodColumn(res.error) || isMissingAddressColumn(res.error))) {
+        res = await (() => {
+          let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).order('name')
+          if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
+          return fallbackQuery
+        })() as { data: object[] | null; error: { message?: string; code?: string } | null }
+      }
+      const legacyRes = res.error && isMissingMealBreakThresholdColumn(res.error)
         ? await (() => {
             let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).order('name')
             if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
             return fallbackQuery
-          })()
-        : initial
+          })() as { data: object[] | null; error: { message?: string; code?: string } | null }
+        : res
       if (!mounted) return
-      setEmployees(withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(res.data ?? [])))) as Employee[])
+      setEmployees(withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(legacyRes.data ?? [])))) as Employee[])
     })()
     return () => {
       mounted = false

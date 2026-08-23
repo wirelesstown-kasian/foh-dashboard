@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { BarChart3, ClipboardCheck, DollarSign, FileClock, LineChart, ReceiptText } from 'lucide-react'
+import { BarChart3, BriefcaseBusiness, ClipboardCheck, DollarSign, FileClock, LineChart, ReceiptText } from 'lucide-react'
 
 const reportingCards = [
   {
@@ -34,6 +34,12 @@ const reportingCards = [
     title: 'EOD History',
     description: 'Review store-wide revenue, tips, deposits, and period totals.',
     icon: ReceiptText,
+  },
+  {
+    href: '/roles-departments',
+    title: 'Roles and Departments',
+    description: 'Maintain reporting departments, labels, and payroll cycles.',
+    icon: BriefcaseBusiness,
   },
   {
     href: '/reporting/clock-records',
