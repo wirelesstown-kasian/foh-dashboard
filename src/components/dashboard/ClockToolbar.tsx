@@ -8,7 +8,7 @@ import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
 import { getClockWorkDepartment, isClockOnMealBreak, isClockOnUnpaidBreak } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { cn } from '@/lib/utils'
-import { ArrowLeft, Bell, Camera, Clock3, Coffee, LogIn, LogOut, Sparkles, Utensils } from 'lucide-react'
+import { ArrowLeft, Bell, Camera, CheckCircle2, Clock3, Coffee, LogIn, LogOut, Sparkles, Utensils } from 'lucide-react'
 
 interface Props {
   schedules: Schedule[]
@@ -44,6 +44,12 @@ type ClockStatus = {
 type EmployeeClockLookup = {
   employee: Pick<Employee, 'id' | 'name' | 'role' | 'primary_department' | 'schedule_departments'>
   status: ClockStatus
+}
+type ClockInStep = 'actions' | 'choose_department' | 'confirmed'
+type ClockInConfirmation = {
+  employeeName: string
+  workDepartment: string
+  clockInAt: string
 }
 type AvailableStaff = {
   id: string
@@ -144,6 +150,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   const [error, setError] = useState<string | null>(null)
   const [lookup, setLookup] = useState<EmployeeClockLookup | null>(null)
   const [selectedWorkDepartment, setSelectedWorkDepartment] = useState('')
+  const [clockInStep, setClockInStep] = useState<ClockInStep>('actions')
+  const [clockInSkipPhoto, setClockInSkipPhoto] = useState(false)
+  const [clockInConfirmation, setClockInConfirmation] = useState<ClockInConfirmation | null>(null)
   const [lookupLoading, setLookupLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
@@ -250,6 +259,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     setError(null)
     setLookup(null)
     setSelectedWorkDepartment('')
+    setClockInStep('actions')
+    setClockInSkipPhoto(false)
+    setClockInConfirmation(null)
     setLookupLoading(false)
     setPin('')
   }
@@ -258,6 +270,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     setPin(nextPin)
     setLookup(null)
     setSelectedWorkDepartment('')
+    setClockInStep('actions')
+    setClockInSkipPhoto(false)
+    setClockInConfirmation(null)
     setError(null)
   }
 
@@ -266,6 +281,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     setPin(sanitized)
     setLookup(null)
     setSelectedWorkDepartment('')
+    setClockInStep('actions')
+    setClockInSkipPhoto(false)
+    setClockInConfirmation(null)
     setError(null)
     if (sanitized.length === 4) {
       void lookupClockStatus(sanitized)
@@ -359,6 +377,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       const nextLookup = { employee: data.employee, status: data.status } as EmployeeClockLookup
       const departmentOptions = getWorkDepartmentOptions(nextLookup.employee, schedules)
       setSelectedWorkDepartment(nextLookup.status.work_department ?? departmentOptions[0] ?? '')
+      setClockInStep('actions')
+      setClockInSkipPhoto(false)
+      setClockInConfirmation(null)
       setLookup(nextLookup)
       return nextLookup
     } catch (err) {
@@ -371,7 +392,11 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     }
   }
 
-  const handleSubmit = async (nextTarget: ClockAction | 'toggle_unpaid_break', skipPhoto = false) => {
+  const handleSubmit = async (
+    nextTarget: ClockAction | 'toggle_unpaid_break',
+    skipPhoto = false,
+    workDepartmentOverride?: string
+  ) => {
     setTarget(nextTarget)
     setError(null)
 
@@ -396,9 +421,19 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
     }
 
     const workDepartmentOptions = getWorkDepartmentOptions(currentLookup.employee, schedules)
-    const resolvedWorkDepartment = selectedWorkDepartment || currentLookup.status.work_department || workDepartmentOptions[0] || ''
+    const hasMultipleWorkDepartments = workDepartmentOptions.length > 1
+    if (nextTarget === 'clock_in' && hasMultipleWorkDepartments && !workDepartmentOverride) {
+      setClockInSkipPhoto(skipPhoto)
+      setClockInStep('choose_department')
+      setSelectedWorkDepartment('')
+      return
+    }
+
+    const resolvedWorkDepartment = workDepartmentOverride ||
+      (!hasMultipleWorkDepartments ? selectedWorkDepartment || currentLookup.status.work_department || workDepartmentOptions[0] : '') ||
+      ''
     if (nextTarget === 'clock_in' && workDepartmentOptions.length > 0 && !resolvedWorkDepartment) {
-      setError('Select a department before clocking in.')
+      setError('Choose what you are clocking in as.')
       return
     }
 
@@ -423,13 +458,46 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
           work_department: nextTarget === 'clock_in' ? resolvedWorkDepartment : undefined,
         }),
       })
-      const data = (await res.json().catch(() => ({}))) as { error?: string; available_at?: string }
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string
+        available_at?: string
+        clock_in_at?: string
+        work_department?: string | null
+      }
       if (!res.ok) {
         if (data.available_at) {
           const available = new Date(data.available_at)
           throw new Error(`${data.error ?? 'Meal break is not complete yet'} You can clock back in at ${available.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.`)
         }
         throw new Error(data.error ?? 'Failed to save clock event')
+      }
+
+      if (nextTarget === 'clock_in') {
+        const clockInAt = data.clock_in_at ?? new Date().toISOString()
+        const confirmedDepartment = data.work_department ?? resolvedWorkDepartment
+        setSelectedWorkDepartment(confirmedDepartment)
+        setClockInConfirmation({
+          employeeName: currentLookup.employee.name,
+          workDepartment: confirmedDepartment,
+          clockInAt,
+        })
+        setClockInStep('confirmed')
+        setClockInSkipPhoto(false)
+        setLookup({
+          employee: currentLookup.employee,
+          status: {
+            ...currentLookup.status,
+            state: 'clocked_in',
+            can_clock_in: false,
+            can_clock_out: true,
+            can_start_break: true,
+            can_end_break: false,
+            clock_in_at: clockInAt,
+            work_department: confirmedDepartment,
+          },
+        })
+        await onRefresh()
+        return
       }
 
       resetPanel()
@@ -475,6 +543,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
             setTarget(null)
             setLookup(null)
             setSelectedWorkDepartment('')
+            setClockInStep('actions')
+            setClockInConfirmation(null)
+            setClockInSkipPhoto(false)
             setError(null)
           }}
           aria-label="Open time clock"
@@ -610,83 +681,142 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                 </div>
 
                 <div className="flex min-h-0 flex-col justify-center gap-3">
-                  <div
-                    className={cn(
-                      'rounded-lg border-2 p-4 shadow-sm',
-                      hasAnnouncement
-                        ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100'
-                        : 'border-slate-200 bg-white text-slate-700',
-                      announcementIsNew && 'animate-pulse'
-                    )}
-                  >
-                    <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.14em]">
-                      {hasAnnouncement ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
-                      Announcement
-                    </div>
-                    <div className="mt-2 text-lg font-bold leading-snug">{visibleAnnouncement}</div>
-                  </div>
-                  {lookup.status.can_clock_in && workDepartmentOptions.length > 1 && (
-                    <div className="rounded-lg border bg-white p-3 shadow-sm">
-                      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Clock In As</div>
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {clockInStep === 'choose_department' ? (
+                    <div className="rounded-lg border bg-white p-5 shadow-sm">
+                      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Choose One</div>
+                      <div className="mt-2 text-2xl font-bold text-slate-950">Clock in as</div>
+                      <div className="mt-1 text-sm text-slate-500">
+                        {lookup.employee.name} can only clock in under one department for this shift.
+                      </div>
+                      <div className="mt-5 grid gap-3">
                         {workDepartmentOptions.map(department => (
-                          <button
+                          <Button
                             key={department}
-                            type="button"
-                            onClick={() => setSelectedWorkDepartment(department)}
-                            className={cn(
-                              'rounded-md border px-3 py-2 text-sm font-bold capitalize transition',
-                              selectedWorkDepartment === department
-                                ? 'border-amber-400 bg-amber-100 text-amber-950'
-                                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-amber-200 hover:bg-amber-50'
-                            )}
+                            className="h-16 bg-emerald-600 text-lg font-bold capitalize hover:bg-emerald-700"
+                            onClick={() => {
+                              setSelectedWorkDepartment(department)
+                              void handleSubmit('clock_in', clockInSkipPhoto, department)
+                            }}
+                            disabled={submitting || (!clockInSkipPhoto && !cameraReady)}
                           >
-                            {department}
-                          </button>
+                            <LogIn className="mr-2 h-5 w-5" />
+                            {submitting && target === 'clock_in' && selectedWorkDepartment === department
+                              ? 'Saving...'
+                              : `Clock In as ${department}`}
+                          </Button>
                         ))}
                       </div>
+                      <Button
+                        variant="ghost"
+                        className="mt-3 h-11 w-full text-slate-600"
+                        onClick={() => {
+                          setClockInStep('actions')
+                          setClockInSkipPhoto(false)
+                          setSelectedWorkDepartment(workDepartmentOptions[0] ?? '')
+                          setError(null)
+                        }}
+                        disabled={submitting}
+                      >
+                        <ArrowLeft className="mr-2 h-4 w-4" />
+                        Back
+                      </Button>
                     </div>
+                  ) : clockInStep === 'confirmed' && clockInConfirmation ? (
+                    <div className="rounded-lg border border-emerald-200 bg-white p-5 text-center shadow-sm">
+                      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                        <CheckCircle2 className="h-8 w-8" />
+                      </div>
+                      <div className="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Clocked In</div>
+                      <div className="mt-2 text-3xl font-bold text-slate-950">{clockInConfirmation.employeeName}</div>
+                      <div className="mt-5 grid gap-2 text-left text-sm">
+                        <div className="rounded-md border bg-emerald-50 px-3 py-2">
+                          <div className="text-xs uppercase text-emerald-700">Clocked In As</div>
+                          <div className="font-semibold capitalize text-slate-950">{clockInConfirmation.workDepartment}</div>
+                        </div>
+                        <div className="rounded-md border bg-slate-50 px-3 py-2">
+                          <div className="text-xs uppercase text-slate-400">Time Stamp</div>
+                          <div className="font-semibold text-slate-950">{formatStatusDateTime(clockInConfirmation.clockInAt)}</div>
+                        </div>
+                      </div>
+                      <Button className="mt-5 h-12 w-full bg-slate-950 font-bold hover:bg-slate-800" onClick={resetPanel}>
+                        Done
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="mt-2 h-11 w-full text-slate-600"
+                        onClick={() => {
+                          setLookup(null)
+                          setSelectedWorkDepartment('')
+                          setClockInStep('actions')
+                          setClockInConfirmation(null)
+                          setClockInSkipPhoto(false)
+                          setError(null)
+                          setPin('')
+                        }}
+                      >
+                        <ArrowLeft className="mr-2 h-4 w-4" />
+                        Back to PIN
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div
+                        className={cn(
+                          'rounded-lg border-2 p-4 shadow-sm',
+                          hasAnnouncement
+                            ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100'
+                            : 'border-slate-200 bg-white text-slate-700',
+                          announcementIsNew && 'animate-pulse'
+                        )}
+                      >
+                        <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.14em]">
+                          {hasAnnouncement ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
+                          Announcement
+                        </div>
+                        <div className="mt-2 text-lg font-bold leading-snug">{visibleAnnouncement}</div>
+                      </div>
+                      <Button
+                        className="h-16 bg-emerald-600 text-lg font-bold hover:bg-emerald-700"
+                        onClick={() => void handleSubmit('clock_in')}
+                        disabled={submitting || !cameraReady || !lookup.status.can_clock_in}
+                      >
+                        <LogIn className="mr-2 h-5 w-5" />
+                        {submitting && target === 'clock_in' ? 'Saving...' : CLOCK_IN_TITLE}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-16 border-slate-300 bg-white text-lg font-bold"
+                        onClick={() => void handleSubmit('clock_out')}
+                        disabled={submitting || !cameraReady || !lookup.status.can_clock_out}
+                      >
+                        <LogOut className="mr-2 h-5 w-5" />
+                        {submitting && target === 'clock_out' ? 'Saving...' : CLOCK_OUT_TITLE}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-16 border-blue-200 bg-blue-50 text-lg font-bold text-blue-800 hover:bg-blue-100"
+                        onClick={() => void handleSubmit('toggle_break', true)}
+                        disabled={submitting || (!lookup.status.can_start_break && !lookup.status.can_end_break)}
+                      >
+                        <Utensils className="mr-2 h-5 w-5" />
+                        {submitting && target === 'toggle_break' ? 'Saving...' : mealBreakActionLabel}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-16 border-amber-200 bg-amber-50 text-lg font-bold text-amber-900 hover:bg-amber-100"
+                        onClick={() => void handleSubmit('toggle_unpaid_break', true)}
+                        disabled={submitting || (!lookup.status.can_start_unpaid_break && !lookup.status.can_end_unpaid_break)}
+                      >
+                        <Coffee className="mr-2 h-5 w-5" />
+                        {submitting && target === 'toggle_unpaid_break' ? 'Saving...' : unpaidBreakActionLabel}
+                      </Button>
+                      <Button variant="ghost" className="h-11 text-slate-600" onClick={() => { setLookup(null); setSelectedWorkDepartment(''); setClockInStep('actions'); setClockInConfirmation(null); setClockInSkipPhoto(false); setError(null); setPin('') }}>
+                        <ArrowLeft className="mr-2 h-4 w-4" />
+                        Back to PIN
+                      </Button>
+                      <TodayStaffPanel staff={availableStaff} />
+                    </>
                   )}
-                  <Button
-                    className="h-16 bg-emerald-600 text-lg font-bold hover:bg-emerald-700"
-                    onClick={() => void handleSubmit('clock_in')}
-                    disabled={submitting || !cameraReady || !lookup.status.can_clock_in}
-                  >
-                    <LogIn className="mr-2 h-5 w-5" />
-                    {submitting && target === 'clock_in' ? 'Saving...' : CLOCK_IN_TITLE}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-16 border-slate-300 bg-white text-lg font-bold"
-                    onClick={() => void handleSubmit('clock_out')}
-                    disabled={submitting || !cameraReady || !lookup.status.can_clock_out}
-                  >
-                    <LogOut className="mr-2 h-5 w-5" />
-                    {submitting && target === 'clock_out' ? 'Saving...' : CLOCK_OUT_TITLE}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-16 border-blue-200 bg-blue-50 text-lg font-bold text-blue-800 hover:bg-blue-100"
-                    onClick={() => void handleSubmit('toggle_break', true)}
-                    disabled={submitting || (!lookup.status.can_start_break && !lookup.status.can_end_break)}
-                  >
-                    <Utensils className="mr-2 h-5 w-5" />
-                    {submitting && target === 'toggle_break' ? 'Saving...' : mealBreakActionLabel}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-16 border-amber-200 bg-amber-50 text-lg font-bold text-amber-900 hover:bg-amber-100"
-                    onClick={() => void handleSubmit('toggle_unpaid_break', true)}
-                    disabled={submitting || (!lookup.status.can_start_unpaid_break && !lookup.status.can_end_unpaid_break)}
-                  >
-                    <Coffee className="mr-2 h-5 w-5" />
-                    {submitting && target === 'toggle_unpaid_break' ? 'Saving...' : unpaidBreakActionLabel}
-                  </Button>
-                  <Button variant="ghost" className="h-11 text-slate-600" onClick={() => { setLookup(null); setSelectedWorkDepartment(''); setError(null); setPin('') }}>
-                    <ArrowLeft className="mr-2 h-4 w-4" />
-                    Back to PIN
-                  </Button>
-                  <TodayStaffPanel staff={availableStaff} />
                 </div>
 
                 <div className="min-h-0 overflow-auto rounded-lg border bg-white p-4 shadow-sm">
@@ -723,14 +853,16 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                       {error}
                     </div>
                   )}
-                  <Button
-                    variant="ghost"
-                    className="mt-3 w-full text-slate-600"
-                    onClick={() => void handleSubmit('clock_in', true)}
-                    disabled={submitting}
-                  >
-                    {submitting && target === 'clock_in' ? 'Saving...' : 'Manager Clock In Without Photo'}
-                  </Button>
+                  {clockInStep === 'actions' && lookup.status.can_clock_in && lookup.employee.role === 'manager' && (
+                    <Button
+                      variant="ghost"
+                      className="mt-3 w-full text-slate-600"
+                      onClick={() => void handleSubmit('clock_in', true)}
+                      disabled={submitting}
+                    >
+                      {submitting && target === 'clock_in' ? 'Saving...' : 'Manager Clock In Without Photo'}
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

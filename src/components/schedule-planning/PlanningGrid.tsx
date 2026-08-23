@@ -18,7 +18,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { ChevronLeft, ChevronRight, Plus, Trash2, Send, CloudOff, Copy, ChevronUp, ChevronDown, Download, Save } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getDepartmentLabel, getRoleColorTheme } from '@/lib/organization'
+import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 import type { EmailSettings } from '@/lib/appSettings'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
@@ -195,6 +195,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
   const [scheduleEmailDefaults, setScheduleEmailDefaults] = useState(DEFAULT_SCHEDULE_EMAIL_SETTINGS)
   const allowedTimeOptions = getAllowedTimeOptions()
   const departmentLabel = getDepartmentLabel(department, departmentDefinitions)
+  const getManagerTitleLabel = (employee: Employee) => employee.role === 'manager' ? getRoleLabel(employee.role, roleDefinitions) : null
 
   useEffect(() => {
     setDays(getWeekDays(weekRef))
@@ -602,6 +603,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = displayedEmployees.map(employee => {
       const roleTheme = getRoleColorTheme(department, roleDefinitions)
+      const managerTitleLabel = getManagerTitleLabel(employee)
       const dayCells = days.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
@@ -623,6 +625,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
               ${departmentLabel}
             </div>
+            ${managerTitleLabel ? `<div class="title-badge">Title: ${managerTitleLabel}</div>` : ''}
           </td>
           ${dayCells}
           <td class="weekly-total">${formatHours(getWeeklyHours(employee.id))}</td>
@@ -648,6 +651,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             .employee-name { font-weight: 800; font-size: 15px; margin-bottom: 2px; }
             .muted { color: #475569; font-size: 12px; }
             .role-badge { display: inline-block; margin-top: 6px; padding: 3px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+            .title-badge { display: inline-block; margin-top: 5px; padding: 3px 8px; border-radius: 9999px; background: #f3e8ff; color: #6b21a8; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
             .shift { background: #f7f7f5; border: 1.5px solid #64748b; border-radius: 8px; padding: 6px; margin-bottom: 5px; }
             .time { font-weight: 700; font-size: 14px; }
             .weekly-total { text-align: center; font-weight: 700; }
@@ -806,7 +810,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         .order('date'),
       supabase
         .from('schedules')
-        .select('*')
+        .select('*, employee:employees(id, name, role, primary_department, schedule_departments, is_active, pin_hash, phone, email, birth_date, created_at)')
         .gte('date', previousWeekStart)
         .lte('date', previousWeekEnd)
         .eq('department', department)
@@ -832,7 +836,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       return
     }
 
-    const previousSchedules = prevSchedulesRes.data ?? []
+    const previousSchedules = (prevSchedulesRes.data ?? []) as Array<Schedule & { employee?: Employee | null }>
     const previousDraftRows = (prevDraftsRes.data ?? []) as Array<ShiftDraft & { week_start?: string; display_order: number | null }>
     const hasPreviousDraftRows = previousDraftRows.length > 0
 
@@ -851,7 +855,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     // Combined ordered list: draft order first, then extras from published schedules
     const allPrevEmployeeIds = Array.from(
       new Set(hasPreviousDraftRows ? prevDraftOrderedIds : [...prevDraftOrderedIds, ...prevScheduleEmployeeIds])
-    ).filter(id => employees.some(emp => emp.id === id)) // must exist in current dept
+    )
 
     if (allPrevEmployeeIds.length === 0) {
       setPublishFeedback({
@@ -860,6 +864,58 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
       })
       return
     }
+
+    const previousEmployeesById = new Map(
+      previousSchedules
+        .filter(schedule => schedule.employee)
+        .map(schedule => [schedule.employee_id, schedule.employee as Employee])
+    )
+    const knownEmployeeIds = new Set([...employees.map(employee => employee.id), ...previousEmployeesById.keys()])
+    const missingEmployeeIds = allPrevEmployeeIds.filter(employeeId => !knownEmployeeIds.has(employeeId))
+    let fetchedEmployees: Employee[] = []
+    if (missingEmployeeIds.length > 0) {
+      const employeeRes = await supabase
+        .from('employees')
+        .select(EMPLOYEE_PUBLIC_SELECT)
+        .in('id', missingEmployeeIds)
+
+      if (employeeRes.error) {
+        setPublishFeedback({
+          tone: 'error',
+          message: employeeRes.error.message,
+        })
+        return
+      }
+      fetchedEmployees = withMealBreakThresholdHours(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate(employeeRes.data ?? [])))) as Employee[]
+    }
+    const copiedEmployees = allPrevEmployeeIds
+      .map(employeeId =>
+        employees.find(employee => employee.id === employeeId) ??
+        previousEmployeesById.get(employeeId) ??
+        fetchedEmployees.find(employee => employee.id === employeeId) ??
+        null
+      )
+      .filter((employee): employee is Employee => !!employee)
+    if (copiedEmployees.length === 0) {
+      setPublishFeedback({
+        tone: 'error',
+        message: `Previous week ${departmentLabel} rows were found, but the employees could not be loaded.`,
+      })
+      return
+    }
+
+    const copiedEmployeeIds = new Set(copiedEmployees.map(employee => employee.id))
+    const nextKnownEmployees = [
+      ...employees.filter(employee => !copiedEmployeeIds.has(employee.id)),
+      ...copiedEmployees,
+    ].sort((left, right) => left.name.localeCompare(right.name))
+    setEmployees(nextKnownEmployees)
+    setEmployeeNamesById(current => {
+      const next = new Map(current)
+      for (const employee of copiedEmployees) next.set(employee.id, employee.name)
+      return next
+    })
+    const validPrevEmployeeIds = allPrevEmployeeIds.filter(employeeId => copiedEmployeeIds.has(employeeId))
 
     const sourceRows = hasPreviousDraftRows
       ? previousDraftRows
@@ -872,9 +928,9 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         }))
 
     // Shift previous week's draft or published shifts forward by 7 days.
-    const displayOrderByEmployeeId = new Map(allPrevEmployeeIds.map((employeeId, index) => [employeeId, index]))
+    const displayOrderByEmployeeId = new Map(validPrevEmployeeIds.map((employeeId, index) => [employeeId, index]))
     const shiftedDrafts = sourceRows
-      .filter(s => allPrevEmployeeIds.includes(s.employee_id))
+      .filter(s => validPrevEmployeeIds.includes(s.employee_id))
       .map(schedule => {
         const previousDate = new Date(schedule.date + 'T12:00:00')
         const nextDate = new Date(previousDate)
@@ -892,12 +948,12 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
     // New row order: previous week's order first, then any current-week-only employees appended
     const nextDisplayedIds = Array.from(
       new Set([
-        ...allPrevEmployeeIds,
-        ...displayedEmployeeIds.filter(id => !allPrevEmployeeIds.includes(id)),
+        ...validPrevEmployeeIds,
+        ...displayedEmployeeIds.filter(id => !validPrevEmployeeIds.includes(id)),
       ])
     )
 
-    const replacedIds = new Set(allPrevEmployeeIds)
+    const replacedIds = new Set(validPrevEmployeeIds)
     const keptDrafts = drafts.filter(draft => !replacedIds.has(draft.employee_id))
     persistDisplayedEmployeeIds(nextDisplayedIds)
     persistDrafts(ensureMondayOffDrafts([...keptDrafts, ...shiftedDrafts].sort((a, b) => {
@@ -1137,6 +1193,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             <tbody>
               {displayedEmployees.map((emp, rowIndex) => {
                 const roleTheme = getRoleColorTheme(department, roleDefinitions)
+                const managerTitleLabel = getManagerTitleLabel(emp)
                 return (
                 <tr key={emp.id} className="border-b border-slate-200 hover:bg-slate-50/70">
                   <td className="border-l-4 p-3.5 align-top" style={roleTheme.rowAccentStyle}>
@@ -1164,6 +1221,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                             <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
                               {departmentLabel}
                             </span>
+                            {managerTitleLabel && (
+                              <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-purple-800">
+                                Title: {managerTitleLabel}
+                              </span>
+                            )}
                             {!emp.is_active && (
                               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                                 Archived
@@ -1519,6 +1581,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                 {availableEmployeesToAdd.map(employee => {
                   const checked = staffToAdd.includes(employee.id)
                   const roleTheme = getRoleColorTheme(department, roleDefinitions)
+                  const managerTitleLabel = getManagerTitleLabel(employee)
                   return (
                     <label
                       key={employee.id}
@@ -1530,6 +1593,11 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                           <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
                             {departmentLabel}
                           </span>
+                          {managerTitleLabel && (
+                            <span className="ml-1.5 rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-purple-800">
+                              Title: {managerTitleLabel}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <input

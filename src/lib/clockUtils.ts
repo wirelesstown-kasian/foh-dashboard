@@ -9,6 +9,7 @@ export const MINIMUM_MEAL_BREAK_MINUTES = 30
 const MEAL_BREAK_TOKEN_PATTERN = /\s*\[meal_break_(?:started_at|ended_at|minutes)=[^\]]*\]/g
 const UNPAID_BREAK_TOKEN_PATTERN = /\s*\[unpaid_break_(?:started_at|ended_at|minutes)=[^\]]*\]/g
 const WORK_DEPARTMENT_TOKEN_PATTERN = /\s*\[work_department=[^\]]*\]/g
+const FALLBACK_WORK_DEPARTMENT_PRIORITY = ['server']
 
 function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
   const formatter = new Intl.DateTimeFormat('en-US', {
@@ -179,6 +180,14 @@ export function setClockWorkDepartmentManagerNote(note: string | null | undefine
   return [baseNote, normalizedDepartment ? `[work_department=${normalizedDepartment}]` : ''].filter(Boolean).join(' ')
 }
 
+function getPreferredAmbiguousWorkDepartment(departments: string[]) {
+  for (const preferredDepartment of FALLBACK_WORK_DEPARTMENT_PRIORITY) {
+    const match = departments.find(department => department.toLowerCase() === preferredDepartment)
+    if (match) return match
+  }
+  return departments.find(department => department.toLowerCase() !== 'manager') ?? departments[0] ?? null
+}
+
 export function getClockWorkDepartment(
   record: ShiftClock,
   employee?: Pick<Employee, 'role' | 'primary_department' | 'schedule_departments'> | null,
@@ -196,10 +205,16 @@ export function getClockWorkDepartment(
       .map(schedule => String(schedule.department).trim())
   ))
   if (scheduledDepartments.length === 1) return scheduledDepartments[0]
+  const preferredScheduledDepartment = getPreferredAmbiguousWorkDepartment(scheduledDepartments)
+  if (preferredScheduledDepartment) return preferredScheduledDepartment
 
   const relatedEmployee = employee ?? (Array.isArray(record.employee) ? record.employee[0] : record.employee)
   if (relatedEmployee) {
-    return getEmployeeScheduleDepartments(relatedEmployee)[0] ?? relatedEmployee.primary_department ?? relatedEmployee.role ?? 'staff'
+    const employeeDepartments = getEmployeeScheduleDepartments(relatedEmployee)
+    const fallbackDepartment = employeeDepartments.length > 1
+      ? getPreferredAmbiguousWorkDepartment(employeeDepartments)
+      : employeeDepartments[0]
+    return fallbackDepartment ?? relatedEmployee.primary_department ?? relatedEmployee.role ?? 'staff'
   }
 
   return 'staff'

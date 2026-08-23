@@ -17,6 +17,8 @@ const DEFAULT_ROLE_COLORS: Record<string, string> = {
   server: '#0ea5e9',
   busser: '#10b981',
   runner: '#f59e0b',
+  cook: '#ef4444',
+  kitchen: '#f97316',
   kitchen_staff: '#f43f5e',
 }
 

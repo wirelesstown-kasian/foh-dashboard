@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
-import { getDepartmentLabel, getRoleColorTheme } from '@/lib/organization'
+import { getDepartmentLabel, getRoleColorTheme, getRoleLabel } from '@/lib/organization'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withScheduleDepartments, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 interface WeeklyScheduleGridProps {
@@ -132,6 +132,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
   const totalWeekHours = days.reduce((sum, day) => sum + getDayTotal(formatDate(day)), 0)
   const totalShifts = schedules.length
   const departmentLabel = getDepartmentLabel(department, departmentDefinitions)
+  const getManagerTitleLabel = (employee: Employee) => employee.role === 'manager' ? getRoleLabel(employee.role, roleDefinitions) : null
 
   const exportDepartmentPdf = () => {
     if (days.length === 0) return
@@ -140,6 +141,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
     const weekLabel = formatWeekRange(weekRef)
     const tableRows = employees.map(employee => {
       const roleTheme = getRoleColorTheme(department, roleDefinitions)
+      const managerTitleLabel = getManagerTitleLabel(employee)
       const dayCells = renderedDays.map(day => {
         const shifts = getShifts(employee.id, formatDate(day))
         return `
@@ -161,6 +163,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
               ${departmentLabel}
             </div>
+            ${managerTitleLabel ? `<div class="title-badge">Title: ${managerTitleLabel}</div>` : ''}
           </td>
           ${dayCells}
         </tr>
@@ -185,6 +188,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             .employee-name { font-weight: 800; font-size: 15px; margin-bottom: 2px; }
             .muted { color: #475569; font-size: 12px; }
             .role-badge { display: inline-block; margin-top: 6px; padding: 3px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+            .title-badge { display: inline-block; margin-top: 5px; padding: 3px 8px; border-radius: 9999px; background: #f3e8ff; color: #6b21a8; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
             .shift { background: #f7f7f5; border: 1.5px solid #64748b; border-radius: 8px; padding: 6px; margin-bottom: 5px; }
             .totals-row td { background: #e5e7eb; text-align: center; vertical-align: middle; }
             .totals-label { font-weight: 700; text-align: left; }
@@ -289,6 +293,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             <tbody>
               {employees.map(emp => {
                 const roleTheme = getRoleColorTheme(department, roleDefinitions)
+                const managerTitleLabel = getManagerTitleLabel(emp)
                 return (
                   <tr key={emp.id} className={`border-b border-slate-200 odd:bg-white even:bg-slate-50 hover:bg-slate-100`}>
                     <td className="sticky left-0 z-[1] border-l-4 border-r border-slate-200 bg-inherit p-3.5 align-top" style={roleTheme.rowAccentStyle}>
@@ -297,6 +302,11 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                         <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]" style={roleTheme.badgeStyle}>
                           {departmentLabel}
                         </span>
+                        {managerTitleLabel && (
+                          <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-purple-800">
+                            Title: {managerTitleLabel}
+                          </span>
+                        )}
                         {!emp.is_active && (
                           <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                             Archived

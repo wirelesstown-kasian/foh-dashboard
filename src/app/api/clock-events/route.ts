@@ -578,7 +578,12 @@ export async function POST(req: NextRequest) {
     }
 
     await upsertClockTaskCompletion(task_id, employee.id, session_date)
-    return NextResponse.json({ success: true, employee })
+    return NextResponse.json({
+      success: true,
+      employee,
+      clock_in_at: nowIso,
+      work_department: selectedWorkDepartment,
+    })
   }
 
   if (!existingRecord?.clock_in_at) {
