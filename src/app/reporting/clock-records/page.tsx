@@ -28,6 +28,10 @@ type ClockEditState = {
   sessionDate: string
   clockIn: string
   clockOut: string
+  mealBreakStart: string
+  mealBreakEnd: string
+  regularBreakStart: string
+  regularBreakEnd: string
   workDepartment: string
   note: string
 }
@@ -56,6 +60,11 @@ function timeInputToIso(sessionDate: string, value: string) {
   date.setHours(Number(hour), Number(minute), 0, 0)
   if (Number(hour) < 3) date.setDate(date.getDate() + 1)
   return date.toISOString()
+}
+
+function getBreakMinutes(startIso: string | null, endIso: string | null) {
+  if (!startIso || !endIso) return 0
+  return Math.max(0, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000))
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -131,7 +140,6 @@ export default function ClockRecordsPage() {
   const [savingClockId, setSavingClockId] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [addHourOpen, setAddHourOpen] = useState(false)
-  const [sheetSyncing, setSheetSyncing] = useState(false)
   const [addHourForm, setAddHourForm] = useState<AddHourFormState>({
     employeeId: '',
     sessionDate: format(new Date(), 'yyyy-MM-dd'),
@@ -188,13 +196,21 @@ export default function ClockRecordsPage() {
         .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)),
     [clockRecords, department, employeeFilter, employees, endDate, schedules, startDate]
   )
-  const getClockEditState = (record: ShiftClock): ClockEditState => ({
-    sessionDate: record.session_date,
-    clockIn: isoToTimeInput(record.clock_in_at),
-    clockOut: isoToTimeInput(record.clock_out_at),
-    workDepartment: getClockWorkDepartment(record, getClockRecordEmployee(record, employees), schedules),
-    note: getVisibleManagerNote(record.manager_note),
-  })
+  const getClockEditState = (record: ShiftClock): ClockEditState => {
+    const mealBreak = getMealBreakState(record)
+    const regularBreak = getUnpaidBreakState(record)
+    return {
+      sessionDate: record.session_date,
+      clockIn: isoToTimeInput(record.clock_in_at),
+      clockOut: isoToTimeInput(record.clock_out_at),
+      mealBreakStart: isoToTimeInput(mealBreak.startedAt),
+      mealBreakEnd: isoToTimeInput(mealBreak.endedAt),
+      regularBreakStart: isoToTimeInput(regularBreak.startedAt),
+      regularBreakEnd: isoToTimeInput(regularBreak.endedAt),
+      workDepartment: getClockWorkDepartment(record, getClockRecordEmployee(record, employees), schedules),
+      note: getVisibleManagerNote(record.manager_note),
+    }
+  }
 
   const selectedClockRecord = useMemo(
     () => clockRecords.find(record => record.id === selectedClockId) ?? null,
@@ -298,6 +314,17 @@ export default function ClockRecordsPage() {
   const saveClockAdjustment = async (record: ShiftClock) => {
     const currentEdit = clockEdits[record.id]
     if (!currentEdit) return false
+    const mealBreakStartAt = timeInputToIso(currentEdit.sessionDate, currentEdit.mealBreakStart)
+    const mealBreakEndAt = timeInputToIso(currentEdit.sessionDate, currentEdit.mealBreakEnd)
+    const regularBreakStartAt = timeInputToIso(currentEdit.sessionDate, currentEdit.regularBreakStart)
+    const regularBreakEndAt = timeInputToIso(currentEdit.sessionDate, currentEdit.regularBreakEnd)
+    if (
+      (mealBreakStartAt && mealBreakEndAt && new Date(mealBreakEndAt).getTime() <= new Date(mealBreakStartAt).getTime()) ||
+      (regularBreakStartAt && regularBreakEndAt && new Date(regularBreakEndAt).getTime() <= new Date(regularBreakStartAt).getTime())
+    ) {
+      setStatus('Break end must be after break start.')
+      return false
+    }
     setSavingClockId(record.id)
     setStatus(null)
     const res = await fetch('/api/clock-events', {
@@ -309,6 +336,12 @@ export default function ClockRecordsPage() {
         session_date: currentEdit.sessionDate,
         clock_in_at: timeInputToIso(currentEdit.sessionDate, currentEdit.clockIn),
         clock_out_at: timeInputToIso(currentEdit.sessionDate, currentEdit.clockOut),
+        meal_break_started_at: mealBreakStartAt,
+        meal_break_ended_at: mealBreakEndAt,
+        meal_break_minutes: getBreakMinutes(mealBreakStartAt, mealBreakEndAt),
+        unpaid_break_started_at: regularBreakStartAt,
+        unpaid_break_ended_at: regularBreakEndAt,
+        unpaid_break_minutes: getBreakMinutes(regularBreakStartAt, regularBreakEndAt),
         work_department: currentEdit.workDepartment,
         manager_note: currentEdit.note,
       }),
@@ -459,25 +492,6 @@ export default function ClockRecordsPage() {
     }
   }
 
-  const handleSheetSync = async () => {
-    setSheetSyncing(true)
-    setStatus(null)
-    try {
-      const res = await fetch('/api/clock-records-sheet-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reset_sheet: true }),
-      })
-      const payload = (await res.json().catch(() => ({}))) as { error?: string; rowCount?: number }
-      if (!res.ok) throw new Error(payload.error ?? 'Failed to sync clock records to Google Sheets')
-      setStatus(`Clock records synced to Google Sheets${typeof payload.rowCount === 'number' ? ` (${payload.rowCount} rows)` : ''}.`)
-    } catch (error) {
-      setStatus(getErrorMessage(error, 'Failed to sync clock records to Google Sheets'))
-    } finally {
-      setSheetSyncing(false)
-    }
-  }
-
   return (
     <div className="p-6">
       <AdminSubpageHeader
@@ -519,9 +533,6 @@ export default function ClockRecordsPage() {
           }
           rightSlot={
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={handleSheetSync} disabled={sheetSyncing}>
-                {sheetSyncing ? 'Syncing Sheet...' : 'Sync Sheet'}
-              </Button>
               <Button size="sm" onClick={openAddHourDialog} disabled={filteredEmployees.length === 0}>
                 <Plus className="mr-2 h-4 w-4" /> Add Hour
               </Button>
@@ -647,7 +658,14 @@ export default function ClockRecordsPage() {
                         ? calculateClockHoursAfterBreak(
                             timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.clockIn) ?? selectedClockRecord.clock_in_at,
                             timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.clockOut) ?? selectedClockRecord.clock_out_at ?? selectedClockRecord.clock_in_at,
-                            getClockBreakMinutes(selectedClockRecord)
+                            getBreakMinutes(
+                              timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.mealBreakStart),
+                              timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.mealBreakEnd)
+                            ) +
+                            getBreakMinutes(
+                              timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.regularBreakStart),
+                              timeInputToIso(selectedClockEdit.sessionDate, selectedClockEdit.regularBreakEnd)
+                            )
                           )
                         : 0).toFixed(2)}
                     </div>
@@ -698,6 +716,43 @@ export default function ClockRecordsPage() {
                           value={selectedClockEdit.clockOut}
                           onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, clockOut: event.target.value } }))}
                         />
+                      </div>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Break Time</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label>Meal Start</Label>
+                          <Input
+                            type="time"
+                            value={selectedClockEdit.mealBreakStart}
+                            onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, mealBreakStart: event.target.value } }))}
+                          />
+                        </div>
+                        <div>
+                          <Label>Meal End</Label>
+                          <Input
+                            type="time"
+                            value={selectedClockEdit.mealBreakEnd}
+                            onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, mealBreakEnd: event.target.value } }))}
+                          />
+                        </div>
+                        <div>
+                          <Label>Break Start</Label>
+                          <Input
+                            type="time"
+                            value={selectedClockEdit.regularBreakStart}
+                            onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, regularBreakStart: event.target.value } }))}
+                          />
+                        </div>
+                        <div>
+                          <Label>Break End</Label>
+                          <Input
+                            type="time"
+                            value={selectedClockEdit.regularBreakEnd}
+                            onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, regularBreakEnd: event.target.value } }))}
+                          />
+                        </div>
                       </div>
                     </div>
                     <div>

@@ -9,15 +9,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { formatCurrency } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
+import { isTipEligibleForWork } from '@/lib/tipEligibility'
 import { Employee } from '@/lib/types'
-import { ArrowLeft, ChevronLeft, ChevronRight, Plus, Save } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Save } from 'lucide-react'
 
 type EditorRow = {
   employee_id: string
@@ -130,7 +129,6 @@ export default function TipDistributionEditorPage() {
   const [selectedDate, setSelectedDate] = useState(todayKey())
   const [totalTipInput, setTotalTipInput] = useState('')
   const [rows, setRows] = useState<EditorRow[] | null>(null)
-  const [employeeToAdd, setEmployeeToAdd] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
@@ -161,10 +159,6 @@ export default function TipDistributionEditorPage() {
   const distributedTotal = roundMoney(calculatedRows.reduce((sum, row) => sum + row.net_tip, 0))
   const houseTotal = roundMoney((Number.isFinite(totalTip) ? totalTip : 0) * 0.15)
   const ruleTotal = roundMoney(distributedTotal + houseTotal)
-  const eligibleEmployees = employees.filter(employee => (
-    isTipEligibleEmployee(employee) &&
-    !currentRows.some(row => row.employee_id === employee.id)
-  ))
   const hasAdjustmentWithoutMemo = currentRows.some(row => row.adjustment !== 0 && row.memo.trim().length === 0)
   const selectedDateIndex = availableEodDates.indexOf(selectedDate)
   const previousEodDate = selectedDateIndex > 0
@@ -200,22 +194,6 @@ export default function TipDistributionEditorPage() {
     setRows(current => (current ?? currentRows).map(row => (
       row.employee_id === employeeId ? { ...row, ...patch } : row
     )))
-  }
-
-  const addEmployee = () => {
-    const employee = employees.find(item => item.id === employeeToAdd)
-    if (!employee) return
-    const clockRow = clockRows.find(row => row.employee_id === employee.id)
-    setRows(current => [...(current ?? currentRows), {
-      employee_id: employee.id,
-      name: employee.name,
-      hours_worked: clockRow?.hours_worked ?? 0,
-      start_time: clockRow?.start_time ?? null,
-      end_time: clockRow?.end_time ?? null,
-      adjustment: 0,
-      memo: '',
-    }].sort((a, b) => a.name.localeCompare(b.name)))
-    setEmployeeToAdd('')
   }
 
   const save = async () => {
@@ -364,22 +342,8 @@ export default function TipDistributionEditorPage() {
         </div>
 
         <div className="grid gap-4">
-          <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-white p-3">
-            <div className="min-w-64">
-              <Label>Add Employee</Label>
-              <Select value={employeeToAdd || undefined} onValueChange={(value: string | null) => value && setEmployeeToAdd(value)}>
-                <SelectTrigger><span>{employees.find(employee => employee.id === employeeToAdd)?.name ?? 'Select employee'}</span></SelectTrigger>
-                <SelectContent>
-                  {eligibleEmployees.map(employee => (
-                    <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button variant="outline" onClick={addEmployee} disabled={!employeeToAdd}><Plus className="size-4" /> Add</Button>
-            <div className="ml-auto text-xs text-muted-foreground">
-              Hours are locked here. Edit hours in <Link className="font-medium text-violet-700 hover:underline" href="/reporting/clock-records">Clock Records</Link>.
-            </div>
+          <div className="rounded-lg border bg-white p-3 text-xs text-muted-foreground">
+            Add staff and edit hours in <Link className="font-medium text-violet-700 hover:underline" href="/reporting/clock-records">Clock Records</Link>. Tip rows here follow saved clock records.
           </div>
 
           <div className="overflow-x-auto rounded-lg border bg-white">

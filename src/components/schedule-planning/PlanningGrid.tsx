@@ -1153,6 +1153,10 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             <Save className="w-4 h-4 mr-1.5" />
             {manualSaveStatus === 'saving' ? 'Saving' : manualSaveStatus === 'saved' ? 'Saved' : 'Save Draft'}
           </Button>
+          <Button variant="outline" size="sm" className="h-8 rounded-lg px-3" onClick={() => void copyPreviousWeekForAll()} disabled={!isEditableWeek}>
+            <Copy className="w-4 h-4 mr-1.5" />
+            Copy Previous Week
+          </Button>
           <Button size="sm" className="h-8 rounded-lg px-3" onClick={() => setPublishDialogOpen(true)} disabled={saving || !isDirty || !isEditableWeek}>
             <Send className="w-4 h-4 mr-1.5" />
             {hasPublishedSchedule ? 'Replace Published Schedule' : 'Publish'}

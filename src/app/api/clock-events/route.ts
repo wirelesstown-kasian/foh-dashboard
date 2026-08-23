@@ -24,6 +24,10 @@ export const runtime = 'nodejs'
 
 let clockPhotoBucketReady = false
 
+function hasOwn(object: object, key: string) {
+  return Object.prototype.hasOwnProperty.call(object, key)
+}
+
 function getAdminConfigResponse() {
   const error = getSupabaseAdminConfigError()
   return error ? NextResponse.json({ error }, { status: 500 }) : null
@@ -630,7 +634,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, approved_hours, manager_note, clock_in_at, clock_out_at, session_date, work_department } = await req.json() as {
+  const payload = await req.json() as {
     id?: string
     approved_hours?: number | string | null
     manager_note?: string | null
@@ -638,7 +642,14 @@ export async function PATCH(req: NextRequest) {
     clock_out_at?: string | null
     session_date?: string | null
     work_department?: string | null
+    meal_break_started_at?: string | null
+    meal_break_ended_at?: string | null
+    meal_break_minutes?: number | string | null
+    unpaid_break_started_at?: string | null
+    unpaid_break_ended_at?: string | null
+    unpaid_break_minutes?: number | string | null
   }
+  const { id, approved_hours, manager_note, clock_in_at, clock_out_at, session_date, work_department } = payload
 
   if (!id) {
     return NextResponse.json({ error: 'Missing clock record id' }, { status: 400 })
@@ -667,6 +678,18 @@ export async function PATCH(req: NextRequest) {
   const nextSessionDate = session_date?.trim() ? session_date : existing.session_date
   const nextClockInAt = clock_in_at?.trim() ? clock_in_at : existing.clock_in_at
   const nextClockOutAt = clock_out_at?.trim() ? clock_out_at : existing.clock_out_at
+  const currentMealBreak = getMealBreakState(existing as ShiftClock)
+  const currentUnpaidBreak = getUnpaidBreakState(existing as ShiftClock)
+  const nextMealBreak = {
+    startedAt: hasOwn(payload, 'meal_break_started_at') ? payload.meal_break_started_at ?? null : currentMealBreak.startedAt,
+    endedAt: hasOwn(payload, 'meal_break_ended_at') ? payload.meal_break_ended_at ?? null : currentMealBreak.endedAt,
+    minutes: hasOwn(payload, 'meal_break_minutes') ? Number(payload.meal_break_minutes ?? 0) : currentMealBreak.minutes,
+  }
+  const nextUnpaidBreak = {
+    startedAt: hasOwn(payload, 'unpaid_break_started_at') ? payload.unpaid_break_started_at ?? null : currentUnpaidBreak.startedAt,
+    endedAt: hasOwn(payload, 'unpaid_break_ended_at') ? payload.unpaid_break_ended_at ?? null : currentUnpaidBreak.endedAt,
+    minutes: hasOwn(payload, 'unpaid_break_minutes') ? Number(payload.unpaid_break_minutes ?? 0) : currentUnpaidBreak.minutes,
+  }
 
   if (!isValidSessionDate(nextSessionDate)) {
     return NextResponse.json({ error: 'Invalid session_date format' }, { status: 400 })
@@ -677,20 +700,30 @@ export async function PATCH(req: NextRequest) {
   if (nextClockOutAt && new Date(nextClockOutAt).getTime() <= new Date(nextClockInAt).getTime()) {
     return NextResponse.json({ error: 'Clock out must be after clock in' }, { status: 400 })
   }
+  if (Number.isNaN(nextMealBreak.minutes) || Number.isNaN(nextUnpaidBreak.minutes)) {
+    return NextResponse.json({ error: 'Invalid break minutes' }, { status: 400 })
+  }
 
   const fallbackHours = nextClockOutAt
-    ? calculateClockHoursAfterBreak(nextClockInAt, nextClockOutAt, getClockBreakMinutes(existing as ShiftClock))
+    ? calculateClockHoursAfterBreak(nextClockInAt, nextClockOutAt, Math.max(0, nextMealBreak.minutes) + Math.max(0, nextUnpaidBreak.minutes))
     : 0
+  const nextManagerNote = setClockWorkDepartmentManagerNote(
+    setUnpaidBreakManagerNote(
+      setMealBreakManagerNote(manager_note?.trim() || null, nextMealBreak),
+      nextUnpaidBreak
+    ),
+    work_department ?? getClockWorkDepartment(existing as ShiftClock)
+  ) || null
   const update = {
     session_date: nextSessionDate,
     approval_status: 'approved',
     approved_hours: numericHours ?? fallbackHours,
-    manager_note: setClockWorkDepartmentManagerNote(
-      setMealBreakManagerNote(manager_note?.trim() || null, getMealBreakState(existing as ShiftClock)),
-      work_department ?? getClockWorkDepartment(existing as ShiftClock)
-    ) || null,
+    manager_note: nextManagerNote,
     clock_in_at: nextClockInAt,
     clock_out_at: nextClockOutAt,
+    break_started_at: nextMealBreak.startedAt,
+    break_ended_at: nextMealBreak.endedAt,
+    break_minutes: Math.max(0, Math.floor(nextMealBreak.minutes)),
     auto_clock_out: false,
     manager_approved_by: null,
     manager_approved_at: new Date().toISOString(),

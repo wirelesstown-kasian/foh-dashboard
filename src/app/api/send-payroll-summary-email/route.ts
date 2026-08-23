@@ -8,6 +8,8 @@ import type { PayrollRun, PayrollRunItem } from '@/lib/types'
 
 type PayrollSummaryRun = PayrollRun & { payroll_run_items?: PayrollRunItem[] }
 
+const PAYROLL_SUMMARY_ADMIN_EMAIL = 'admin@newvillagepub.com'
+
 function formatCurrency(value: number) {
   return `$${Number(value ?? 0).toFixed(2)}`
 }
@@ -131,7 +133,7 @@ export async function POST(req: NextRequest) {
 
     await sendEmail({
       resendKey,
-      to: emailSettings.eod_report_email,
+      to: PAYROLL_SUMMARY_ADMIN_EMAIL,
       subject: `Payroll Worksheet Summary - ${periodLabel}`,
       html,
       fromName: emailSettings.from_name,

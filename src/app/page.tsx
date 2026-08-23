@@ -233,12 +233,12 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className={`flex flex-col gap-2 rounded-lg border px-3 py-2 shadow-sm sm:flex-row sm:items-center ${announcementBoard ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
-          <div className="flex shrink-0 items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
+        <div className={`flex min-h-24 flex-col gap-2 rounded-lg border px-3 py-3 shadow-sm sm:flex-row sm:items-start ${announcementBoard ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+          <div className="flex shrink-0 items-center gap-2 pt-0.5 text-xs font-bold uppercase tracking-[0.14em]">
             {announcementBoard ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
             Announcement Board
           </div>
-          <div className="text-sm font-semibold leading-snug sm:border-l sm:border-current/20 sm:pl-3">
+          <div className="min-h-20 flex-1 overflow-y-auto pr-1 text-sm font-semibold leading-5 sm:max-h-20 sm:border-l sm:border-current/20 sm:pl-3">
             {announcementLines.length > 0 ? (
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {announcementLines.map((line, index) => (
