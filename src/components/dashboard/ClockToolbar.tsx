@@ -157,7 +157,6 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   const [submitting, setSubmitting] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const [announcementText, setAnnouncementText] = useState('')
-  const [announcementIsNew, setAnnouncementIsNew] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const visibleAnnouncement = announcementText.trim() || 'No announcement posted.'
@@ -224,32 +223,22 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   }, [openClockRecords, schedules])
 
   useEffect(() => {
-    if (!hasAnnouncement || typeof window === 'undefined') {
-      setAnnouncementIsNew(false)
-      return
-    }
-    const storageKey = 'foh-last-clock-announcement'
-    const previous = window.localStorage.getItem(storageKey)
-    const current = announcementText.trim()
-    setAnnouncementIsNew(previous !== current)
-    window.localStorage.setItem(storageKey, current)
-  }, [announcementText, hasAnnouncement])
-
-  useEffect(() => {
     let mounted = true
 
     const loadAnnouncement = async () => {
-      const res = await fetch('/api/app-settings', { cache: 'no-store' })
-      const data = (await res.json().catch(() => ({}))) as { settings?: { time_clock_announcement?: string } }
+      const res = await fetch('/api/announcements', { cache: 'no-store' })
+      const data = (await res.json().catch(() => ({}))) as { boardText?: string }
       if (!mounted) return
-      setAnnouncementText(data.settings?.time_clock_announcement ?? '')
+      setAnnouncementText(data.boardText ?? '')
     }
 
     void loadAnnouncement()
     window.addEventListener('app-settings-updated', loadAnnouncement)
+    window.addEventListener('announcements-updated', loadAnnouncement)
     return () => {
       mounted = false
       window.removeEventListener('app-settings-updated', loadAnnouncement)
+      window.removeEventListener('announcements-updated', loadAnnouncement)
     }
   }, [])
 
@@ -764,9 +753,9 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                         className={cn(
                           'rounded-lg border-2 p-4 shadow-sm',
                           hasAnnouncement
-                            ? 'border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100'
+                            ? 'border-amber-400 bg-amber-50 text-amber-950 shadow-amber-200'
                             : 'border-slate-200 bg-white text-slate-700',
-                          announcementIsNew && 'animate-pulse'
+                          hasAnnouncement && 'animate-pulse'
                         )}
                       >
                         <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-[0.14em]">

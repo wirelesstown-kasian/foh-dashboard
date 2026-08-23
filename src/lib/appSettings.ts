@@ -34,10 +34,23 @@ export interface DepartmentDefinition {
   display_order: number
 }
 
+export type AnnouncementDuration = 'month' | '7days' | 'until_close'
+
+export interface AnnouncementEvent {
+  id: string
+  title: string
+  date: string
+  time?: string
+  place?: string
+  duration: AnnouncementDuration
+  is_active: boolean
+}
+
 export interface AppSettings extends EmailSettings {
   role_definitions: RoleDefinition[]
   primary_department_definitions: DepartmentDefinition[]
   time_clock_announcement: string
+  announcement_events: AnnouncementEvent[]
 }
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -55,6 +68,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   weekly_summary_recipient: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
   wage_report_emails_enabled: true,
   time_clock_announcement: '',
+  announcement_events: [],
   role_definitions: [
     { key: 'manager', label: 'Manager', description: 'Admin access and oversight', color: '#8b5cf6', is_active: true, display_order: 0 },
     { key: 'server', label: 'Server', description: 'Guest-facing service and table management', color: '#0ea5e9', is_active: true, display_order: 1 },
@@ -97,6 +111,34 @@ function normalizeOptionalString(value: unknown) {
 
 function normalizeOptionalHexColor(value: unknown) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim()) ? value.trim() : undefined
+}
+
+function normalizeAnnouncementDuration(value: unknown): AnnouncementDuration {
+  return value === 'month' || value === '7days' || value === 'until_close' ? value : '7days'
+}
+
+function normalizeAnnouncementEvents(value: unknown): AnnouncementEvent[] {
+  if (!Array.isArray(value)) return []
+  const normalized = value
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object') return null
+      const maybeEntry = entry as Partial<AnnouncementEvent>
+      const title = typeof maybeEntry.title === 'string' ? maybeEntry.title.trim() : ''
+      const date = typeof maybeEntry.date === 'string' ? maybeEntry.date.trim() : ''
+      if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+      const normalizedEntry: AnnouncementEvent = {
+        id: typeof maybeEntry.id === 'string' && maybeEntry.id.trim() ? maybeEntry.id.trim() : `event-${index}`,
+        title,
+        date,
+        duration: normalizeAnnouncementDuration(maybeEntry.duration),
+        is_active: maybeEntry.is_active !== false,
+      }
+      if (typeof maybeEntry.time === 'string' && maybeEntry.time.trim()) normalizedEntry.time = maybeEntry.time.trim()
+      if (typeof maybeEntry.place === 'string' && maybeEntry.place.trim()) normalizedEntry.place = maybeEntry.place.trim()
+      return normalizedEntry
+    })
+    .filter((entry): entry is AnnouncementEvent => entry !== null)
+  return normalized.sort((left, right) => left.date.localeCompare(right.date) || (left.time ?? '').localeCompare(right.time ?? ''))
 }
 
 function getDefaultPayrollCycleForDepartment(key: string) {
@@ -155,6 +197,10 @@ export async function getAppSettings(): Promise<AppSettings> {
     }
     if (row.key === 'primary_department_definitions') {
       settings.primary_department_definitions = normalizeDefinitions(row.value, settings.primary_department_definitions)
+      continue
+    }
+    if (row.key === 'announcement_events') {
+      settings.announcement_events = normalizeAnnouncementEvents(row.value)
       continue
     }
     if (

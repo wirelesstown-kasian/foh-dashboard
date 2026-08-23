@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText, HandCoins } from 'lucide-react'
+import { Bell, ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText, HandCoins } from 'lucide-react'
 
 const adminGroups = [
   {
@@ -44,6 +44,14 @@ const adminGroups = [
     links: [
       { label: 'Schedule Planner', href: '/schedule-planning', icon: CalendarDays },
       { label: 'Email Settings', href: '/email-settings', icon: MailCheck },
+    ],
+  },
+  {
+    label: 'Announcement Board',
+    icon: Bell,
+    description: 'Clock-in announcements, event reminders, and automatic birthday notices.',
+    links: [
+      { label: 'Announcement Board', href: '/announcements', icon: Bell },
     ],
   },
 ]

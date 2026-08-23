@@ -434,6 +434,9 @@ export default function EodPage() {
       tip_pool_hourly_rate: employees.find(employee => employee.id === r.employee_id)?.tip_pool_hourly_rate ?? null,
     }))
   )
+  const distributedTipTotal = tipResults.reduce((sum, result) => sum + result.net_tip, 0)
+  const houseTipTotal = tipResults.reduce((sum, result) => sum + result.house_deduction, 0)
+  const tipDistributionCheckTotal = distributedTipTotal + houseTipTotal
   const setField = (field: string, value: string) => {
     setFinancialsSaved(false)
     setForm(f => ({ ...f, [field]: value }))
@@ -478,6 +481,10 @@ export default function EodPage() {
   }
 
   const handleTipDistributionSave = async () => {
+    if (tipTotal > 0 && tipRows.length === 0) {
+      setSaveError('Tip Distribution needs at least one recipient when tips were collected.')
+      return
+    }
     window.localStorage.setItem(getTipDraftKey(today), JSON.stringify(tipRows))
     setTipDistributionSaved(true)
     setSaveError(null)
@@ -1051,9 +1058,9 @@ export default function EodPage() {
               <div className={`rounded-xl border p-4 text-center ${eodStyles.card}`}>
                 <div className="flex flex-col items-center gap-2">
                   <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${eodStyles.badge}`}>3</span>
-                  <div className={`font-semibold ${eodStyles.title}`}>Save EOD</div>
+                  <div className={`font-semibold ${eodStyles.title}`}>Save EOD & Send</div>
                 </div>
-                <p className={`mt-2 text-xs ${eodStyles.body}`}>Lock the report and move to the final send flow.</p>
+                <p className={`mt-2 text-xs ${eodStyles.body}`}>Save the report, review the summary, then send emails.</p>
                 <p className={`mt-2 text-[11px] font-semibold uppercase tracking-wide ${eodStyles.status}`}>
                   {eodAlreadySaved && !managerOverride ? 'Saved' : financialsSaved && tipDistributionSaved ? 'Ready to Save' : 'Locked'}
                 </p>
@@ -1377,6 +1384,30 @@ export default function EodPage() {
                   </Button>
                 </div>
               </div>
+              <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="text-[10px] font-semibold uppercase text-muted-foreground">Collected Tips</div>
+                  <div className="mt-0.5 text-lg font-bold text-slate-950">${tipTotal.toFixed(2)}</div>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="text-[10px] font-semibold uppercase text-muted-foreground">House 15%</div>
+                  <div className="mt-0.5 text-lg font-bold text-slate-950">${houseTipTotal.toFixed(2)}</div>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="text-[10px] font-semibold uppercase text-muted-foreground">Distributed</div>
+                  <div className="mt-0.5 text-lg font-bold text-green-700">${distributedTipTotal.toFixed(2)}</div>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="text-[10px] font-semibold uppercase text-muted-foreground">Recipients</div>
+                  <div className="mt-0.5 text-lg font-bold text-slate-950">{tipRows.length}</div>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <div className="text-[10px] font-semibold uppercase text-muted-foreground">Total Check</div>
+                  <div className={`mt-0.5 text-lg font-bold ${Math.abs(tipDistributionCheckTotal - tipTotal) < 0.02 ? 'text-slate-950' : 'text-red-700'}`}>
+                    ${tipDistributionCheckTotal.toFixed(2)}
+                  </div>
+                </div>
+              </div>
               <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-135">
                 <thead>
@@ -1478,8 +1509,11 @@ export default function EodPage() {
                   eodAlreadySaved && !managerOverride ? 'bg-emerald-600 hover:bg-emerald-700' : ''
                 }`}
               >
-                {saving ? 'Saving…' : eodAlreadySaved && !managerOverride ? 'EOD Saved' : 'Save EOD'}
+                {saving ? 'Saving…' : eodAlreadySaved && !managerOverride ? 'EOD Saved' : 'Save EOD & Review Email'}
               </Button>
+            </div>
+            <div className="mt-2 text-center text-xs text-muted-foreground">
+              After saving EOD, a summary window opens with the visible Submit & Send Emails button.
             </div>
             {existing && (
               <div className="mt-4 flex justify-center">

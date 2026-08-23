@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format, startOfMonth } from 'date-fns'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipEligibleColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withTipEligible, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { Bell, Sparkles } from 'lucide-react'
 
 const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
@@ -32,6 +33,7 @@ export default function DashboardPage() {
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
   const [notes, setNotes] = useState('')
   const [notesSaved, setNotesSaved] = useState(false)
+  const [announcementBoard, setAnnouncementBoard] = useState('')
   const [startingCash, setStartingCash] = useState<string>('')
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -160,6 +162,22 @@ export default function DashboardPage() {
     return () => window.removeEventListener('foh-clock-records-changed', handleClockRecordsChanged)
   }, [load])
 
+  useEffect(() => {
+    let mounted = true
+    const loadAnnouncements = async () => {
+      const res = await fetch('/api/announcements', { cache: 'no-store' })
+      const data = (await res.json().catch(() => ({}))) as { boardText?: string }
+      if (!mounted) return
+      setAnnouncementBoard(data.boardText ?? '')
+    }
+    void loadAnnouncements()
+    window.addEventListener('announcements-updated', loadAnnouncements)
+    return () => {
+      mounted = false
+      window.removeEventListener('announcements-updated', loadAnnouncements)
+    }
+  }, [])
+
   const saveNotes = async () => {
     if (session) {
       await supabase.from('daily_sessions').update({ notes }).eq('id', session.id)
@@ -249,15 +267,29 @@ export default function DashboardPage() {
               closing: getTaskCounts('closing'),
             }}
           />
-          <div className="flex flex-1 gap-2">
-            <Textarea
-              placeholder="Notes / events for today…"
-              value={notes}
-              onChange={event => setNotes(event.target.value)}
-              className="h-10 min-h-0 resize-none py-2 text-sm"
-              onBlur={saveNotes}
-            />
-            {notesSaved && <span className="shrink-0 self-center text-xs text-green-600">Saved</span>}
+          <div className="flex flex-1 flex-col gap-3">
+            <div className={`rounded-xl border px-4 py-3 shadow-sm ${announcementBoard ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-white text-slate-600'}`}>
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
+                {announcementBoard ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
+                Announcement Board
+              </div>
+              <div className="mt-2 whitespace-pre-line text-base font-semibold leading-snug">
+                {announcementBoard || 'No active announcement today.'}
+              </div>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 shadow-sm">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">Current Notes</span>
+                {notesSaved && <span className="text-xs font-semibold text-green-600">Saved</span>}
+              </div>
+              <Textarea
+                placeholder="Notes / events for today..."
+                value={notes}
+                onChange={event => setNotes(event.target.value)}
+                className="min-h-24 resize-none border-blue-200 bg-white text-sm shadow-sm"
+                onBlur={saveNotes}
+              />
+            </div>
           </div>
         </div>
       </div>
