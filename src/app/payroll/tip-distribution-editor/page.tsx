@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { addDays, format, parseISO } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
@@ -17,7 +17,7 @@ import { formatCurrency } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
 import { Employee } from '@/lib/types'
-import { ArrowLeft, Plus, Save } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Plus, Save } from 'lucide-react'
 
 type EditorRow = {
   employee_id: string
@@ -35,6 +35,10 @@ function todayKey() {
 
 function shiftDateKey(date: string, days: number) {
   return format(addDays(parseISO(date), days), 'yyyy-MM-dd')
+}
+
+function getLatestDate(dates: string[]) {
+  return dates.length > 0 ? dates[dates.length - 1] : todayKey()
 }
 
 function roundMoney(value: number) {
@@ -130,6 +134,10 @@ export default function TipDistributionEditorPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
+  const availableEodDates = useMemo(() => (
+    Array.from(new Set(eodReports.map(report => report.session_date))).sort()
+  ), [eodReports])
+  const latestEodDate = getLatestDate(availableEodDates)
   const report = eodReports.find(item => item.session_date === selectedDate) ?? null
   const totalTip = totalTipInput === '' ? Number(report?.tip_total ?? 0) : Number(totalTipInput)
   const clockRows = useMemo(() => buildClockRows(selectedDate, employees, clockRecords), [clockRecords, employees, selectedDate])
@@ -158,6 +166,22 @@ export default function TipDistributionEditorPage() {
     !currentRows.some(row => row.employee_id === employee.id)
   ))
   const hasAdjustmentWithoutMemo = currentRows.some(row => row.adjustment !== 0 && row.memo.trim().length === 0)
+  const selectedDateIndex = availableEodDates.indexOf(selectedDate)
+  const previousEodDate = selectedDateIndex > 0
+    ? availableEodDates[selectedDateIndex - 1]
+    : availableEodDates.filter(date => date < selectedDate).at(-1) ?? shiftDateKey(selectedDate, -1)
+  const nextEodDate = selectedDateIndex >= 0 && selectedDateIndex < availableEodDates.length - 1
+    ? availableEodDates[selectedDateIndex + 1]
+    : availableEodDates.find(date => date > selectedDate) ?? shiftDateKey(selectedDate, 1)
+
+  useEffect(() => {
+    if (availableEodDates.length === 0) return
+    setSelectedDate(current => (
+      current === todayKey() && !availableEodDates.includes(current)
+        ? latestEodDate
+        : current
+    ))
+  }, [availableEodDates, latestEodDate])
 
   const loadClockRows = () => {
     setRows(clockRows)
@@ -275,20 +299,39 @@ export default function TipDistributionEditorPage() {
       />
 
       <div className="grid gap-4">
-        <div className="rounded-lg border bg-white p-4">
+        <div className="rounded-lg border bg-white p-4 shadow-sm">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">EOD date navigation</div>
           <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-44">
-              <Label>Date</Label>
-              <Input type="date" value={selectedDate} onChange={event => selectDate(event.target.value)} />
+            <div className="min-w-56">
+              <Label className="text-sm font-semibold">Date</Label>
+              <Input className="mt-1 h-11 text-base font-medium" type="date" value={selectedDate} onChange={event => selectDate(event.target.value)} />
             </div>
-            <Button variant="outline" onClick={() => selectDate(shiftDateKey(selectedDate, -1))}>Day Before</Button>
-            <Button variant="outline" onClick={() => selectDate(shiftDateKey(todayKey(), -1))}>Yesterday</Button>
-            <Button variant="outline" onClick={() => selectDate(shiftDateKey(selectedDate, 1))}>Day After</Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-11 w-11"
+              onClick={() => selectDate(previousEodDate)}
+              title="Previous EOD"
+              aria-label="Previous EOD"
+            >
+              <ChevronLeft className="size-5" />
+            </Button>
+            <Button variant="outline" className="h-11 px-5 text-base font-semibold" onClick={() => selectDate(latestEodDate)}>Latest</Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-11 w-11"
+              onClick={() => selectDate(nextEodDate)}
+              title="Next EOD"
+              aria-label="Next EOD"
+            >
+              <ChevronRight className="size-5" />
+            </Button>
             <div className="min-w-52">
-              <Label>Total Collected Tip</Label>
-              <Input type="number" step="0.01" value={totalTipInput === '' ? Number(report?.tip_total ?? 0) : totalTipInput} onChange={event => setTotalTipInput(event.target.value)} />
+              <Label className="text-sm font-semibold">Total Collected Tip</Label>
+              <Input className="mt-1 h-11 text-base font-medium" type="number" step="0.01" value={totalTipInput === '' ? Number(report?.tip_total ?? 0) : totalTipInput} onChange={event => setTotalTipInput(event.target.value)} />
             </div>
-            <Button variant="outline" onClick={loadClockRows} disabled={!report}>Reload From Clock Records</Button>
+            <Button variant="outline" className="h-11 px-4 font-semibold" onClick={loadClockRows} disabled={!report}>Reload From Clock Records</Button>
             {!report && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 No EOD report exists for this date.

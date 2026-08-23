@@ -26,7 +26,7 @@ import {
   normalizeMoney,
   paymentMethodLabel,
 } from '@/lib/payroll'
-import { PaymentMethod } from '@/lib/types'
+import { CashBalanceEntry, PaymentMethod } from '@/lib/types'
 import { DepartmentDefinition } from '@/lib/appSettings'
 
 type Step = 'setup' | 'worksheet'
@@ -88,6 +88,10 @@ function getDefaultPayrollPeriod(cycle: PayrollCycle) {
 
 function payrollCycleLabel(cycle: PayrollCycle) {
   return cycle === 'weekly' ? 'Weekly' : 'Semi-monthly'
+}
+
+function getSignedCashAmount(entry: Pick<CashBalanceEntry, 'entry_type' | 'amount'>) {
+  return entry.entry_type === 'cash_in' ? Number(entry.amount ?? 0) : Number(entry.amount ?? 0) * -1
 }
 
 function sortPayrollRows(rows: PayrollDraftRow[]) {
@@ -225,6 +229,15 @@ export default function WageWorksheetPage() {
   ], [departmentDefinitions])
 
   const totals = useMemo(() => getPayrollTotals(rows), [rows])
+  const worksheetSummary = useMemo(() => {
+    const hours = rows.reduce((sum, row) => sum + Number(row.hours ?? 0), 0)
+    const tips = rows.reduce((sum, row) => sum + Number(row.tips ?? 0), 0)
+    const baseWages = rows.reduce((sum, row) => sum + Number(row.base_wages ?? 0), 0)
+    const topUp = rows.reduce((sum, row) => sum + Number(row.guarantee_top_up ?? 0), 0)
+    const commission = rows.reduce((sum, row) => sum + Number(row.commission ?? 0), 0)
+    const employeeCount = rows.filter(row => row.hours > 0 || row.payout_amount > 0).length
+    return { hours, tips, baseWages, topUp, commission, employeeCount }
+  }, [rows])
   const missingPaymentRows = rows.filter(row => !row.payment_method)
   const hasClockFlags = rows.some(row => row.has_auto_clock_out || row.has_open_clock)
   const breakReviewCounts = useMemo(() => {
@@ -342,6 +355,82 @@ export default function WageWorksheetPage() {
     setEmployeeToAdd('')
   }
 
+  const getCurrentCashOnHand = async () => {
+    const [{ data: reports, error: reportsError }, { data: cashEntries, error: cashEntriesError }] = await Promise.all([
+      supabase.from('eod_reports').select('actual_cash_on_hand'),
+      supabase.from('cash_balance_entries').select('entry_type, amount'),
+    ])
+
+    if (reportsError) throw reportsError
+    if (cashEntriesError) throw cashEntriesError
+
+    const eodCashTotal = (reports ?? []).reduce((sum, report) => (
+      sum + Number((report as { actual_cash_on_hand?: number | null }).actual_cash_on_hand ?? 0)
+    ), 0)
+    const cashEntryTotal = ((cashEntries ?? []) as Array<Pick<CashBalanceEntry, 'entry_type' | 'amount'>>).reduce((sum, entry) => (
+      sum + getSignedCashAmount(entry)
+    ), 0)
+
+    return normalizeMoney(eodCashTotal + cashEntryTotal)
+  }
+
+  const recordPayrollCashOut = async (runId: string) => {
+    const cashTotal = normalizeMoney(totals.cash)
+    if (cashTotal <= 0) {
+      return { recorded: false, skipped: true, reason: 'No cash payout.' }
+    }
+
+    const departmentLabel = departmentOptions.find(option => option.key === department)?.label ?? department
+    const cashPaidDetails = rows
+      .filter(row => row.payment_method === 'cash' && row.payout_amount > 0)
+      .map(row => `${row.employee_name} ${formatCurrency(row.payout_amount)}`)
+      .join(', ')
+    const description = [
+      `Payroll cash payout - ${departmentLabel}`,
+      `${startDate} to ${endDate}`,
+      `Pay date ${payDate}`,
+      `Run ${runId}`,
+      `Total ${formatCurrency(cashTotal)}`,
+      cashPaidDetails ? `Employees: ${cashPaidDetails}` : null,
+      memo.trim() ? `Memo: ${memo.trim()}` : null,
+    ].filter(Boolean).join(' | ')
+
+    const { data: entry, error } = await supabase
+      .from('cash_balance_entries')
+      .insert({
+        entry_date: payDate,
+        entry_type: 'cash_out' as const,
+        amount: cashTotal,
+        description,
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single()
+
+    if (error || !entry) {
+      return { recorded: false, skipped: false, error: error?.message ?? 'Failed to record payroll cash out.' }
+    }
+
+    const cashOnHand = await getCurrentCashOnHand()
+    const sheetSync = await fetch('/api/cash-balance-sheet-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entry_id: (entry as CashBalanceEntry).id, cash_on_hand: cashOnHand }),
+    })
+    const sheetPayload = (await sheetSync.json().catch(() => ({}))) as {
+      error?: string
+      skipped?: boolean
+      reason?: string
+    }
+
+    return {
+      recorded: true,
+      skipped: sheetPayload.skipped === true,
+      reason: sheetPayload.reason,
+      error: sheetSync.ok ? undefined : sheetPayload.error ?? 'Cash log Google Sheets sync failed.',
+    }
+  }
+
   const savePayroll = async () => {
     if (missingPaymentRows.length > 0) {
       setMessage('Select a payment method for every employee before saving.')
@@ -406,16 +495,49 @@ export default function WageWorksheetPage() {
         error?: string
         payroll?: { success?: boolean; skipped?: boolean; reason?: string; sheetName?: string }
       }
+      const cashOutResult = await recordPayrollCashOut(runId)
+      const summaryEmail = await fetch('/api/send-payroll-summary-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId }),
+      })
+      const summaryEmailPayload = (await summaryEmail.json().catch(() => ({}))) as {
+        error?: string
+        skipped?: boolean
+        reason?: string
+      }
 
       notifyReportingDataChanged()
       setConfirmOpen(false)
+      const notices = ['Payroll worksheet saved.']
       if (!sheetSync.ok) {
-        setMessage(`Payroll worksheet saved, but Google Sheets sync failed${sheetSyncPayload.error ? `: ${sheetSyncPayload.error}` : '.'}`)
+        notices.push(`Payroll Google Sheets sync failed${sheetSyncPayload.error ? `: ${sheetSyncPayload.error}` : '.'}`)
       } else if (sheetSyncPayload.payroll?.skipped) {
-        setMessage(`Payroll worksheet saved. Google Sheets sync skipped: ${sheetSyncPayload.payroll.reason ?? 'not configured.'}`)
+        notices.push(`Payroll Google Sheets sync skipped: ${sheetSyncPayload.payroll.reason ?? 'not configured.'}`)
       } else {
-        setMessage(`Payroll worksheet saved and synced to Google Sheets${sheetSyncPayload.payroll?.sheetName ? ` (${sheetSyncPayload.payroll.sheetName})` : ''}. Wage Report and Dashboard can now use this payroll run.`)
+        notices.push(`Payroll synced to Google Sheets${sheetSyncPayload.payroll?.sheetName ? ` (${sheetSyncPayload.payroll.sheetName})` : ''}.`)
       }
+      if (cashOutResult.recorded) {
+        notices.push('Cash payout was recorded as Cash Out.')
+        if (cashOutResult.error) {
+          notices.push(`Cash log Google Sheets sync failed: ${cashOutResult.error}`)
+        } else if (cashOutResult.skipped) {
+          notices.push(`Cash log Google Sheets sync skipped: ${cashOutResult.reason ?? 'not configured.'}`)
+        } else {
+          notices.push('Cash log synced to Google Sheets.')
+        }
+      } else if (cashOutResult.error) {
+        notices.push(`Cash payout was not recorded: ${cashOutResult.error}`)
+      }
+      if (!summaryEmail.ok) {
+        notices.push(`Payroll summary email failed: ${summaryEmailPayload.error ?? 'unknown error'}`)
+      } else if (summaryEmailPayload.skipped) {
+        notices.push(`Payroll summary email skipped: ${summaryEmailPayload.reason ?? 'not configured.'}`)
+      } else {
+        notices.push('Payroll summary email sent.')
+      }
+      notices.push('Wage Report and Dashboard can now use this payroll run.')
+      setMessage(notices.join(' '))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Failed to save payroll worksheet.')
     } finally {
@@ -590,22 +712,49 @@ export default function WageWorksheetPage() {
             </div>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-lg border bg-white p-3">
-              <p className="text-xs font-medium uppercase text-muted-foreground">Cash Total</p>
-              <p className="mt-0.5 text-xl font-bold">{formatCurrency(totals.cash)}</p>
+              <p className="text-xs font-medium uppercase text-muted-foreground">Staff</p>
+              <p className="mt-0.5 text-xl font-bold">{worksheetSummary.employeeCount}</p>
             </div>
             <div className="rounded-lg border bg-white p-3">
-              <p className="text-xs font-medium uppercase text-muted-foreground">Check Total</p>
+              <p className="text-xs font-medium uppercase text-muted-foreground">Hours</p>
+              <p className="mt-0.5 text-xl font-bold">{worksheetSummary.hours.toFixed(2)}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Tips</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(worksheetSummary.tips)}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Base Wages</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(worksheetSummary.baseWages)}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Top-Up</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(worksheetSummary.topUp)}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Commission</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(worksheetSummary.commission)}</p>
+            </div>
+            <div className="rounded-lg border bg-emerald-50 p-3">
+              <p className="text-xs font-medium uppercase text-emerald-700">Cash Payout</p>
+              <p className="mt-0.5 text-xl font-bold text-emerald-950">{formatCurrency(totals.cash)}</p>
+            </div>
+            <div className="rounded-lg border bg-white p-3">
+              <p className="text-xs font-medium uppercase text-muted-foreground">Check Payout</p>
               <p className="mt-0.5 text-xl font-bold">{formatCurrency(totals.check)}</p>
             </div>
-            <div className="rounded-lg border bg-white p-3">
-              <p className="text-xs font-medium uppercase text-muted-foreground">ACH Total</p>
-              <p className="mt-0.5 text-xl font-bold">{formatCurrency(totals.ach)}</p>
+            <div className="rounded-lg border bg-blue-50 p-3">
+              <p className="text-xs font-medium uppercase text-blue-700">ACH Payout</p>
+              <p className="mt-0.5 text-xl font-bold text-blue-950">{formatCurrency(totals.ach)}</p>
             </div>
             <div className="rounded-lg border bg-white p-3">
-              <p className="text-xs font-medium uppercase text-muted-foreground">Deductions</p>
-              <p className="mt-0.5 text-xl font-bold text-red-700">{formatCurrency(totals.deductions)}</p>
+              <p className="text-xs font-medium uppercase text-muted-foreground">Net Payroll</p>
+              <p className="mt-0.5 text-xl font-bold">{formatCurrency(totals.net)}</p>
+              {totals.deductions > 0 && (
+                <p className="mt-1 text-xs text-red-700">{formatCurrency(totals.deductions)} deducted</p>
+              )}
             </div>
           </div>
 

@@ -205,13 +205,15 @@ async function writeEmployeeWithOptionalFallback(
   id?: string
 ) {
   let nextPayload = payload
+  let lastError: { message?: string } | null = null
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     const result = operation === 'insert'
       ? await supabaseAdmin.from('employees').insert(nextPayload)
       : await supabaseAdmin.from('employees').update(nextPayload).eq('id', id)
 
     if (!result.error) return null
+    lastError = result.error
 
     if (isMissingPinCodeColumn(result.error) && 'pin_code' in nextPayload) {
       nextPayload = withoutPinCode(nextPayload)
@@ -253,7 +255,7 @@ async function writeEmployeeWithOptionalFallback(
     return result.error
   }
 
-  return { message: 'Failed to save employee after optional column fallback' }
+  return { message: lastError?.message ?? 'Failed to save employee after optional column fallback' }
 }
 
 export async function GET() {
