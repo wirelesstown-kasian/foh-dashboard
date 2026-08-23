@@ -121,7 +121,7 @@ function withoutStaffingProfileFields<T extends { address?: unknown; commission_
 
 function isMissingPinCodeColumn(error: { message?: string; code?: string } | null | undefined) {
   const message = error?.message?.toLowerCase() ?? ''
-  return message.includes('pin_code') || message.includes('schema cache')
+  return message.includes('pin_code')
 }
 
 type PinLookupEmployee = {

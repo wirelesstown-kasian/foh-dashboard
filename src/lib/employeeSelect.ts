@@ -13,34 +13,33 @@ export const EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS =
 export const EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE =
   'id, name, phone, email, address, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
 
-export function isMissingTipPoolRateColumn(error: { message?: string; code?: string } | null | undefined) {
+function missingColumnMessageIncludes(error: { message?: string; code?: string } | null | undefined, ...columns: string[]) {
   const message = error?.message?.toLowerCase() ?? ''
-  return message.includes('tip_pool_hourly_rate') || message.includes('schema cache')
+  return columns.some(column => message.includes(column))
+}
+
+export function isMissingTipPoolRateColumn(error: { message?: string; code?: string } | null | undefined) {
+  return missingColumnMessageIncludes(error, 'tip_pool_hourly_rate')
 }
 
 export function isMissingTipEligibleColumn(error: { message?: string; code?: string } | null | undefined) {
-  const message = error?.message?.toLowerCase() ?? ''
-  return message.includes('tip_eligible') || message.includes('schema cache')
+  return missingColumnMessageIncludes(error, 'tip_eligible')
 }
 
 export function isMissingMealBreakThresholdColumn(error: { message?: string; code?: string } | null | undefined) {
-  const message = error?.message?.toLowerCase() ?? ''
-  return message.includes('meal_break_threshold_hours') || message.includes('schema cache')
+  return missingColumnMessageIncludes(error, 'meal_break_threshold_hours')
 }
 
 export function isMissingScheduleDepartmentsColumn(error: { message?: string; code?: string } | null | undefined) {
-  const message = error?.message?.toLowerCase() ?? ''
-  return message.includes('schedule_departments') || message.includes('schema cache')
+  return missingColumnMessageIncludes(error, 'schedule_departments')
 }
 
 export function isMissingPaymentMethodColumn(error: { message?: string; code?: string } | null | undefined) {
-  const message = error?.message?.toLowerCase() ?? ''
-  return message.includes('payment_method') || message.includes('schema cache')
+  return missingColumnMessageIncludes(error, 'payment_method')
 }
 
 export function isMissingAddressColumn(error: { message?: string; code?: string } | null | undefined) {
-  const message = error?.message?.toLowerCase() ?? ''
-  return message.includes('address') || message.includes('commission_enabled') || message.includes('commission_note') || message.includes('schema cache')
+  return missingColumnMessageIncludes(error, 'address', 'commission_enabled', 'commission_note')
 }
 
 const LEGACY_SCHEDULE_DEPARTMENT_MAP: Record<string, string> = {
