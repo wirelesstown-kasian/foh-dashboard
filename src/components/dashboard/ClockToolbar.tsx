@@ -60,6 +60,8 @@ type AvailableStaff = {
   onBreak: boolean
 }
 
+const getAnnouncementLines = (value: string) => value.split('\n').map(line => line.trim()).filter(Boolean)
+
 function formatStatusTime(value: string | null | undefined) {
   if (!value) return '-'
   return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
@@ -159,7 +161,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   const [announcementText, setAnnouncementText] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const visibleAnnouncement = announcementText.trim() || 'No announcement posted.'
+  const announcementLines = getAnnouncementLines(announcementText)
   const hasAnnouncement = announcementText.trim().length > 0
 
   const firstShift = useMemo(() => {
@@ -751,7 +753,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                     <>
                       <div
                         className={cn(
-                          'rounded-lg border-2 p-4 shadow-sm',
+                          'min-h-36 rounded-lg border-2 p-5 shadow-sm',
                           hasAnnouncement
                             ? 'border-amber-400 bg-amber-50 text-amber-950 shadow-amber-200'
                             : 'border-slate-200 bg-white text-slate-700',
@@ -762,7 +764,20 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                           {hasAnnouncement ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
                           Announcement
                         </div>
-                        <div className="mt-2 text-lg font-bold leading-snug">{visibleAnnouncement}</div>
+                        <div className="mt-3 max-h-48 overflow-y-auto pr-1 text-xl font-bold leading-snug">
+                          {announcementLines.length > 0 ? (
+                            <div className="space-y-2">
+                              {announcementLines.map((line, index) => (
+                                <div key={`${line}-${index}`} className="flex items-start gap-2">
+                                  <span className="text-amber-600">-</span>
+                                  <span>{line}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            'No announcement posted.'
+                          )}
+                        </div>
                       </div>
                       <Button
                         className="h-16 bg-emerald-600 text-lg font-bold hover:bg-emerald-700"

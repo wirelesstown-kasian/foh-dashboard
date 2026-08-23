@@ -25,11 +25,42 @@ function addDays(date: Date, days: number) {
   return next
 }
 
+function getEventOccurrenceDate(event: AnnouncementEvent, today: string) {
+  const recurrence = event.recurrence ?? 'none'
+  if (recurrence === 'none') return event.date === today ? event.date : null
+  if (today < event.date) return null
+  if (event.recurrence_end_date && today > event.recurrence_end_date) return null
+
+  const eventDate = parseDateKey(event.date)
+  const todayDate = parseDateKey(today)
+  if (!eventDate || !todayDate) return null
+
+  if (recurrence === 'daily') return today
+  if (recurrence === 'weekly') return eventDate.getDay() === todayDate.getDay() ? today : null
+  if (recurrence === 'monthly') return eventDate.getDate() === todayDate.getDate() ? today : null
+  if (recurrence === 'annually') {
+    return eventDate.getMonth() === todayDate.getMonth() && eventDate.getDate() === todayDate.getDate() ? today : null
+  }
+  return null
+}
+
 function isEventActive(event: AnnouncementEvent, today: string, now: Date) {
   if (event.is_active === false) return false
   const eventDate = parseDateKey(event.date)
   const todayDate = parseDateKey(today)
   if (!eventDate || !todayDate) return false
+  const occurrenceDate = getEventOccurrenceDate(event, today)
+  const recurrence = event.recurrence ?? 'none'
+
+  if (occurrenceDate && event.day_start_time && event.day_end_time) {
+    const startAt = new Date(`${today}T${event.day_start_time}`)
+    const endAt = new Date(`${today}T${event.day_end_time}`)
+    if (!Number.isNaN(startAt.getTime()) && !Number.isNaN(endAt.getTime())) {
+      return now >= startAt && now <= endAt
+    }
+  }
+
+  if (recurrence !== 'none') return !!occurrenceDate
 
   if (event.duration === 'month') {
     return today >= dateKey(addDays(eventDate, -30)) && today <= event.date
@@ -48,9 +79,13 @@ function isEventActive(event: AnnouncementEvent, today: string, now: Date) {
 }
 
 function formatEventDetail(event: AnnouncementEvent) {
+  const dayWindow = event.day_start_time && event.day_end_time
+    ? `${event.day_start_time.slice(0, 5)}-${event.day_end_time.slice(0, 5)}`
+    : null
   return [
     event.date,
     event.time ? event.time.slice(0, 5) : null,
+    dayWindow,
     event.place ? `at ${event.place}` : null,
   ].filter(Boolean).join(' ')
 }

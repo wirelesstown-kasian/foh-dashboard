@@ -35,14 +35,19 @@ export interface DepartmentDefinition {
 }
 
 export type AnnouncementDuration = 'month' | '7days' | 'until_close'
+export type AnnouncementRecurrence = 'none' | 'daily' | 'weekly' | 'monthly' | 'annually'
 
 export interface AnnouncementEvent {
   id: string
   title: string
   date: string
   time?: string
+  day_start_time?: string
+  day_end_time?: string
   place?: string
   duration: AnnouncementDuration
+  recurrence?: AnnouncementRecurrence
+  recurrence_end_date?: string
   is_active: boolean
 }
 
@@ -117,6 +122,10 @@ function normalizeAnnouncementDuration(value: unknown): AnnouncementDuration {
   return value === 'month' || value === '7days' || value === 'until_close' ? value : '7days'
 }
 
+function normalizeAnnouncementRecurrence(value: unknown): AnnouncementRecurrence {
+  return value === 'daily' || value === 'weekly' || value === 'monthly' || value === 'annually' ? value : 'none'
+}
+
 function normalizeAnnouncementEvents(value: unknown): AnnouncementEvent[] {
   if (!Array.isArray(value)) return []
   const normalized = value
@@ -134,7 +143,13 @@ function normalizeAnnouncementEvents(value: unknown): AnnouncementEvent[] {
         is_active: maybeEntry.is_active !== false,
       }
       if (typeof maybeEntry.time === 'string' && maybeEntry.time.trim()) normalizedEntry.time = maybeEntry.time.trim()
+      if (typeof maybeEntry.day_start_time === 'string' && maybeEntry.day_start_time.trim()) normalizedEntry.day_start_time = maybeEntry.day_start_time.trim()
+      if (typeof maybeEntry.day_end_time === 'string' && maybeEntry.day_end_time.trim()) normalizedEntry.day_end_time = maybeEntry.day_end_time.trim()
       if (typeof maybeEntry.place === 'string' && maybeEntry.place.trim()) normalizedEntry.place = maybeEntry.place.trim()
+      normalizedEntry.recurrence = normalizeAnnouncementRecurrence(maybeEntry.recurrence)
+      if (typeof maybeEntry.recurrence_end_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(maybeEntry.recurrence_end_date.trim())) {
+        normalizedEntry.recurrence_end_date = maybeEntry.recurrence_end_date.trim()
+      }
       return normalizedEntry
     })
     .filter((entry): entry is AnnouncementEvent => entry !== null)

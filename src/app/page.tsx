@@ -8,7 +8,6 @@ import { StaffSidebar } from '@/components/dashboard/StaffSidebar'
 import { TaskFlow } from '@/components/dashboard/TaskFlow'
 import { PerformanceBar } from '@/components/dashboard/PerformanceBar'
 import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
-import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format, startOfMonth } from 'date-fns'
 import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipEligibleColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withTipEligible, withTipPoolHourlyRate } from '@/lib/employeeSelect'
@@ -18,6 +17,8 @@ const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
   return title === 'clock in' || title === 'clock out'
 }
+
+const getAnnouncementLines = (value: string) => value.split('\n').map(line => line.trim()).filter(Boolean)
 
 export default function DashboardPage() {
   const [now, setNow] = useState(() => new Date())
@@ -31,8 +32,6 @@ export default function DashboardPage() {
   const [monthCompletions, setMonthCompletions] = useState<TaskCompletion[]>([])
   const [session, setSession] = useState<DailySession | null>(null)
   const [clockRecords, setClockRecords] = useState<ShiftClock[]>([])
-  const [notes, setNotes] = useState('')
-  const [notesSaved, setNotesSaved] = useState(false)
   const [announcementBoard, setAnnouncementBoard] = useState('')
   const [startingCash, setStartingCash] = useState<string>('')
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -113,7 +112,6 @@ export default function DashboardPage() {
       setMonthCompletions(monthCompRes.data ?? [])
       setClockRecords(loadedClockRecords)
       setSession(loadedSession)
-      setNotes(loadedSession?.notes ?? '')
       setStartingCash(loadedSession?.starting_cash != null ? String(loadedSession.starting_cash) : '')
       if (clockRes.error) {
         setLoadError(`Clock system offline: ${clockRes.error}`)
@@ -129,9 +127,8 @@ export default function DashboardPage() {
       setMonthCompletions([])
       setClockRecords([])
       setSession(null)
-      setNotes('')
     }
-  }, [today, setNotes])
+  }, [today])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -178,17 +175,6 @@ export default function DashboardPage() {
     }
   }, [])
 
-  const saveNotes = async () => {
-    if (session) {
-      await supabase.from('daily_sessions').update({ notes }).eq('id', session.id)
-    } else {
-      await supabase.from('daily_sessions').insert({ session_date: today, notes, current_phase: 'pre_shift' })
-    }
-    setNotesSaved(true)
-    setTimeout(() => setNotesSaved(false), 2000)
-    await load()
-  }
-
   const saveStartingCash = async () => {
     const value = parseFloat(startingCash) || 0
     if (session) {
@@ -212,6 +198,7 @@ export default function DashboardPage() {
   const doneTasks = new Set(completions.filter(completion => isResolvedCompletion(completion) && visibleTaskIds.has(completion.task_id)).map(completion => completion.task_id)).size
   const completedTasks = new Set(completions.filter(completion => isCompletedCompletion(completion) && visibleTaskIds.has(completion.task_id)).map(completion => completion.task_id)).size
   const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
+  const announcementLines = getAnnouncementLines(announcementBoard)
 
   // Show Register Open screen when session hasn't started yet or is in register_open phase
   if (!session || session.current_phase === 'register_open') {
@@ -246,6 +233,27 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        <div className={`flex flex-col gap-2 rounded-lg border px-3 py-2 shadow-sm sm:flex-row sm:items-center ${announcementBoard ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+          <div className="flex shrink-0 items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
+            {announcementBoard ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
+            Announcement Board
+          </div>
+          <div className="text-sm font-semibold leading-snug sm:border-l sm:border-current/20 sm:pl-3">
+            {announcementLines.length > 0 ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {announcementLines.map((line, index) => (
+                  <div key={`${line}-${index}`} className="flex items-start gap-1.5">
+                    <span className="text-amber-600">-</span>
+                    <span>{line}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              'No active announcement today.'
+            )}
+          </div>
+        </div>
+
         <PerformanceBar employees={employees} completions={monthCompletions} schedules={schedules} clockRecords={clockRecords} today={today} />
         {doneTasks !== completedTasks && (
           <p className="text-xs text-muted-foreground">
@@ -267,30 +275,6 @@ export default function DashboardPage() {
               closing: getTaskCounts('closing'),
             }}
           />
-          <div className="flex flex-1 flex-col gap-3">
-            <div className={`rounded-xl border px-4 py-3 shadow-sm ${announcementBoard ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-slate-200 bg-white text-slate-600'}`}>
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em]">
-                {announcementBoard ? <Sparkles className="h-4 w-4 text-amber-600" /> : <Bell className="h-4 w-4 text-slate-500" />}
-                Announcement Board
-              </div>
-              <div className="mt-2 whitespace-pre-line text-base font-semibold leading-snug">
-                {announcementBoard || 'No active announcement today.'}
-              </div>
-            </div>
-            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 shadow-sm">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">Current Notes</span>
-                {notesSaved && <span className="text-xs font-semibold text-green-600">Saved</span>}
-              </div>
-              <Textarea
-                placeholder="Notes / events for today..."
-                value={notes}
-                onChange={event => setNotes(event.target.value)}
-                className="min-h-24 resize-none border-blue-200 bg-white text-sm shadow-sm"
-                onBlur={saveNotes}
-              />
-            </div>
-          </div>
         </div>
       </div>
 
