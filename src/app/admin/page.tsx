@@ -40,18 +40,11 @@ const adminGroups = [
   {
     label: 'Schedule Planner',
     icon: CalendarDays,
-    description: 'Build, save, and publish department schedules.',
+    description: 'Build schedules, manage calendar reminders, and control schedule emails.',
     links: [
       { label: 'Schedule Planner', href: '/schedule-planning', icon: CalendarDays },
-      { label: 'Email Settings', href: '/email-settings', icon: MailCheck },
-    ],
-  },
-  {
-    label: 'Announcement Board',
-    icon: Bell,
-    description: 'Clock-in announcements, event reminders, and automatic birthday notices.',
-    links: [
       { label: 'Announcement Board', href: '/announcements', icon: Bell },
+      { label: 'Email Settings', href: '/email-settings', icon: MailCheck },
     ],
   },
 ]
