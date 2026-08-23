@@ -163,7 +163,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
             <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
               ${departmentLabel}
             </div>
-            ${managerTitleLabel ? `<div class="title-badge">Title: ${managerTitleLabel}</div>` : ''}
+            ${managerTitleLabel ? `<div class="title-badge">${managerTitleLabel}</div>` : ''}
           </td>
           ${dayCells}
         </tr>
@@ -304,7 +304,7 @@ export function WeeklyScheduleGrid({ department, rightSlot }: WeeklyScheduleGrid
                         </span>
                         {managerTitleLabel && (
                           <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-purple-800">
-                            Title: {managerTitleLabel}
+                            {managerTitleLabel}
                           </span>
                         )}
                         {!emp.is_active && (

@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Archive, Plus, Pencil, Gift, Check, ChevronDown } from 'lucide-react'
+import { Archive, Plus, Pencil, Gift, Check, ChevronDown, AlertTriangle } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
 import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
@@ -48,6 +48,7 @@ interface FormState {
   guaranteed_hourly: string
   guaranteed_enabled: boolean
   tip_pool_hourly_rate: string
+  tip_eligible: boolean
   meal_break_alert_enabled: boolean
   meal_break_threshold_hours: string
   commission_enabled: boolean
@@ -76,6 +77,7 @@ const EMPTY_FORM: FormState = {
   guaranteed_hourly: '',
   guaranteed_enabled: false,
   tip_pool_hourly_rate: '',
+  tip_eligible: false,
   meal_break_alert_enabled: true,
   meal_break_threshold_hours: '7.5',
   commission_enabled: false,
@@ -116,6 +118,10 @@ function getDepartmentSummary(selectedDepartments: string[], departmentDefinitio
     return departmentDefinitions.find(department => department.key === selectedDepartments[0])?.label ?? selectedDepartments[0]
   }
   return `${selectedDepartments.length} departments`
+}
+
+function hasNonServerDepartment(selectedDepartments: string[]) {
+  return selectedDepartments.some(department => department !== 'server')
 }
 
 function ToggleRow({
@@ -216,6 +222,7 @@ export function EmployeeTable() {
       guaranteed_hourly: emp.guaranteed_hourly?.toFixed(2) ?? '',
       guaranteed_enabled: emp.guaranteed_hourly !== null,
       tip_pool_hourly_rate: emp.tip_pool_hourly_rate?.toFixed(2) ?? '',
+      tip_eligible: emp.tip_eligible === true,
       meal_break_alert_enabled: emp.meal_break_threshold_hours !== null,
       meal_break_threshold_hours: String(emp.meal_break_threshold_hours ?? 7.5),
       commission_enabled: emp.commission_enabled === true,
@@ -358,9 +365,12 @@ export function EmployeeTable() {
         ...currentForm,
         schedule_departments: normalizedDepartments,
         primary_department: normalizedDepartments[0] ?? currentForm.primary_department,
+        tip_eligible: currentForm.tip_eligible || (!hasDepartment && department === 'server'),
       }
     })
   }
+
+  const showTipEligibilityWarning = form.tip_eligible && hasNonServerDepartment(form.schedule_departments)
 
   return (
     <div>
@@ -432,6 +442,7 @@ export function EmployeeTable() {
               <TableHead className="w-24">Hourly</TableHead>
               <TableHead className="w-28">Guaranteed</TableHead>
               <TableHead className="w-24">Tip Cap</TableHead>
+              <TableHead className="w-20">Tips</TableHead>
               <TableHead className="w-20">Payroll</TableHead>
               <TableHead className="w-28">Birthday</TableHead>
               <TableHead className="w-20 text-right">Actions</TableHead>
@@ -459,6 +470,16 @@ export function EmployeeTable() {
                   <TableCell>{emp.guaranteed_hourly !== null ? `${formatPay(emp.guaranteed_hourly)} on` : 'Off'}</TableCell>
                   <TableCell>{emp.tip_pool_hourly_rate !== null ? `${formatPay(emp.tip_pool_hourly_rate)} on` : 'Off'}</TableCell>
                   <TableCell>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Badge variant={emp.tip_eligible ? 'default' : 'outline'}>
+                        {emp.tip_eligible ? 'Eligible' : 'Off'}
+                      </Badge>
+                      {emp.tip_eligible && hasNonServerDepartment(getEmployeeScheduleDepartments(emp)) && (
+                        <AlertTriangle className="size-3.5 text-amber-500" aria-label="Non-server department selected" />
+                      )}
+                    </span>
+                  </TableCell>
+                  <TableCell>
                     <Badge variant={emp.payment_method ? 'outline' : 'destructive'}>
                       {getPaymentMethodLabel(emp.payment_method)}
                     </Badge>
@@ -480,7 +501,7 @@ export function EmployeeTable() {
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   No employees found
                 </TableCell>
               </TableRow>
@@ -587,6 +608,20 @@ export function EmployeeTable() {
             </div>
 
             <div className="grid gap-3 xl:grid-cols-3">
+              <ToggleRow
+                checked={form.tip_eligible}
+                onCheckedChange={checked => setForm(f => ({ ...f, tip_eligible: checked }))}
+                label="Tip Eligible"
+                description="Allows tip distribution only for qualifying clocked-in departments."
+              >
+                {showTipEligibilityWarning && (
+                  <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>Non-server departments are selected. Only Server clock-ins qualify for tip distribution.</span>
+                  </div>
+                )}
+              </ToggleRow>
+
               <ToggleRow
                 checked={form.tip_cap_enabled}
                 onCheckedChange={checked => setForm(f => ({ ...f, tip_cap_enabled: checked, tip_pool_hourly_rate: checked ? f.tip_pool_hourly_rate : '' }))}

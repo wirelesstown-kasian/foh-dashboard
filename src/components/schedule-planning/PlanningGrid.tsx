@@ -625,7 +625,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
             <div class="role-badge" style="background:${roleTheme.pdfBadgeBackground};color:${roleTheme.pdfBadgeText};">
               ${departmentLabel}
             </div>
-            ${managerTitleLabel ? `<div class="title-badge">Title: ${managerTitleLabel}</div>` : ''}
+            ${managerTitleLabel ? `<div class="title-badge">${managerTitleLabel}</div>` : ''}
           </td>
           ${dayCells}
           <td class="weekly-total">${formatHours(getWeeklyHours(employee.id))}</td>
@@ -1223,7 +1223,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                             </span>
                             {managerTitleLabel && (
                               <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-purple-800">
-                                Title: {managerTitleLabel}
+                                {managerTitleLabel}
                               </span>
                             )}
                             {!emp.is_active && (
@@ -1595,7 +1595,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
                           </span>
                           {managerTitleLabel && (
                             <span className="ml-1.5 rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-purple-800">
-                              Title: {managerTitleLabel}
+                              {managerTitleLabel}
                             </span>
                           )}
                         </div>

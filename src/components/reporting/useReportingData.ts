@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, EodReport, PayrollRun, PayrollRunItem, Schedule, ShiftClock, Task, TaskCategory, TaskCompletion, TipDistribution } from '@/lib/types'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD, isMissingAddressColumn, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withStaffingProfileFields, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD, EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE, isMissingAddressColumn, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipEligibleColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withStaffingProfileFields, withTipEligible, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const REPORTING_REFRESH_EVENT = 'reporting-data-refresh'
 
@@ -28,6 +28,13 @@ export function useEmployees({ includeArchived = false }: { includeArchived?: bo
           return fallbackQuery
         })() as { data: object[] | null; error: { message?: string; code?: string } | null }
       }
+      if (res.error && isMissingTipEligibleColumn(res.error)) {
+        res = await (() => {
+          let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE).order('name')
+          if (!includeArchived) fallbackQuery = fallbackQuery.eq('is_active', true)
+          return fallbackQuery
+        })() as { data: object[] | null; error: { message?: string; code?: string } | null }
+      }
       if (res.error && (isMissingTipPoolRateColumn(res.error) || isMissingPaymentMethodColumn(res.error) || isMissingAddressColumn(res.error))) {
         res = await (() => {
           let fallbackQuery = supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).order('name')
@@ -43,7 +50,7 @@ export function useEmployees({ includeArchived = false }: { includeArchived?: bo
           })() as { data: object[] | null; error: { message?: string; code?: string } | null }
         : res
       if (!mounted) return
-      setEmployees(withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(legacyRes.data ?? [])))) as Employee[])
+      setEmployees(withTipEligible(withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(legacyRes.data ?? []))))) as Employee[])
     })()
     return () => {
       mounted = false

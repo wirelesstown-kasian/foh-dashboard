@@ -11,17 +11,19 @@ import {
   EMPLOYEE_PUBLIC_SELECT,
   EMPLOYEE_PUBLIC_SELECT_FALLBACK,
   EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD,
+  EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE,
   isMissingAddressColumn,
   isMissingMealBreakThresholdColumn,
   isMissingPaymentMethodColumn,
+  isMissingTipEligibleColumn,
   isMissingTipPoolRateColumn,
-  getEmployeeScheduleDepartments,
   withMealBreakThresholdHours,
   withPaymentMethod,
   withStaffingProfileFields,
+  withTipEligible,
   withTipPoolHourlyRate,
 } from '@/lib/employeeSelect'
-import { isTipEligibleDepartment, isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
+import { isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -210,10 +212,7 @@ export default function EodPage() {
   })
   const [tipRows, setTipRows] = useState<TipRow[]>([])
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
-  const tipEligibleEmployees = employees.filter(employee =>
-    isTipEligibleEmployee(employee) ||
-    getEmployeeScheduleDepartments(employee).some(department => isTipEligibleDepartment(department))
-  )
+  const tipEligibleEmployees = employees.filter(employee => isTipEligibleEmployee(employee))
   const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
 
   const toFinancialForm = useCallback((value: Partial<{
@@ -265,6 +264,9 @@ export default function EodPage() {
       if (result.error && isMissingMealBreakThresholdColumn(result.error)) {
         result = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD).eq('is_active', true).order('name') as { data: object[] | null; error: { message?: string; code?: string } | null }
       }
+      if (result.error && isMissingTipEligibleColumn(result.error)) {
+        result = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE).eq('is_active', true).order('name') as { data: object[] | null; error: { message?: string; code?: string } | null }
+      }
       if (result.error && (isMissingTipPoolRateColumn(result.error) || isMissingPaymentMethodColumn(result.error) || isMissingAddressColumn(result.error))) {
         result = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true).order('name') as { data: object[] | null; error: { message?: string; code?: string } | null }
       }
@@ -273,7 +275,7 @@ export default function EodPage() {
       }
       return {
         ...result,
-        data: withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(result.data ?? [])))) as Employee[],
+        data: withTipEligible(withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withTipPoolHourlyRate(result.data ?? []))))) as Employee[],
       }
     }
 

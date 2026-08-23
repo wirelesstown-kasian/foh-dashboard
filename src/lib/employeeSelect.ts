@@ -1,18 +1,26 @@
 export const EMPLOYEE_PUBLIC_SELECT =
-  'id, name, phone, email, address, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
+  'id, name, phone, email, address, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, tip_eligible, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
 
 export const EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD =
-  'id, name, phone, email, address, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
+  'id, name, phone, email, address, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, tip_eligible, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
 
 export const EMPLOYEE_PUBLIC_SELECT_FALLBACK =
   'id, name, phone, email, role, primary_department, hourly_wage, guaranteed_hourly, birth_date, login_enabled, is_active, created_at'
 
 export const EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS =
-  'id, name, phone, email, address, role, primary_department, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
+  'id, name, phone, email, address, role, primary_department, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, tip_eligible, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
+
+export const EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE =
+  'id, name, phone, email, address, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, birth_date, login_enabled, is_active, created_at'
 
 export function isMissingTipPoolRateColumn(error: { message?: string; code?: string } | null | undefined) {
   const message = error?.message?.toLowerCase() ?? ''
   return message.includes('tip_pool_hourly_rate') || message.includes('schema cache')
+}
+
+export function isMissingTipEligibleColumn(error: { message?: string; code?: string } | null | undefined) {
+  const message = error?.message?.toLowerCase() ?? ''
+  return message.includes('tip_eligible') || message.includes('schema cache')
 }
 
 export function isMissingMealBreakThresholdColumn(error: { message?: string; code?: string } | null | undefined) {
@@ -68,6 +76,19 @@ export function withTipPoolHourlyRate<T extends object>(employees: T[]) {
     tip_pool_hourly_rate: 'tip_pool_hourly_rate' in employee
       ? (employee.tip_pool_hourly_rate as number | null)
       : null,
+  }))
+}
+
+export function getDefaultTipEligible(employee: { role?: unknown; primary_department?: string | null; schedule_departments?: unknown }) {
+  return getEmployeeScheduleDepartments(employee).includes('server')
+}
+
+export function withTipEligible<T extends object>(employees: T[]) {
+  return employees.map(employee => ({
+    ...employee,
+    tip_eligible: 'tip_eligible' in employee && typeof employee.tip_eligible === 'boolean'
+      ? employee.tip_eligible
+      : getDefaultTipEligible(employee),
   }))
 }
 

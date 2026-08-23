@@ -15,8 +15,7 @@ import { supabase } from '@/lib/supabase'
 import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { formatCurrency } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
-import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
-import { isTipEligibleDepartment, isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
+import { isTipEligibleEmployee, isTipEligibleForWork } from '@/lib/tipEligibility'
 import { Employee } from '@/lib/types'
 import { ArrowLeft, Plus, Save } from 'lucide-react'
 
@@ -155,10 +154,7 @@ export default function TipDistributionEditorPage() {
   const houseTotal = roundMoney((Number.isFinite(totalTip) ? totalTip : 0) * 0.15)
   const ruleTotal = roundMoney(distributedTotal + houseTotal)
   const eligibleEmployees = employees.filter(employee => (
-    (
-      isTipEligibleEmployee(employee) ||
-      getEmployeeScheduleDepartments(employee).some(department => isTipEligibleDepartment(department))
-    ) &&
+    isTipEligibleEmployee(employee) &&
     !currentRows.some(row => row.employee_id === employee.id)
   ))
   const hasAdjustmentWithoutMemo = currentRows.some(row => row.adjustment !== 0 && row.memo.trim().length === 0)

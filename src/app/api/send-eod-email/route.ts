@@ -9,7 +9,7 @@ import type { Employee, Schedule, ShiftClock } from '@/lib/types'
 
 type TipDist = {
   employee_id: string
-  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate'> | null
+  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate' | 'tip_eligible'> | null
   start_time: string | null
   end_time: string | null
   hours_worked: number
@@ -19,7 +19,7 @@ type TipDist = {
 }
 
 type ShiftClockWithEmployee = ShiftClock & {
-  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate'> | Array<Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate'>> | null
+  employee?: Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate' | 'tip_eligible'> | Array<Pick<Employee, 'id' | 'name' | 'email' | 'role' | 'primary_department' | 'schedule_departments' | 'tip_pool_hourly_rate' | 'tip_eligible'>> | null
 }
 
 function formatShiftTime(value: string | null) {
@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
         .eq('date', report.session_date),
       supabaseAdmin
         .from('shift_clocks')
-        .select('*, employee:employees(id, name, email, role, primary_department, schedule_departments, tip_pool_hourly_rate)')
+        .select('*, employee:employees(id, name, email, role, primary_department, schedule_departments, tip_pool_hourly_rate, tip_eligible)')
         .eq('session_date', report.session_date),
     ])
     const sessionSchedules = (sessionSchedulesRes.data ?? []) as Schedule[]

@@ -12,11 +12,14 @@ import {
   EMPLOYEE_PUBLIC_SELECT_FALLBACK,
   EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS,
   EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD,
+  EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE,
   isMissingAddressColumn,
   isMissingMealBreakThresholdColumn,
   isMissingPaymentMethodColumn,
   isMissingScheduleDepartmentsColumn,
+  isMissingTipEligibleColumn,
   isMissingTipPoolRateColumn,
+  withTipEligible,
   withMealBreakThresholdHours,
   withStaffingProfileFields,
   withPaymentMethod,
@@ -75,6 +78,12 @@ function normalizePaymentMethod(paymentMethod: unknown): PaymentMethod | null {
 function withoutTipPoolHourlyRate<T extends { tip_pool_hourly_rate?: unknown }>(payload: T) {
   const fallbackPayload: Partial<T> = { ...payload }
   delete fallbackPayload.tip_pool_hourly_rate
+  return fallbackPayload
+}
+
+function withoutTipEligible<T extends { tip_eligible?: unknown }>(payload: T) {
+  const fallbackPayload: Partial<T> = { ...payload }
+  delete fallbackPayload.tip_eligible
   return fallbackPayload
 }
 
@@ -219,6 +228,11 @@ async function writeEmployeeWithOptionalFallback(
       continue
     }
 
+    if (isMissingTipEligibleColumn(result.error) && 'tip_eligible' in nextPayload) {
+      nextPayload = withoutTipEligible(nextPayload)
+      continue
+    }
+
     if (isMissingMealBreakThresholdColumn(result.error) && 'meal_break_threshold_hours' in nextPayload) {
       nextPayload = withoutMealBreakThresholdHours(nextPayload)
       continue
@@ -275,6 +289,16 @@ export async function GET() {
     error = fallbackResult.error
   }
 
+  if (error && isMissingTipEligibleColumn(error)) {
+    const fallbackResult = await supabaseAdmin
+      .from('employees')
+      .select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE)
+      .eq('is_active', true)
+      .order('name')
+    data = fallbackResult.data as unknown[] | null
+    error = fallbackResult.error
+  }
+
   if (error && isMissingScheduleDepartmentsColumn(error)) {
     const fallbackResult = await supabaseAdmin
       .from('employees')
@@ -319,7 +343,7 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ employees: withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[]))))) })
+  return NextResponse.json({ employees: withTipEligible(withMealBreakThresholdHours(withStaffingProfileFields(withPaymentMethod(withScheduleDepartments(withTipPoolHourlyRate((data ?? []) as object[])))))) })
 }
 
 export async function POST(req: NextRequest) {
@@ -327,7 +351,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
+  const { name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, tip_eligible, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
   if (typeof name !== 'string' || !name.trim()) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   }
@@ -402,6 +426,7 @@ export async function POST(req: NextRequest) {
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    tip_eligible: typeof tip_eligible === 'boolean' ? tip_eligible : normalizedScheduleDepartments.includes('server'),
     meal_break_threshold_hours: mealBreakThresholdHours,
     commission_enabled: commission_enabled === true,
     commission_note: commission_enabled === true && typeof commission_note === 'string' && commission_note.trim() ? commission_note.trim() : null,
@@ -427,7 +452,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
+  const { id, name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, tip_eligible, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -492,6 +517,7 @@ export async function PATCH(req: NextRequest) {
     hourly_wage: number | null
     guaranteed_hourly: number | null
     tip_pool_hourly_rate: number | null
+    tip_eligible: boolean
     meal_break_threshold_hours: number | null
     commission_enabled: boolean
     commission_note: string | null
@@ -512,6 +538,7 @@ export async function PATCH(req: NextRequest) {
     hourly_wage: hourlyWage,
     guaranteed_hourly: guaranteedHourly,
     tip_pool_hourly_rate: tipPoolHourlyRate,
+    tip_eligible: typeof tip_eligible === 'boolean' ? tip_eligible : normalizedScheduleDepartments.includes('server'),
     meal_break_threshold_hours: mealBreakThresholdHours,
     commission_enabled: commission_enabled === true,
     commission_note: commission_enabled === true && typeof commission_note === 'string' && commission_note.trim() ? commission_note.trim() : null,

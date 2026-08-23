@@ -24,6 +24,7 @@ export interface Employee {
   hourly_wage: number | null
   guaranteed_hourly: number | null
   tip_pool_hourly_rate: number | null
+  tip_eligible?: boolean | null
   meal_break_threshold_hours?: number | null
   commission_enabled?: boolean
   commission_note?: string | null

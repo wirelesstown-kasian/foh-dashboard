@@ -11,7 +11,7 @@ import { TaskRoadmap } from '@/components/dashboard/TaskRoadmap'
 import { Textarea } from '@/components/ui/textarea'
 import { RegisterOpenPanel } from '@/components/dashboard/RegisterOpenPanel'
 import { format, startOfMonth } from 'date-fns'
-import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { EMPLOYEE_PUBLIC_SELECT, EMPLOYEE_PUBLIC_SELECT_FALLBACK, EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE, isMissingMealBreakThresholdColumn, isMissingPaymentMethodColumn, isMissingTipEligibleColumn, isMissingTipPoolRateColumn, withMealBreakThresholdHours, withPaymentMethod, withTipEligible, withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 const isSystemClockTask = (task: Task) => {
   const title = task.title.trim().toLowerCase()
@@ -46,12 +46,15 @@ export default function DashboardPage() {
       const monthStart = format(startOfMonth(new Date(`${today}T12:00:00`)), 'yyyy-MM-dd')
       const loadEmployees = async () => {
         const initial = await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT).eq('is_active', true)
-        const result = initial.error && (isMissingTipPoolRateColumn(initial.error) || isMissingPaymentMethodColumn(initial.error) || isMissingMealBreakThresholdColumn(initial.error))
-          ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true)
+        const tipEligibleFallback = initial.error && isMissingTipEligibleColumn(initial.error)
+          ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE).eq('is_active', true)
           : initial
+        const result = tipEligibleFallback.error && (isMissingTipPoolRateColumn(tipEligibleFallback.error) || isMissingPaymentMethodColumn(tipEligibleFallback.error) || isMissingMealBreakThresholdColumn(tipEligibleFallback.error))
+          ? await supabase.from('employees').select(EMPLOYEE_PUBLIC_SELECT_FALLBACK).eq('is_active', true)
+          : tipEligibleFallback
         return {
           ...result,
-          data: withMealBreakThresholdHours(withPaymentMethod(withTipPoolHourlyRate(result.data ?? []))) as Employee[],
+          data: withTipEligible(withMealBreakThresholdHours(withPaymentMethod(withTipPoolHourlyRate(result.data ?? [])))) as Employee[],
         }
       }
 
@@ -96,7 +99,7 @@ export default function DashboardPage() {
           .select(EMPLOYEE_PUBLIC_SELECT)
           .in('id', missingClockEmployeeIds)
         if (!missingEmployeesRes.error) {
-          loadedEmployees.push(...withMealBreakThresholdHours(withPaymentMethod(withTipPoolHourlyRate(missingEmployeesRes.data ?? []))) as Employee[])
+          loadedEmployees.push(...withTipEligible(withMealBreakThresholdHours(withPaymentMethod(withTipPoolHourlyRate(missingEmployeesRes.data ?? [])))) as Employee[])
         }
       }
 

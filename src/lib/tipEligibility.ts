@@ -1,26 +1,26 @@
 import { Employee } from '@/lib/types'
 
-const STANDARD_TIP_ROLES = new Set(['manager', 'server', 'busser', 'runner'])
+const TIP_PAYING_DEPARTMENTS = new Set(['server'])
 
 export function isStandardTipRole(role: Employee['role']) {
-  return STANDARD_TIP_ROLES.has(role)
+  return role === 'server'
 }
 
 export function isTipEligibleDepartment(department: string | null | undefined) {
   const normalized = department?.trim().toLowerCase()
   if (!normalized) return false
-  return STANDARD_TIP_ROLES.has(normalized) || normalized === 'foh' || normalized === 'hybrid'
+  return TIP_PAYING_DEPARTMENTS.has(normalized)
 }
 
-export function isTipEligibleEmployee(employee: Pick<Employee, 'role' | 'primary_department'>) {
-  if (isStandardTipRole(employee.role)) return true
-  const primaryDepartment = employee.primary_department ?? 'foh'
-  return primaryDepartment === 'foh' || primaryDepartment === 'hybrid'
+export function isTipEligibleEmployee(employee: Pick<Employee, 'role' | 'primary_department' | 'tip_eligible'>) {
+  if (typeof employee.tip_eligible === 'boolean') return employee.tip_eligible
+  return isStandardTipRole(employee.role) || employee.primary_department === 'server'
 }
 
 export function isTipEligibleForWork(
-  employee: Pick<Employee, 'role' | 'primary_department'>,
+  employee: Pick<Employee, 'role' | 'primary_department' | 'tip_eligible'>,
   workDepartment?: string | null
 ) {
-  return workDepartment ? isTipEligibleDepartment(workDepartment) : isTipEligibleEmployee(employee)
+  if (!isTipEligibleEmployee(employee)) return false
+  return workDepartment ? isTipEligibleDepartment(workDepartment) : employee.primary_department === 'server'
 }
