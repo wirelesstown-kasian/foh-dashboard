@@ -14,6 +14,8 @@ export interface EmailSettings {
   weekly_summary_emails_enabled: boolean
   weekly_summary_recipient: string
   wage_report_emails_enabled: boolean
+  announcement_event_emails_enabled: boolean
+  announcement_event_email: string
 }
 
 export interface RoleDefinition {
@@ -72,6 +74,8 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   weekly_summary_emails_enabled: true,
   weekly_summary_recipient: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
   wage_report_emails_enabled: true,
+  announcement_event_emails_enabled: true,
+  announcement_event_email: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
   time_clock_announcement: '',
   announcement_events: [],
   role_definitions: [
@@ -224,7 +228,8 @@ export async function getAppSettings(): Promise<AppSettings> {
       row.key === 'schedule_emails_enabled' ||
       row.key === 'queued_schedule_emails_enabled' ||
       row.key === 'weekly_summary_emails_enabled' ||
-      row.key === 'wage_report_emails_enabled'
+      row.key === 'wage_report_emails_enabled' ||
+      row.key === 'announcement_event_emails_enabled'
     ) {
       settings[row.key] = normalizeBoolean(row.value, settings[row.key])
       continue
@@ -259,6 +264,8 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     weekly_summary_emails_enabled: settings.weekly_summary_emails_enabled,
     weekly_summary_recipient: settings.weekly_summary_recipient,
     wage_report_emails_enabled: settings.wage_report_emails_enabled,
+    announcement_event_emails_enabled: settings.announcement_event_emails_enabled,
+    announcement_event_email: settings.announcement_event_email,
   }
 }
 

@@ -33,6 +33,8 @@ const EMPTY_SETTINGS: SettingsForm = {
   weekly_summary_emails_enabled: true,
   weekly_summary_recipient: '',
   wage_report_emails_enabled: true,
+  announcement_event_emails_enabled: true,
+  announcement_event_email: '',
   time_clock_announcement: '',
 }
 
@@ -261,6 +263,16 @@ export default function EmailSettingsPage() {
                 <div className="mt-1">
                   <BooleanSelect value={settings.wage_report_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, wage_report_emails_enabled: nextValue }))} />
                 </div>
+              </div>
+              <div>
+                <Label>Announcement Event Emails</Label>
+                <div className="mt-1">
+                  <BooleanSelect value={settings.announcement_event_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, announcement_event_emails_enabled: nextValue }))} />
+                </div>
+              </div>
+              <div>
+                <Label>Announcement Event Recipient</Label>
+                <Input value={settings.announcement_event_email} onChange={(event) => setSettings((prev) => ({ ...prev, announcement_event_email: event.target.value }))} className="mt-1" />
               </div>
             </div>
           </div>
