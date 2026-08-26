@@ -5,7 +5,7 @@ import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { notifyReportingDataChanged, useClockRecords, useEmployees, useSchedulesByRange } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, usePayrollRuns, useSchedulesByRange } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -127,6 +127,7 @@ function formatBreakSummary(record: ShiftClock) {
 
 export default function ClockRecordsPage() {
   const employees = useEmployees({ includeArchived: true })
+  const { payrollRuns } = usePayrollRuns()
 
   const [department, setDepartment] = useState<ReportDepartment>('all')
   const [period, setPeriod] = useState<ReportPeriod>('daily')
@@ -218,6 +219,17 @@ export default function ClockRecordsPage() {
   )
   const selectedClockEmployee = selectedClockRecord ? getClockRecordEmployee(selectedClockRecord, employees) : null
   const selectedClockEdit = selectedClockRecord ? clockEdits[selectedClockRecord.id] ?? getClockEditState(selectedClockRecord) : null
+  const isClockRecordPaid = (record: ShiftClock) => {
+    const employee = getClockRecordEmployee(record, employees)
+    const workDepartment = getClockWorkDepartment(record, employee, schedules)
+    return payrollRuns.some(run =>
+      record.session_date >= run.start_date &&
+      record.session_date <= run.end_date &&
+      (run.department === 'all' || run.department === workDepartment) &&
+      (run.payroll_run_items ?? []).some(item => item.employee_id === record.employee_id)
+    )
+  }
+  const selectedClockRecordPaid = selectedClockRecord ? isClockRecordPaid(selectedClockRecord) : false
   const selectedClockWorkDepartmentOptions = uniqueStrings([
     selectedClockEdit?.workDepartment,
     ...getWorkDepartmentOptions(selectedClockEmployee, department),
@@ -228,7 +240,7 @@ export default function ClockRecordsPage() {
   const openClockDetail = (record: ShiftClock, edit = false) => {
     setClockEdits(prev => ({ ...prev, [record.id]: prev[record.id] ?? getClockEditState(record) }))
     setSelectedClockId(record.id)
-    setDetailEditing(edit)
+    setDetailEditing(edit && !isClockRecordPaid(record))
     setStatus(null)
   }
 
@@ -567,6 +579,7 @@ export default function ClockRecordsPage() {
               const mealBreakThresholdHours = getMealBreakThresholdHours(employee)
               const breakMinutes = getClockBreakMinutes(record)
               const workedHours = record.clock_out_at ? calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, breakMinutes) : 0
+              const paid = isClockRecordPaid(record)
               return (
                 <TableRow key={record.id}>
                   <TableCell className="font-medium">{format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
@@ -594,6 +607,9 @@ export default function ClockRecordsPage() {
                           <AlertTriangle className="mr-1 h-3 w-3" /> Break Audit
                         </Badge>
                       )}
+                      {paid && (
+                        <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Paid</Badge>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
@@ -610,7 +626,7 @@ export default function ClockRecordsPage() {
                   <TableCell className="align-top">
                     <div className="flex gap-2">
                       <Button size="sm" variant="outline" onClick={() => openClockDetail(record)}>View</Button>
-                      <Button size="sm" variant="outline" onClick={() => openClockDetail(record, true)}>Edit</Button>
+                      <Button size="sm" variant="outline" onClick={() => openClockDetail(record, true)} disabled={paid}>Edit</Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -644,6 +660,11 @@ export default function ClockRecordsPage() {
                 </SheetDescription>
               </SheetHeader>
               <div className="space-y-4 px-4">
+                {selectedClockRecordPaid && (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                    This clock record is part of a paid payroll payout. Make post-payout hour corrections from Reporting &gt; Payroll Payouts.
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg border bg-muted/30 p-3">
                     <div className="text-xs font-medium uppercase text-muted-foreground">Status</div>

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { addDays, format, parseISO } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -126,6 +126,7 @@ export default function TipDistributionEditorPage() {
   const employees = useEmployees({ includeArchived: true })
   const { clockRecords } = useClockRecords()
   const { eodReports, setEodReports } = useEodReports()
+  const { payrollRuns } = usePayrollRuns()
   const [selectedDate, setSelectedDate] = useState(todayKey())
   const [totalTipInput, setTotalTipInput] = useState('')
   const [rows, setRows] = useState<EditorRow[] | null>(null)
@@ -160,6 +161,8 @@ export default function TipDistributionEditorPage() {
   const houseTotal = roundMoney((Number.isFinite(totalTip) ? totalTip : 0) * 0.15)
   const ruleTotal = roundMoney(distributedTotal + houseTotal)
   const hasAdjustmentWithoutMemo = currentRows.some(row => row.adjustment !== 0 && row.memo.trim().length === 0)
+  const paidPayrollRuns = useMemo(() => payrollRuns.filter(run => selectedDate >= run.start_date && selectedDate <= run.end_date), [payrollRuns, selectedDate])
+  const isPaidDate = paidPayrollRuns.length > 0
   const selectedDateIndex = availableEodDates.indexOf(selectedDate)
   const previousEodDate = selectedDateIndex > 0
     ? availableEodDates[selectedDateIndex - 1]
@@ -199,6 +202,10 @@ export default function TipDistributionEditorPage() {
   const save = async () => {
     if (!report) {
       setMessage('Create the EOD report first, then edit tip distribution.')
+      return
+    }
+    if (isPaidDate) {
+      setMessage('This date is already part of a paid payroll payout. Make post-payout corrections from Reporting > Payroll Payouts.')
       return
     }
     if (hasAdjustmentWithoutMemo) {
@@ -345,6 +352,11 @@ export default function TipDistributionEditorPage() {
           <div className="rounded-lg border bg-white p-3 text-xs text-muted-foreground">
             Add staff and edit hours in <Link className="font-medium text-violet-700 hover:underline" href="/reporting/clock-records">Clock Records</Link>. Tip rows here follow saved clock records.
           </div>
+          {isPaidDate && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+              This tip date is included in paid payroll: {paidPayrollRuns.map(run => `${run.department} ${run.start_date} to ${run.end_date}`).join(', ')}. Use Payroll Payouts for post-payout corrections.
+            </div>
+          )}
 
           <div className="overflow-x-auto rounded-lg border bg-white">
             <Table className="min-w-[980px] table-fixed text-xs">
@@ -392,7 +404,7 @@ export default function TipDistributionEditorPage() {
           {message && <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">{message}</div>}
           <div className="flex justify-between">
             <Link className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium hover:bg-slate-50" href="/admin"><ArrowLeft className="size-4" /> Admin Board</Link>
-            <Button onClick={save} disabled={saving || !report || hasAdjustmentWithoutMemo || Math.abs(ruleTotal - (Number.isFinite(totalTip) ? totalTip : 0)) > 0.02}>
+            <Button onClick={save} disabled={saving || !report || isPaidDate || hasAdjustmentWithoutMemo || Math.abs(ruleTotal - (Number.isFinite(totalTip) ? totalTip : 0)) > 0.02}>
               <Save className="size-4" /> {saving ? 'Saving...' : 'Save Distribution'}
             </Button>
           </div>

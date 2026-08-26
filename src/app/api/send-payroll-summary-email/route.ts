@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { getEmailSettings } from '@/lib/appSettings'
+import { getAppSettings } from '@/lib/appSettings'
 import { escapeHtml, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import type { PayrollRun, PayrollRunItem } from '@/lib/types'
@@ -50,7 +50,8 @@ export async function POST(req: NextRequest) {
     const resendKey = process.env.RESEND_API_KEY
     if (!resendKey) return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })
 
-    const emailSettings = await getEmailSettings()
+    const appSettings = await getAppSettings()
+    const emailSettings = appSettings
     if (!emailSettings.wage_report_emails_enabled) {
       return NextResponse.json({ success: true, skipped: true, reason: 'Wage report emails are disabled in Email Settings' })
     }
@@ -74,6 +75,7 @@ export async function POST(req: NextRequest) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? req.nextUrl.origin
     const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
     const periodLabel = `${run.start_date} to ${run.end_date}`
+    const departmentLabel = appSettings.primary_department_definitions.find(department => department.key === run.department)?.label ?? (run.department === 'all' ? 'All' : run.department)
     const summary = buildItemSummary(items)
     const rowHtml = items.map(item => `
       <tr>
@@ -94,21 +96,31 @@ export async function POST(req: NextRequest) {
 
     const html = renderEmailShell(logoUrl, `
       <h2 style="color:#111827;margin:0 0 6px">Payroll Worksheet Summary</h2>
-      <p style="margin:0 0 14px;color:#4b5563">${escapeHtml(periodLabel)} | Pay date ${escapeHtml(run.pay_date)} | Department ${escapeHtml(run.department)}</p>
-      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:14px 0">
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Staff</div><div style="font-size:20px;font-weight:700">${summary.employeeCount}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Hours</div><div style="font-size:20px;font-weight:700">${summary.hours.toFixed(2)}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Tips</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.tips)}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Base Wages</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.baseWages)}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Top-Up</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.topUp)}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Commission</div><div style="font-size:20px;font-weight:700">${formatCurrency(summary.commission)}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#047857">Cash Payout</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_cash ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Check Payout</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_check ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#1d4ed8">ACH Payout</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_ach ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Net Payroll</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_net ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#6b7280">Gross</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_gross ?? 0))}</div></div>
-        <div style="border:1px solid #d1d5db;border-radius:10px;padding:10px"><div style="font-size:10px;text-transform:uppercase;color:#b91c1c">Deductions</div><div style="font-size:20px;font-weight:700">${formatCurrency(Number(run.total_deductions ?? 0))}</div></div>
-      </div>
+      <p style="margin:0 0 14px;color:#4b5563">Department: ${escapeHtml(departmentLabel)} | ${escapeHtml(periodLabel)} | Pay date ${escapeHtml(run.pay_date)}</p>
+      <table cellpadding="6" style="border-collapse:collapse;width:100%;font-size:12px;margin:12px 0 14px">
+        <tbody>
+          <tr style="background:#f9fafb">
+            <td style="border:1px solid #d1d5db;color:#6b7280">Staff</td><td style="border:1px solid #d1d5db;font-weight:700">${summary.employeeCount}</td>
+            <td style="border:1px solid #d1d5db;color:#6b7280">Hours</td><td style="border:1px solid #d1d5db;font-weight:700">${summary.hours.toFixed(2)}</td>
+            <td style="border:1px solid #d1d5db;color:#6b7280">Tips</td><td style="border:1px solid #d1d5db;font-weight:700">${formatCurrency(summary.tips)}</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #d1d5db;color:#6b7280">Cash</td><td style="border:1px solid #d1d5db;font-weight:700;color:#047857">${formatCurrency(Number(run.total_cash ?? 0))}</td>
+            <td style="border:1px solid #d1d5db;color:#6b7280">Check</td><td style="border:1px solid #d1d5db;font-weight:700">${formatCurrency(Number(run.total_check ?? 0))}</td>
+            <td style="border:1px solid #d1d5db;color:#6b7280">ACH</td><td style="border:1px solid #d1d5db;font-weight:700;color:#1d4ed8">${formatCurrency(Number(run.total_ach ?? 0))}</td>
+          </tr>
+          <tr style="background:#f9fafb">
+            <td style="border:1px solid #d1d5db;color:#6b7280">Base</td><td style="border:1px solid #d1d5db;font-weight:700">${formatCurrency(summary.baseWages)}</td>
+            <td style="border:1px solid #d1d5db;color:#6b7280">Top-Up</td><td style="border:1px solid #d1d5db;font-weight:700">${formatCurrency(summary.topUp)}</td>
+            <td style="border:1px solid #d1d5db;color:#6b7280">Commission</td><td style="border:1px solid #d1d5db;font-weight:700">${formatCurrency(summary.commission)}</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #d1d5db;color:#6b7280">Gross</td><td style="border:1px solid #d1d5db;font-weight:700">${formatCurrency(Number(run.total_gross ?? 0))}</td>
+            <td style="border:1px solid #d1d5db;color:#b91c1c">Deductions</td><td style="border:1px solid #d1d5db;font-weight:700;color:#b91c1c">${formatCurrency(Number(run.total_deductions ?? 0))}</td>
+            <td style="border:1px solid #d1d5db;color:#111827">Net Payroll</td><td style="border:1px solid #d1d5db;font-weight:800;color:#111827">${formatCurrency(Number(run.total_net ?? 0))}</td>
+          </tr>
+        </tbody>
+      </table>
       ${run.memo ? `<p style="margin:0 0 12px"><strong>Memo:</strong> ${escapeHtml(run.memo)}</p>` : ''}
       <table border="1" cellpadding="7" style="border-collapse:collapse;width:100%;font-size:11px">
         <thead>
@@ -134,7 +146,7 @@ export async function POST(req: NextRequest) {
     await sendEmail({
       resendKey,
       to: PAYROLL_SUMMARY_ADMIN_EMAIL,
-      subject: `Payroll Worksheet Summary - ${periodLabel}`,
+      subject: `Payroll Worksheet Summary - ${departmentLabel} - ${periodLabel}`,
       html,
       fromName: emailSettings.from_name,
       fromEmail: emailSettings.from_email,

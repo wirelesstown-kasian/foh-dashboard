@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
 
     const existingRunResult = await supabaseAdmin
       .from('payroll_runs')
-      .select('id, department')
+      .select('id, department, payroll_run_items(employee_id, employee_name)')
       .eq('start_date', payload.start_date)
       .eq('end_date', payload.end_date)
 
@@ -117,14 +117,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: existingRunResult.error.message }, { status: 500 })
     }
 
-    const existingRun = (existingRunResult.data ?? []).find(run =>
+    const relatedExistingRuns = (existingRunResult.data ?? []).filter(run =>
       run.department === payload.department ||
       run.department === 'all' ||
       payload.department === 'all'
     )
-    if (existingRun) {
+    const requestedEmployeeIds = new Set(rows.map(row => row.employee_id).filter(Boolean))
+    const duplicateEmployee = relatedExistingRuns
+      .flatMap(run => run.payroll_run_items ?? [])
+      .find(item => item.employee_id && requestedEmployeeIds.has(item.employee_id))
+    if (duplicateEmployee) {
       return NextResponse.json(
-        { error: 'A payroll payout already exists for this period. Open the saved payout summary to edit it instead of creating another payout.' },
+        { error: `${duplicateEmployee.employee_name || 'An employee'} is already paid for this period. Open Payroll Payouts to edit the saved payout or create a worksheet for unpaid staff only.` },
         { status: 409 }
       )
     }
@@ -240,6 +244,10 @@ export async function PATCH(req: NextRequest) {
         .from('payroll_run_items')
         .update({
           payment_method: row.payment_method,
+          hours: normalizeNumber(row.hours),
+          tips: normalizeNumber(row.tips),
+          base_wages: normalizeNumber(row.base_wages),
+          guarantee_top_up: normalizeNumber(row.guarantee_top_up),
           commission: normalizeNumber(row.commission),
           deductions: normalizeNumber(row.deductions),
           gross_pay: normalizeNumber(row.gross_pay),
@@ -266,6 +274,7 @@ export async function PATCH(req: NextRequest) {
         `${existingRun.start_date} to ${existingRun.end_date}`,
         `Pay date ${existingRun.pay_date}`,
         `Run ${payload.run_id}`,
+        'Modified after payout',
         `Cash ${cashDifference > 0 ? 'increased' : 'decreased'} by $${amount.toFixed(2)}`,
       ].join(' | ')
       const { data: cashEntry, error: cashError } = await supabaseAdmin

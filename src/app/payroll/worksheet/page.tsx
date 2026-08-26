@@ -280,6 +280,7 @@ function printSummary({
   endDate,
   payDate,
   department,
+  departmentLabel,
   memo,
   clockRecords,
   employees,
@@ -291,6 +292,7 @@ function printSummary({
   endDate: string
   payDate: string
   department: string
+  departmentLabel: string
   memo: string
   clockRecords: ShiftClock[]
   employees: Employee[]
@@ -333,7 +335,7 @@ function printSummary({
       <body>
         <section class="page">
           <h1>Payroll Summary</h1>
-          <div class="muted">${escapePrintValue(department.toUpperCase())} | ${startDate} - ${endDate} | Pay date ${payDate}</div>
+          <div class="muted">Department: ${escapePrintValue(departmentLabel)} | ${startDate} - ${endDate} | Pay date ${payDate}</div>
           ${memo ? `<div class="note">${escapePrintValue(memo)}</div>` : ''}
           <div class="cards">
             <div class="card"><div class="muted">Staff</div><div class="metric">${summary.employeeCount}</div></div>
@@ -496,6 +498,11 @@ export default function WageWorksheetPage() {
     if (run.start_date !== startDate || run.end_date !== endDate) return false
     return run.department === department || run.department === 'all' || department === 'all'
   }) ?? null, [department, endDate, payrollRuns, startDate])
+  const paidEmployeeIdsForRange = useMemo(() => new Set(payrollRuns
+    .filter(run => run.start_date === startDate && run.end_date === endDate)
+    .filter(run => run.department === department || run.department === 'all' || department === 'all')
+    .flatMap(run => (run.payroll_run_items ?? []).map(item => item.employee_id).filter((id): id is string => Boolean(id)))
+  ), [department, endDate, payrollRuns, startDate])
   const selectedSummaryRun = useMemo(
     () => payrollRuns.find(run => run.id === summaryRunId) ?? null,
     [payrollRuns, summaryRunId]
@@ -596,11 +603,6 @@ export default function WageWorksheetPage() {
   }
 
   const buildWorksheet = () => {
-    if (existingPayoutRun) {
-      setMessage('A payroll payout already exists for this period. Open the saved payout summary to edit it instead of creating another payout.')
-      openSavedSummary(existingPayoutRun.id)
-      return
-    }
     const nextRows = buildPayrollDraftRows({
       employees,
       clockRecords,
@@ -609,7 +611,15 @@ export default function WageWorksheetPage() {
       startDate,
       endDate,
       schedules,
-    }).filter(row => row.hours > 0)
+    }).filter(row => row.hours > 0 && !paidEmployeeIdsForRange.has(row.employee_id))
+    if (nextRows.length === 0) {
+      setMessage(existingPayoutRun
+        ? 'Everything in this period is already paid. Open Payroll Payouts to edit the saved payout instead of creating another payout.'
+        : 'No unpaid hours found for this period.'
+      )
+      if (existingPayoutRun) openSavedSummary(existingPayoutRun.id)
+      return
+    }
     setRows(sortPayrollRows(nextRows))
     setExcludedEmployeeIds([])
     setStep('worksheet')
@@ -628,12 +638,13 @@ export default function WageWorksheetPage() {
       endDate,
       schedules,
     }).filter(row => row.hours > 0 && !excludedEmployeeIds.includes(row.employee_id))
+      .filter(row => !paidEmployeeIdsForRange.has(row.employee_id))
 
     setRows(currentRows => {
       const nextRows = sortPayrollRows(mergeWorksheetRowsWithClockSource(currentRows, sourceRows))
       return arePayrollRowsEqual(currentRows, nextRows) ? currentRows : nextRows
     })
-  }, [clockRecords, department, employees, endDate, eodReports, excludedEmployeeIds, schedules, startDate, step])
+  }, [clockRecords, department, employees, endDate, eodReports, excludedEmployeeIds, paidEmployeeIdsForRange, schedules, startDate, step])
 
   const updateRow = (employeeId: string, patch: Partial<PayrollDraftRow>) => {
     setRows(currentRows => sortPayrollRows(currentRows.map(row => {
@@ -883,7 +894,29 @@ export default function WageWorksheetPage() {
       endDate,
       schedules,
     })
-    setRows(currentRows => sortPayrollRows([...currentRows, ...nextRows]))
+    const rowToAdd = nextRows[0] ?? {
+      employee_id: employee.id,
+      employee_name: employee.name,
+      role: employee.role,
+      department: department === 'all' ? (getEmployeeScheduleDepartments(employee)[0] ?? employee.primary_department ?? 'all') : department,
+      payment_method: employee.payment_method ?? '',
+      hours: 0,
+      tips: 0,
+      base_wages: 0,
+      guarantee_top_up: 0,
+      commission: 0,
+      deductions: 0,
+      gross_pay: 0,
+      net_pay: 0,
+      payout_amount: 0,
+      cash_rounding: 0,
+      has_auto_clock_out: false,
+      has_open_clock: false,
+      has_tip_data: false,
+      memo: '',
+      display_order: rows.length,
+    }
+    setRows(currentRows => sortPayrollRows([...currentRows, rowToAdd]))
     setExcludedEmployeeIds(current => current.filter(id => id !== employeeToAdd))
     setEmployeeToAdd('')
   }
@@ -985,11 +1018,6 @@ export default function WageWorksheetPage() {
   const savePayroll = async () => {
     if (missingPaymentRows.length > 0) {
       setMessage('Select a payment method for every employee before saving.')
-      return
-    }
-    if (existingPayoutRun) {
-      setMessage('A payroll payout already exists for this period. Open the saved payout summary to edit it instead of creating another payout.')
-      openSavedSummary(existingPayoutRun.id)
       return
     }
     setSaving(true)
@@ -1230,11 +1258,11 @@ export default function WageWorksheetPage() {
                 <p className="text-sm text-muted-foreground">Rows with zero recorded hours are skipped unless added manually.</p>
                 {existingPayoutRun && (
                   <p className="mt-1 text-sm font-medium text-red-700">
-                    Payout already saved for this period. Open the saved payout summary to edit it.
+                    Some staff in this period are already paid. New worksheets only include unpaid staff; edit paid records from Payroll Payouts.
                   </p>
                 )}
               </div>
-              <Button className="min-w-32" onClick={buildWorksheet} disabled={!startDate || !endDate || !payDate || !!existingPayoutRun}>Next</Button>
+              <Button className="min-w-32" onClick={buildWorksheet} disabled={!startDate || !endDate || !payDate}>Next</Button>
             </div>
           </div>
 
@@ -1977,7 +2005,7 @@ export default function WageWorksheetPage() {
             </div>
           )}
           <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
-            <Button className="w-full sm:w-auto" variant="outline" onClick={() => printSummary({ rows, totals, startDate, endDate, payDate, department, memo, clockRecords, employees, schedules })}>Print Summary</Button>
+            <Button className="w-full sm:w-auto" variant="outline" onClick={() => printSummary({ rows, totals, startDate, endDate, payDate, department, departmentLabel: departmentOptions.find(option => option.key === department)?.label ?? department, memo, clockRecords, employees, schedules })}>Print Summary</Button>
             {confirmStep === 'summary' ? (
               <Button className="w-full sm:w-auto" onClick={() => setConfirmStep('final')}>Continue</Button>
             ) : confirmStep === 'final' ? (

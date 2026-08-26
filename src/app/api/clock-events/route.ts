@@ -147,6 +147,40 @@ function isValidSessionDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
 }
 
+function clockRangesOverlap(leftStart: string, leftEnd: string | null, rightStart: string, rightEnd: string | null) {
+  if (!leftEnd || !rightEnd) return false
+  return new Date(leftStart).getTime() < new Date(rightEnd).getTime() &&
+    new Date(rightStart).getTime() < new Date(leftEnd).getTime()
+}
+
+async function hasOverlappingClockRecord({
+  employeeId,
+  sessionDate,
+  clockInAt,
+  clockOutAt,
+  ignoreId,
+}: {
+  employeeId: string
+  sessionDate: string
+  clockInAt: string
+  clockOutAt: string | null
+  ignoreId?: string
+}) {
+  const { data, error } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('id, clock_in_at, clock_out_at')
+    .eq('employee_id', employeeId)
+    .eq('session_date', sessionDate)
+
+  if (error) throw new Error(error.message)
+
+  return (data ?? []).some(record => {
+    if (ignoreId && record.id === ignoreId) return false
+    if (!record.clock_in_at) return false
+    return clockRangesOverlap(clockInAt, clockOutAt, record.clock_in_at, record.clock_out_at)
+  })
+}
+
 async function uploadPhoto(dataUrl: string, path: string) {
   await ensureClockPhotoBucket()
   const binary = await dataUrlToArrayBuffer(dataUrl)
@@ -269,6 +303,14 @@ async function createManualClockRecord(payload: {
 
   if (employeeError || !employee) {
     return NextResponse.json({ error: employeeError?.message ?? 'Employee not found' }, { status: 404 })
+  }
+
+  try {
+    if (await hasOverlappingClockRecord({ employeeId: employee_id, sessionDate: session_date, clockInAt: clock_in_at, clockOutAt: clock_out_at })) {
+      return NextResponse.json({ error: 'This employee already has clock hours that overlap this time range.' }, { status: 409 })
+    }
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to check overlapping clock records' }, { status: 500 })
   }
 
   const nowIso = new Date().toISOString()
@@ -699,6 +741,21 @@ export async function PATCH(req: NextRequest) {
   }
   if (nextClockOutAt && new Date(nextClockOutAt).getTime() <= new Date(nextClockInAt).getTime()) {
     return NextResponse.json({ error: 'Clock out must be after clock in' }, { status: 400 })
+  }
+  if (nextClockOutAt) {
+    try {
+      if (await hasOverlappingClockRecord({
+        employeeId: existing.employee_id,
+        sessionDate: nextSessionDate,
+        clockInAt: nextClockInAt,
+        clockOutAt: nextClockOutAt,
+        ignoreId: id,
+      })) {
+        return NextResponse.json({ error: 'This edit overlaps another clock record for the same employee.' }, { status: 409 })
+      }
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to check overlapping clock records' }, { status: 500 })
+    }
   }
   if (Number.isNaN(nextMealBreak.minutes) || Number.isNaN(nextUnpaidBreak.minutes)) {
     return NextResponse.json({ error: 'Invalid break minutes' }, { status: 400 })
