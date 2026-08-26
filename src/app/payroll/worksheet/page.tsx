@@ -1498,8 +1498,9 @@ export default function WageWorksheetPage() {
                         size="sm"
                         className={breakReviewCount > 0 ? 'h-8 border-red-300 bg-red-50 text-red-700 hover:bg-red-100' : 'h-8'}
                         onClick={() => openBreakReview(row.employee_id)}
+                        title={worksheetMode === 'paid_view' ? 'View only. Edit paid breaktime from Payroll Payouts.' : undefined}
                       >
-                        {breakReviewCount > 0 ? `${breakReviewCount} Review` : 'View'}
+                        {worksheetMode === 'paid_view' ? 'View Only' : breakReviewCount > 0 ? `${breakReviewCount} Review` : 'View'}
                       </Button>
                     </TableCell>
                     <TableCell className="border-r p-1 text-right align-middle">
@@ -1568,6 +1569,11 @@ export default function WageWorksheetPage() {
                 <p className="font-semibold text-slate-950">{breakReviewRow.employee_name}</p>
                 <p className="text-xs text-muted-foreground">{startDate} to {endDate} | All clock records in this payroll period</p>
               </div>
+              {worksheetMode === 'paid_view' && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                  This payroll period is already paid. Breaktime review is view-only here; edit paid breaktime from Payroll Payouts.
+                </div>
+              )}
               <div className="overflow-x-auto rounded-lg border bg-white">
                 <Table className="min-w-[980px] text-xs">
                   <TableHeader>
@@ -1616,21 +1622,21 @@ export default function WageWorksheetPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Input className="h-8" type="time" value={edit.mealBreakStart} onChange={event => updateBreakEdit(record.id, { mealBreakStart: event.target.value })} />
+                            <Input className="h-8" type="time" value={edit.mealBreakStart} disabled={worksheetMode === 'paid_view'} onChange={event => updateBreakEdit(record.id, { mealBreakStart: event.target.value })} />
                           </TableCell>
                           <TableCell>
-                            <Input className="h-8" type="time" value={edit.mealBreakEnd} onChange={event => updateBreakEdit(record.id, { mealBreakEnd: event.target.value })} />
+                            <Input className="h-8" type="time" value={edit.mealBreakEnd} disabled={worksheetMode === 'paid_view'} onChange={event => updateBreakEdit(record.id, { mealBreakEnd: event.target.value })} />
                           </TableCell>
                           <TableCell>
-                            <Input className="h-8" type="time" value={edit.regularBreakStart} onChange={event => updateBreakEdit(record.id, { regularBreakStart: event.target.value })} />
+                            <Input className="h-8" type="time" value={edit.regularBreakStart} disabled={worksheetMode === 'paid_view'} onChange={event => updateBreakEdit(record.id, { regularBreakStart: event.target.value })} />
                           </TableCell>
                           <TableCell>
-                            <Input className="h-8" type="time" value={edit.regularBreakEnd} onChange={event => updateBreakEdit(record.id, { regularBreakEnd: event.target.value })} />
+                            <Input className="h-8" type="time" value={edit.regularBreakEnd} disabled={worksheetMode === 'paid_view'} onChange={event => updateBreakEdit(record.id, { regularBreakEnd: event.target.value })} />
                           </TableCell>
                           <TableCell className="text-right">{editedBreakMinutes}</TableCell>
                           <TableCell className="text-right">{editedHours.toFixed(2)}</TableCell>
                           <TableCell className="text-right">
-                            <Button size="sm" onClick={() => void saveBreakEdit(record)} disabled={savingBreakId === record.id}>
+                            <Button size="sm" onClick={() => void saveBreakEdit(record)} disabled={worksheetMode === 'paid_view' || savingBreakId === record.id}>
                               {savingBreakId === record.id ? 'Saving...' : 'Save'}
                             </Button>
                           </TableCell>
