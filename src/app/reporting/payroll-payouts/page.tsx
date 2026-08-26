@@ -509,6 +509,7 @@ export default function PayrollPayoutsReportPage() {
   const [adjustmentPaymentDirection, setAdjustmentPaymentDirection] = useState<AdjustmentPaymentDirection>('pay_out')
   const [itemEdits, setItemEdits] = useState<Record<string, Partial<PayrollRunItem>>>({})
   const [clockEdits, setClockEdits] = useState<Record<string, ClockEditState>>({})
+  const [balanceCalculated, setBalanceCalculated] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null)
@@ -558,6 +559,7 @@ export default function PayrollPayoutsReportPage() {
   const directionMatchesAdjustment = selectedAdjustment === 0 ||
     (selectedAdjustment > 0 && adjustmentPaymentDirection === 'pay_out') ||
     (selectedAdjustment < 0 && adjustmentPaymentDirection === 'receive_credit')
+  const hasClockTimeChanges = selectedClockRecords.some(record => clockEditChanged(record, clockEdits[record.id]))
 
   const openSummary = (runId: string) => {
     const run = payrollRuns.find(item => item.id === runId)
@@ -572,6 +574,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentDirection('pay_out')
     setTipImpactEmployeeIds(new Set())
     paymentPreloadKeyRef.current = ''
+    setBalanceCalculated(false)
     setEditing(false)
     setMessage(null)
   }
@@ -598,6 +601,7 @@ export default function PayrollPayoutsReportPage() {
       setAdjustmentPaymentDirection('pay_out')
       setTipImpactEmployeeIds(new Set())
       paymentPreloadKeyRef.current = ''
+      setBalanceCalculated(false)
       setEditing(false)
     }
   }, [payrollRuns])
@@ -624,6 +628,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentDirection('pay_out')
     setTipImpactEmployeeIds(new Set())
     paymentPreloadKeyRef.current = ''
+    setBalanceCalculated(false)
     setMemoEdit(selectedRun?.memo ?? '')
     setMessage(null)
   }
@@ -634,7 +639,8 @@ export default function PayrollPayoutsReportPage() {
   }
 
   const updateItemEdit = (item: PayrollRunItem, patch: Partial<PayrollRunItem>) => {
-    setItemEdits(current => ({ ...current, [item.id]: calculateSavedPayrollItem(item, { ...current[item.id], ...patch }, employees) }))
+    setBalanceCalculated(false)
+    setItemEdits(current => ({ ...current, [item.id]: { ...(current[item.id] ?? {}), ...patch } }))
   }
 
   const openEmployeeAdjustment = (item: PayrollRunItem) => {
@@ -646,6 +652,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentMethod('')
     setTipImpactEmployeeIds(new Set())
     paymentPreloadKeyRef.current = ''
+    setBalanceCalculated(false)
     setClockEdits(() => {
       if (!selectedRun || !item.employee_id) return {}
       const records = getEmployeeClockRecords({
@@ -665,6 +672,7 @@ export default function PayrollPayoutsReportPage() {
   }
 
   const updateClockEdit = (record: ShiftClock, patch: Partial<ClockEditState>) => {
+    setBalanceCalculated(false)
     setClockEdits(current => {
       const previous = current[record.id] ?? {
         clockIn: isoToTimeInput(record.clock_in_at),
@@ -681,27 +689,35 @@ export default function PayrollPayoutsReportPage() {
     })
   }
 
-  useEffect(() => {
-    if (!isIndividualMode || !selectedItem || !selectedOriginalItem || selectedClockRecords.length === 0) return
+  const calculateBalanceFromClockEdits = () => {
+    if (!isIndividualMode || !selectedOriginalItem || selectedClockRecords.length === 0) return
     const hasReadyEdits = selectedClockRecords.every(record => clockEdits[record.id])
     if (!hasReadyEdits) return
     const nextHours = normalizeMoney(selectedClockRecords.reduce((sum, record) => sum + getEditedClockHours(record, clockEdits[record.id]), 0))
     setItemEdits(current => {
       const currentPatch = current[selectedOriginalItem.id] ?? {}
       const currentHours = normalizeMoney(currentPatch.hours ?? selectedOriginalItem.hours)
-      if (currentHours === nextHours) return current
+      if (currentHours === nextHours) {
+        setBalanceCalculated(true)
+        return current
+      }
       return {
         ...current,
-        [selectedOriginalItem.id]: calculateSavedPayrollItem(selectedOriginalItem, {
+        [selectedOriginalItem.id]: {
           ...currentPatch,
           hours: nextHours,
-        }, employees),
+        },
       }
     })
-  }, [clockEdits, employees, isIndividualMode, selectedClockRecords, selectedItem, selectedOriginalItem])
+    setBalanceCalculated(true)
+  }
 
   const saveEdit = async () => {
     if (!selectedRun) return
+    if (hasClockTimeChanges && !balanceCalculated) {
+      setMessage('Click Calculate Balance after all clock changes before saving.')
+      return
+    }
     if (adjustmentPaymentValue > 0 && !adjustmentPaymentMethod) {
       setMessage('Choose how the balance was paid or credit was received, or leave the amount blank to save without payment.')
       return
@@ -762,7 +778,6 @@ export default function PayrollPayoutsReportPage() {
           adjustmentMemo.trim(),
         ].filter(Boolean).join(' ')
         : adjustmentMemo.trim()
-      const hasClockTimeChanges = selectedClockRecords.some(record => clockEditChanged(record, clockEdits[record.id]))
       let rowsForSave = editedItems
       const tipSyncNotices: string[] = []
       let tipDates: string[] = []
@@ -925,6 +940,7 @@ export default function PayrollPayoutsReportPage() {
       setSelectedEmployeeId('all')
       setSelectedRunId(null)
       paymentPreloadKeyRef.current = ''
+      setBalanceCalculated(false)
       setEditing(false)
       setMessage(null)
       setSaveResult({ success: true, title: 'Payroll payout saved', details: changedDetails })
@@ -1156,12 +1172,21 @@ export default function PayrollPayoutsReportPage() {
                       <SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="check">Check</SelectItem><SelectItem value="ach">ACH</SelectItem></SelectContent>
                     </Select>
                   </div>
-                  <div className="md:col-span-1 md:self-end"><Button className="h-9 w-full" onClick={() => void saveEdit()} disabled={saving || selectedAdjustment === 0}>{saving ? 'Saving...' : adjustmentPaymentDirection === 'receive_credit' ? 'Save Credit' : 'Save Payout'}</Button></div>
+                  <div className="md:col-span-1 md:self-end"><Button className="h-9 w-full" onClick={() => void saveEdit()} disabled={saving || selectedAdjustment === 0 || (hasClockTimeChanges && !balanceCalculated)}>{saving ? 'Saving...' : adjustmentPaymentDirection === 'receive_credit' ? 'Save Credit' : 'Save Payout'}</Button></div>
                   {!directionMatchesAdjustment && <div className="md:col-span-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{selectedAdjustment > 0 ? 'This is a balance due. Use Pay Out.' : 'This is credit/overpaid. Use Receive Credit.'}</div>}
                   <div className="md:col-span-4"><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Reason for correcting this paid payroll" /></div>
                 </div>
                 <div className="overflow-x-auto rounded-lg border bg-white">
-                  <div className="border-b bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-950">{selectedItem.employee_name} Time Records</div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 px-3 py-2">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-950">{selectedItem.employee_name} Time Records</div>
+                      {hasClockTimeChanges && !balanceCalculated && <div className="text-xs text-amber-700">Clock time changed. Calculate balance before saving.</div>}
+                      {hasClockTimeChanges && balanceCalculated && <div className="text-xs text-emerald-700">Balance calculated from all edited clock rows.</div>}
+                    </div>
+                    <Button variant={hasClockTimeChanges && !balanceCalculated ? 'default' : 'outline'} size="sm" onClick={calculateBalanceFromClockEdits} disabled={!hasClockTimeChanges || saving}>
+                      Calculate Balance
+                    </Button>
+                  </div>
                   <Table className="min-w-[900px] text-xs">
                     <TableHeader><TableRow className="bg-slate-50 hover:bg-slate-50"><TableHead>Date</TableHead><TableHead>Clock In</TableHead><TableHead>Clock Out</TableHead><TableHead>Meal Break</TableHead><TableHead>Regular Break</TableHead><TableHead className="text-right">Unpaid Min</TableHead><TableHead className="text-right">Worked Hours</TableHead><TableHead className="text-right">Daily Payout</TableHead></TableRow></TableHeader>
                     <TableBody>
@@ -1183,7 +1208,7 @@ export default function PayrollPayoutsReportPage() {
               {editing && (
                 <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-amber-900">This will replace existing saved payroll data and refresh reports/dashboard from the updated payout.</p>
-                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={closePayrollDialog} disabled={saving}>Cancel</Button><Button size="sm" onClick={() => void saveEdit()} disabled={saving}>{saving ? 'Saving...' : 'Save All Changes'}</Button></div>
+                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={closePayrollDialog} disabled={saving}>Cancel</Button><Button size="sm" onClick={() => void saveEdit()} disabled={saving || (hasClockTimeChanges && !balanceCalculated)}>{saving ? 'Saving...' : 'Save All Changes'}</Button></div>
                 </div>
               )}
             </div>
