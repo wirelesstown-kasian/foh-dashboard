@@ -52,9 +52,10 @@ export async function POST(req: NextRequest) {
 
     const appSettings = await getAppSettings()
     const emailSettings = appSettings
-    if (!emailSettings.wage_report_emails_enabled) {
-      return NextResponse.json({ success: true, skipped: true, reason: 'Wage report emails are disabled in Email Settings' })
+    if (!emailSettings.payroll_summary_emails_enabled) {
+      return NextResponse.json({ success: true, skipped: true, reason: 'Payroll summary emails are disabled in Email Settings' })
     }
+    const recipient = emailSettings.payroll_summary_email?.trim() || PAYROLL_SUMMARY_ADMIN_EMAIL
 
     const { data, error } = await supabaseAdmin
       .from('payroll_runs')
@@ -145,7 +146,7 @@ export async function POST(req: NextRequest) {
 
     await sendEmail({
       resendKey,
-      to: PAYROLL_SUMMARY_ADMIN_EMAIL,
+      to: recipient,
       subject: `Payroll Worksheet Summary - ${departmentLabel} - ${periodLabel}`,
       html,
       fromName: emailSettings.from_name,

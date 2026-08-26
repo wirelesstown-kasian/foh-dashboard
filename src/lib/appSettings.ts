@@ -13,9 +13,15 @@ export interface EmailSettings {
   schedule_default_send_time: string
   weekly_summary_emails_enabled: boolean
   weekly_summary_recipient: string
+  weekly_summary_send_day: string
+  weekly_summary_send_time: string
   wage_report_emails_enabled: boolean
+  payroll_summary_emails_enabled: boolean
+  payroll_summary_email: string
+  payroll_summary_send_timing: string
   announcement_event_emails_enabled: boolean
   announcement_event_email: string
+  eod_send_timing: string
 }
 
 export interface RoleDefinition {
@@ -73,9 +79,15 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   schedule_default_send_time: '21:00',
   weekly_summary_emails_enabled: true,
   weekly_summary_recipient: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
+  weekly_summary_send_day: 'monday',
+  weekly_summary_send_time: '09:00',
   wage_report_emails_enabled: true,
+  payroll_summary_emails_enabled: true,
+  payroll_summary_email: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
+  payroll_summary_send_timing: 'after_save',
   announcement_event_emails_enabled: true,
   announcement_event_email: process.env.EOD_REPORT_EMAIL ?? 'admin@newvillagepub.com',
+  eod_send_timing: 'manual',
   time_clock_announcement: '',
   announcement_events: [],
   role_definitions: [
@@ -112,6 +124,11 @@ function normalizeWeekday(value: unknown, fallback: string) {
 
 function normalizeTime(value: unknown, fallback: string) {
   return typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value.trim()) ? value.trim() : fallback
+}
+
+function normalizeTiming(value: unknown, fallback: string) {
+  if (value === 'manual' || value === 'after_save') return value
+  return fallback
 }
 
 function normalizeOptionalString(value: unknown) {
@@ -229,6 +246,7 @@ export async function getAppSettings(): Promise<AppSettings> {
       row.key === 'queued_schedule_emails_enabled' ||
       row.key === 'weekly_summary_emails_enabled' ||
       row.key === 'wage_report_emails_enabled' ||
+      row.key === 'payroll_summary_emails_enabled' ||
       row.key === 'announcement_event_emails_enabled'
     ) {
       settings[row.key] = normalizeBoolean(row.value, settings[row.key])
@@ -238,8 +256,17 @@ export async function getAppSettings(): Promise<AppSettings> {
       settings.schedule_default_send_day = normalizeWeekday(row.value, settings.schedule_default_send_day)
       continue
     }
-    if (row.key === 'schedule_default_send_time') {
-      settings.schedule_default_send_time = normalizeTime(row.value, settings.schedule_default_send_time)
+    if (row.key === 'weekly_summary_send_day') {
+      settings.weekly_summary_send_day = normalizeWeekday(row.value, settings.weekly_summary_send_day)
+      continue
+    }
+    if (row.key === 'schedule_default_send_time' || row.key === 'weekly_summary_send_time') {
+      if (row.key === 'schedule_default_send_time') settings.schedule_default_send_time = normalizeTime(row.value, settings.schedule_default_send_time)
+      if (row.key === 'weekly_summary_send_time') settings.weekly_summary_send_time = normalizeTime(row.value, settings.weekly_summary_send_time)
+      continue
+    }
+    if (row.key === 'eod_send_timing' || row.key === 'payroll_summary_send_timing') {
+      settings[row.key] = normalizeTiming(row.value, settings[row.key])
       continue
     }
     settings[row.key] = normalizeString(row.value, settings[row.key])
@@ -263,9 +290,15 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     schedule_default_send_time: settings.schedule_default_send_time,
     weekly_summary_emails_enabled: settings.weekly_summary_emails_enabled,
     weekly_summary_recipient: settings.weekly_summary_recipient,
+    weekly_summary_send_day: settings.weekly_summary_send_day,
+    weekly_summary_send_time: settings.weekly_summary_send_time,
     wage_report_emails_enabled: settings.wage_report_emails_enabled,
+    payroll_summary_emails_enabled: settings.payroll_summary_emails_enabled,
+    payroll_summary_email: settings.payroll_summary_email,
+    payroll_summary_send_timing: settings.payroll_summary_send_timing,
     announcement_event_emails_enabled: settings.announcement_event_emails_enabled,
     announcement_event_email: settings.announcement_event_email,
+    eod_send_timing: settings.eod_send_timing,
   }
 }
 

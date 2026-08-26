@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { MailCheck } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { CalendarClock, MailCheck, Send, Users } from 'lucide-react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,9 +33,15 @@ const EMPTY_SETTINGS: SettingsForm = {
   schedule_default_send_time: '21:00',
   weekly_summary_emails_enabled: true,
   weekly_summary_recipient: '',
+  weekly_summary_send_day: 'monday',
+  weekly_summary_send_time: '09:00',
   wage_report_emails_enabled: true,
+  payroll_summary_emails_enabled: true,
+  payroll_summary_email: '',
+  payroll_summary_send_timing: 'after_save',
   announcement_event_emails_enabled: true,
   announcement_event_email: '',
+  eod_send_timing: 'manual',
   time_clock_announcement: '',
 }
 
@@ -46,6 +53,16 @@ const WEEKDAY_OPTIONS = [
   { value: 'thursday', label: 'Thursday' },
   { value: 'friday', label: 'Friday' },
   { value: 'saturday', label: 'Saturday' },
+]
+
+const EOD_SEND_TIMING_OPTIONS = [
+  { value: 'manual', label: 'Manual button' },
+  { value: 'after_save', label: 'After EOD save' },
+]
+
+const PAYROLL_SEND_TIMING_OPTIONS = [
+  { value: 'after_save', label: 'After worksheet save' },
+  { value: 'manual', label: 'Manual only' },
 ]
 
 function BooleanSelect({
@@ -65,6 +82,37 @@ function BooleanSelect({
         <SelectItem value="disabled">Disabled</SelectItem>
       </SelectContent>
     </Select>
+  )
+}
+
+function FieldNote({ children }: { children: ReactNode }) {
+  return <p className="mt-1 text-xs text-muted-foreground">{children}</p>
+}
+
+function SettingsSection({
+  title,
+  description,
+  icon,
+  children,
+}: {
+  title: string
+  description: string
+  icon: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-lg border bg-white p-4 shadow-sm sm:p-5">
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+          {icon}
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-slate-950">{title}</h2>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -130,18 +178,9 @@ export default function EmailSettingsPage() {
       {loading ? (
         <p className="text-muted-foreground">Loading email settings…</p>
       ) : (
-        <div className="space-y-6">
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
-                <MailCheck className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold">Sender</h2>
-                <p className="text-sm text-muted-foreground">These values are used across EOD, schedule, and wage emails.</p>
-              </div>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-4">
+          <SettingsSection title="Sender" description="Default identity for every system email." icon={<MailCheck className="h-5 w-5" />}>
+            <div className="grid gap-4 md:grid-cols-3">
               <div>
                 <Label>From Name</Label>
                 <Input value={settings.from_name} onChange={(event) => setSettings((prev) => ({ ...prev, from_name: event.target.value }))} className="mt-1" />
@@ -154,118 +193,143 @@ export default function EmailSettingsPage() {
                 <Label>Reply-To Email</Label>
                 <Input value={settings.reply_to} onChange={(event) => setSettings((prev) => ({ ...prev, reply_to: event.target.value }))} className="mt-1" />
               </div>
-              <div>
-                <Label>EOD Summary Recipient</Label>
-                <Input value={settings.eod_report_email} onChange={(event) => setSettings((prev) => ({ ...prev, eod_report_email: event.target.value }))} className="mt-1" />
-              </div>
             </div>
-          </div>
+          </SettingsSection>
 
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Time Clock Announcement</h2>
-            <p className="mt-1 text-sm text-muted-foreground">This appears on the clock-in screen above the clock action buttons.</p>
-            <div className="mt-4">
-              <Label>Announcement</Label>
-              <Textarea
-                value={settings.time_clock_announcement}
-                onChange={(event) => setSettings((prev) => ({ ...prev, time_clock_announcement: event.target.value }))}
-                className="mt-1 min-h-24"
-                placeholder="Example: Patio section open tonight. Check with manager before breaks."
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Automatic Emails</h2>
-            <p className="mt-1 text-sm text-muted-foreground">These are the emails that go out without someone pressing a send button.</p>
-            <div className="mt-4 space-y-4">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="font-semibold">Queued Schedule Emails</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Sent automatically to scheduled employees when a published schedule is queued instead of sent immediately.</p>
-                  </div>
-                  <div className="w-40">
-                    <Label>Auto Send</Label>
-                    <div className="mt-1">
-                      <BooleanSelect value={settings.queued_schedule_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, queued_schedule_emails_enabled: nextValue }))} />
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div>
-                    <Label>Default Queue Day</Label>
-                    <div className="mt-1">
-                      <Select value={settings.schedule_default_send_day} onValueChange={(nextValue: string | null) => setSettings((prev) => ({ ...prev, schedule_default_send_day: nextValue ?? prev.schedule_default_send_day }))}>
-                        <SelectTrigger>
-                          <span>{WEEKDAY_OPTIONS.find((option) => option.value === settings.schedule_default_send_day)?.label ?? 'Select day'}</span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {WEEKDAY_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div>
-                    <Label>Default Queue Time</Label>
-                    <Input type="time" value={settings.schedule_default_send_time} onChange={(event) => setSettings((prev) => ({ ...prev, schedule_default_send_time: event.target.value }))} className="mt-1" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="font-semibold">Weekly Summary Email</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Automatic Tuesday-Sunday summary that currently goes out on the deployed Monday morning cron.</p>
-                  </div>
-                  <div className="w-40">
-                    <Label>Auto Send</Label>
-                    <div className="mt-1">
-                      <BooleanSelect value={settings.weekly_summary_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, weekly_summary_emails_enabled: nextValue }))} />
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <Label>Summary Recipient</Label>
-                  <Input value={settings.weekly_summary_recipient} onChange={(event) => setSettings((prev) => ({ ...prev, weekly_summary_recipient: event.target.value }))} className="mt-1" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold">Triggers</h2>
-            <p className="mt-1 text-sm text-muted-foreground">These apply when someone manually sends a report or schedule from the dashboard.</p>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <SettingsSection title="EOD Emails" description="Admin EOD summary and employee tip email controls." icon={<Send className="h-5 w-5" />}>
+            <div className="grid gap-4 md:grid-cols-4">
               <div>
-                <Label>EOD Tip Emails</Label>
-                <div className="mt-1">
-                  <BooleanSelect value={settings.eod_tip_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, eod_tip_emails_enabled: nextValue }))} />
-                </div>
-              </div>
-              <div>
-                <Label>EOD Admin Summary</Label>
+                <Label>Admin Summary</Label>
                 <div className="mt-1">
                   <BooleanSelect value={settings.eod_admin_summary_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, eod_admin_summary_enabled: nextValue }))} />
                 </div>
               </div>
               <div>
-                <Label>Schedule Emails</Label>
+                <Label>Tip Emails</Label>
                 <div className="mt-1">
-                  <BooleanSelect value={settings.schedule_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, schedule_emails_enabled: nextValue }))} />
+                  <BooleanSelect value={settings.eod_tip_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, eod_tip_emails_enabled: nextValue }))} />
                 </div>
               </div>
               <div>
-                <Label>Wage Report Emails</Label>
+                <Label>Send Timing</Label>
+                <div className="mt-1">
+                  <Select value={settings.eod_send_timing} onValueChange={(nextValue: string | null) => setSettings((prev) => ({ ...prev, eod_send_timing: nextValue ?? prev.eod_send_timing }))}>
+                    <SelectTrigger><span>{EOD_SEND_TIMING_OPTIONS.find((option) => option.value === settings.eod_send_timing)?.label ?? 'Manual button'}</span></SelectTrigger>
+                    <SelectContent>{EOD_SEND_TIMING_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <FieldNote>Manual keeps the current review-before-send flow.</FieldNote>
+              </div>
+              <div>
+                <Label>EOD Summary Recipient</Label>
+                <Input value={settings.eod_report_email} onChange={(event) => setSettings((prev) => ({ ...prev, eod_report_email: event.target.value }))} className="mt-1" />
+              </div>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Payroll Emails" description="Worksheet summary and wage report delivery." icon={<Users className="h-5 w-5" />}>
+            <div className="grid gap-4 md:grid-cols-5">
+              <div>
+                <Label>Payroll Summary</Label>
+                <div className="mt-1">
+                  <BooleanSelect value={settings.payroll_summary_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, payroll_summary_emails_enabled: nextValue }))} />
+                </div>
+              </div>
+              <div>
+                <Label>Wage Reports</Label>
                 <div className="mt-1">
                   <BooleanSelect value={settings.wage_report_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, wage_report_emails_enabled: nextValue }))} />
                 </div>
               </div>
               <div>
-                <Label>Announcement Event Emails</Label>
+                <Label>Send Timing</Label>
+                <div className="mt-1">
+                  <Select value={settings.payroll_summary_send_timing} onValueChange={(nextValue: string | null) => setSettings((prev) => ({ ...prev, payroll_summary_send_timing: nextValue ?? prev.payroll_summary_send_timing }))}>
+                    <SelectTrigger><span>{PAYROLL_SEND_TIMING_OPTIONS.find((option) => option.value === settings.payroll_summary_send_timing)?.label ?? 'After worksheet save'}</span></SelectTrigger>
+                    <SelectContent>{PAYROLL_SEND_TIMING_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <Label>Payroll Summary Recipient</Label>
+                <Input value={settings.payroll_summary_email} onChange={(event) => setSettings((prev) => ({ ...prev, payroll_summary_email: event.target.value }))} className="mt-1" />
+                <FieldNote>Used when payroll worksheet summary is emailed.</FieldNote>
+              </div>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Schedule Emails" description="Immediate schedule sends and queued schedule defaults." icon={<CalendarClock className="h-5 w-5" />}>
+            <div className="grid gap-4 md:grid-cols-4">
+              <div>
+                <Label>Manual Send</Label>
+                <div className="mt-1">
+                  <BooleanSelect value={settings.schedule_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, schedule_emails_enabled: nextValue }))} />
+                </div>
+              </div>
+              <div>
+                <Label>Queued Send</Label>
+                <div className="mt-1">
+                  <BooleanSelect value={settings.queued_schedule_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, queued_schedule_emails_enabled: nextValue }))} />
+                </div>
+              </div>
+              <div>
+                <Label>Default Queue Day</Label>
+                <div className="mt-1">
+                  <Select value={settings.schedule_default_send_day} onValueChange={(nextValue: string | null) => setSettings((prev) => ({ ...prev, schedule_default_send_day: nextValue ?? prev.schedule_default_send_day }))}>
+                    <SelectTrigger><span>{WEEKDAY_OPTIONS.find((option) => option.value === settings.schedule_default_send_day)?.label ?? 'Select day'}</span></SelectTrigger>
+                    <SelectContent>{WEEKDAY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <Label>Default Queue Time</Label>
+                <Input type="time" value={settings.schedule_default_send_time} onChange={(event) => setSettings((prev) => ({ ...prev, schedule_default_send_time: event.target.value }))} className="mt-1" />
+              </div>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Weekly Summary" description="Weekly management summary settings." icon={<CalendarClock className="h-5 w-5" />}>
+            <div className="grid gap-4 md:grid-cols-4">
+              <div>
+                <Label>Weekly Email</Label>
+                <div className="mt-1">
+                  <BooleanSelect value={settings.weekly_summary_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, weekly_summary_emails_enabled: nextValue }))} />
+                </div>
+              </div>
+              <div>
+                <Label>Send Day</Label>
+                <div className="mt-1">
+                  <Select value={settings.weekly_summary_send_day} onValueChange={(nextValue: string | null) => setSettings((prev) => ({ ...prev, weekly_summary_send_day: nextValue ?? prev.weekly_summary_send_day }))}>
+                    <SelectTrigger><span>{WEEKDAY_OPTIONS.find((option) => option.value === settings.weekly_summary_send_day)?.label ?? 'Select day'}</span></SelectTrigger>
+                    <SelectContent>{WEEKDAY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <FieldNote>Vercel cron currently controls exact delivery.</FieldNote>
+              </div>
+              <div>
+                <Label>Send Time</Label>
+                <Input type="time" value={settings.weekly_summary_send_time} onChange={(event) => setSettings((prev) => ({ ...prev, weekly_summary_send_time: event.target.value }))} className="mt-1" />
+              </div>
+              <div>
+                <Label>Recipient</Label>
+                <Input value={settings.weekly_summary_recipient} onChange={(event) => setSettings((prev) => ({ ...prev, weekly_summary_recipient: event.target.value }))} className="mt-1" />
+              </div>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Announcements" description="Time clock announcement text and event email notifications." icon={<Send className="h-5 w-5" />}>
+            <div className="grid gap-4 md:grid-cols-[1fr_180px_1fr]">
+              <div>
+                <Label>Clock-In Announcement</Label>
+                <Textarea
+                  value={settings.time_clock_announcement}
+                  onChange={(event) => setSettings((prev) => ({ ...prev, time_clock_announcement: event.target.value }))}
+                  className="mt-1 min-h-24"
+                  placeholder="Example: Patio section open tonight. Check with manager before breaks."
+                />
+              </div>
+              <div>
+                <Label>Event Emails</Label>
                 <div className="mt-1">
                   <BooleanSelect value={settings.announcement_event_emails_enabled} onChange={(nextValue) => setSettings((prev) => ({ ...prev, announcement_event_emails_enabled: nextValue }))} />
                 </div>
@@ -275,7 +339,7 @@ export default function EmailSettingsPage() {
                 <Input value={settings.announcement_event_email} onChange={(event) => setSettings((prev) => ({ ...prev, announcement_event_email: event.target.value }))} className="mt-1" />
               </div>
             </div>
-          </div>
+          </SettingsSection>
 
           {(error || saved) && (
             <div className={`rounded-xl border px-3 py-2 text-sm ${error ? 'border-red-200 bg-red-50 text-red-600' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>

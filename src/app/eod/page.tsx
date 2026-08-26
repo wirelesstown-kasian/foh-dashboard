@@ -175,6 +175,7 @@ export default function EodPage() {
   const [submitting, setSubmitting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [eodSendTiming, setEodSendTiming] = useState('manual')
   const [currentReportId, setCurrentReportId] = useState<string | null>(null)
   const [submissionComplete, setSubmissionComplete] = useState(false)
   const [managerOverride, setManagerOverride] = useState(false)
@@ -279,7 +280,7 @@ export default function EodPage() {
       }
     }
 
-    const [sessRes, empRes, eodRes, clockRes, appSessionRes] = await Promise.all([
+    const [sessRes, empRes, eodRes, clockRes, appSessionRes, appSettingsRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
       loadEmployees(),
       supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
@@ -289,9 +290,13 @@ export default function EodPage() {
       fetch('/api/app-session', { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { can_manage_admin?: boolean }
       )),
+      fetch('/api/org-settings', { cache: 'no-store' }).then(async res => (
+        res.ok ? (await res.json().catch(() => ({}))) as { eod_send_timing?: string } : {}
+      )),
     ])
     setSession(sessRes.data ?? null)
     setAppCanManageAdmin(appSessionRes.can_manage_admin === true)
+    setEodSendTiming(appSettingsRes.eod_send_timing === 'after_save' ? 'after_save' : 'manual')
     setStartingCash(Number(sessRes.data?.starting_cash ?? 0))
     setEmployees(empRes.data ?? [])
     setClockRecords(clockRes.records ?? [])
@@ -638,6 +643,9 @@ export default function EodPage() {
       setCurrentReportId(reportId)
       setSubmissionComplete(false)
       setShowConfirm(true)
+      if (eodSendTiming === 'after_save') {
+        await sendEodEmails(reportId)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save EOD.'
       setSaveError(message)
@@ -654,14 +662,13 @@ export default function EodPage() {
     void handleSave()
   }
 
-  const handleSubmit = async () => {
-    if (!currentReportId) return
+  const sendEodEmails = async (reportId: string) => {
     setSubmitting(true)
     try {
       const res = await fetch('/api/send-eod-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eod_report_id: currentReportId }),
+        body: JSON.stringify({ eod_report_id: reportId }),
       })
       const data = await res.json().catch(() => ({})) as { success?: boolean; sent?: number; errors?: string[]; error?: string }
       if (res.status >= 500 || (!res.ok && res.status !== 207)) {
@@ -680,6 +687,11 @@ export default function EodPage() {
       setSubmitResult({ success: false, message })
     }
     setSubmitting(false)
+  }
+
+  const handleSubmit = async () => {
+    if (!currentReportId) return
+    await sendEodEmails(currentReportId)
   }
 
   const handleManagerUnlock = async (pin: string) => {
