@@ -299,7 +299,15 @@ export async function PATCH(req: NextRequest) {
       cashEntryId = cashEntry?.id ?? null
     }
 
-    return NextResponse.json({ run_id: payload.run_id, cash_entry_id: cashEntryId })
+    const { data: updatedRun, error: updatedRunError } = await supabaseAdmin
+      .from('payroll_runs')
+      .select('*, payroll_run_items(*)')
+      .eq('id', payload.run_id)
+      .single()
+
+    if (updatedRunError) return NextResponse.json({ error: updatedRunError.message }, { status: 500 })
+
+    return NextResponse.json({ run_id: payload.run_id, cash_entry_id: cashEntryId, payroll_run: updatedRun })
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, 'Failed to update payroll payout') },

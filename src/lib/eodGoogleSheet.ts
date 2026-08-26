@@ -101,9 +101,9 @@ async function getSpreadsheetSheetTitles(config: GoogleSheetsConfig, accessToken
 
 async function getSpreadsheetSheets(config: GoogleSheetsConfig, accessToken: string) {
   const metadata = await googleSheetsRequest<{
-    sheets?: Array<{ properties?: { sheetId?: number; title?: string } }>
+    sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { columnCount?: number } } }>
   }>(
-    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?fields=sheets.properties(sheetId,title)`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`,
     accessToken,
   )
 
@@ -111,8 +111,9 @@ async function getSpreadsheetSheets(config: GoogleSheetsConfig, accessToken: str
     .map(sheet => ({
       sheetId: sheet.properties?.sheetId,
       title: sheet.properties?.title,
+      columnCount: sheet.properties?.gridProperties?.columnCount,
     }))
-    .filter((sheet): sheet is { sheetId: number; title: string } => typeof sheet.sheetId === 'number' && typeof sheet.title === 'string')
+    .filter((sheet): sheet is { sheetId: number; title: string; columnCount: number | undefined } => typeof sheet.sheetId === 'number' && typeof sheet.title === 'string')
 }
 
 async function ensureSheetExists(config: GoogleSheetsConfig, accessToken: string, sheetName: string) {
@@ -149,6 +150,35 @@ async function resolveSheetName(config: GoogleSheetsConfig, accessToken: string,
   }
 
   return ensureSheetExists(config, accessToken, preferredSheetName)
+}
+
+async function ensureSheetColumnCount(config: GoogleSheetsConfig, accessToken: string, sheetName: string, minColumnCount: number) {
+  const sheets = await getSpreadsheetSheets(config, accessToken)
+  const sheet = sheets.find(candidate => candidate.title === sheetName)
+  if (!sheet || Number(sheet.columnCount ?? 0) >= minColumnCount) return
+
+  await googleSheetsRequest(
+    `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}:batchUpdate`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        requests: [
+          {
+            updateSheetProperties: {
+              properties: {
+                sheetId: sheet.sheetId,
+                gridProperties: {
+                  columnCount: minColumnCount,
+                },
+              },
+              fields: 'gridProperties.columnCount',
+            },
+          },
+        ],
+      }),
+    }
+  )
 }
 
 type EodSheetReport = EodReport & { closed_by?: { name?: string | null } | null }
@@ -279,6 +309,7 @@ function buildPayrollSheetRow(run: PayrollSheetRun, item: PayrollRunItem) {
 
 async function ensurePayrollSheetHeaders(config: GoogleSheetsConfig, accessToken: string) {
   const resolvedSheetName = await resolveSheetName(config, accessToken, config.payrollSheetName, ['Payroll'])
+  await ensureSheetColumnCount(config, accessToken, resolvedSheetName, PAYROLL_SHEET_HEADERS.length)
   const encodedSheetName = getEncodedSheetRangePrefix(resolvedSheetName)
   const baseUrl = `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values`
   const headerRange = `${encodedSheetName}!A1:AF1`

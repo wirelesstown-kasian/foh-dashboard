@@ -420,7 +420,7 @@ export default function PayrollPayoutsReportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ run_id: selectedRun.id, memo: memoEdit, rows: rowsForSave }),
       })
-      const payload = (await res.json().catch(() => ({}))) as { error?: string; cash_entry_id?: string | null }
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; cash_entry_id?: string | null; payroll_run?: SavedPayrollRun }
       if (!res.ok) throw new Error(payload.error ?? 'Failed to update payroll payout.')
       const totals = getPayrollTotals(rowsForSave.map(item => ({
         payment_method: item.payment_method ?? '',
@@ -429,18 +429,20 @@ export default function PayrollPayoutsReportPage() {
         deductions: Number(item.deductions ?? 0),
         net_pay: Number(item.net_pay ?? 0),
       })))
-      setPayrollRuns(currentRuns => currentRuns.map(run => run.id === selectedRun.id ? {
-        ...run,
-        memo: memoEdit.trim() || null,
-        total_cash: totals.cash,
-        total_check: totals.check,
-        total_ach: totals.ach,
-        total_gross: totals.gross,
-        total_deductions: totals.deductions,
-        total_net: totals.net,
-            updated_at: new Date().toISOString(),
-        payroll_run_items: rowsForSave,
-      } : run))
+      setPayrollRuns(currentRuns => currentRuns.map(run => run.id === selectedRun.id ? (
+        payload.payroll_run ?? {
+          ...run,
+          memo: memoEdit.trim() || null,
+          total_cash: totals.cash,
+          total_check: totals.check,
+          total_ach: totals.ach,
+          total_gross: totals.gross,
+          total_deductions: totals.deductions,
+          total_net: totals.net,
+          updated_at: new Date().toISOString(),
+          payroll_run_items: rowsForSave,
+        }
+      ) : run))
       if (editedClockRecords.length > 0) {
         setClockRecords(current => current.map(record => editedClockRecords.find(next => next.id === record.id) ?? record))
       }
