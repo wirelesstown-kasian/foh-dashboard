@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { ReportingNav } from '@/components/reporting/ReportingNav'
@@ -160,6 +160,98 @@ function appendMemo(existing: string | null | undefined, note: string) {
   if (!trimmedNote) return trimmedExisting || null
   if (trimmedExisting?.includes(trimmedNote)) return trimmedExisting
   return [trimmedExisting, trimmedNote].filter(Boolean).join(' | ')
+}
+
+function formatBalanceCurrency(value: number) {
+  const normalized = normalizeMoney(value)
+  if (normalized < 0) return `(${formatCurrency(Math.abs(normalized))})`
+  return formatCurrency(normalized)
+}
+
+function formatRemainingBalance(adjustment: number, remaining: number) {
+  if (remaining <= 0) return formatCurrency(0)
+  return adjustment < 0 ? formatBalanceCurrency(-remaining) : formatBalanceCurrency(remaining)
+}
+
+function moneyChanged(left: unknown, right: unknown) {
+  return normalizeMoney(left) !== normalizeMoney(right)
+}
+
+function getPayrollChangeDetails({
+  originalItem,
+  updatedItem,
+  selectedClockRecords,
+  clockEdits,
+  adjustment,
+  adjustmentPaymentAmount,
+  adjustmentPaymentMethod,
+  adjustmentPaymentDirection,
+  adjustmentRemaining,
+  tipDates,
+  tipEmployeeCount,
+  sheetNotice,
+  cashNotice,
+}: {
+  originalItem: PayrollRunItem | null
+  updatedItem: PayrollRunItem | null
+  selectedClockRecords: ShiftClock[]
+  clockEdits: Record<string, ClockEditState>
+  adjustment: number
+  adjustmentPaymentAmount: number
+  adjustmentPaymentMethod: PaymentMethod | ''
+  adjustmentPaymentDirection: AdjustmentPaymentDirection
+  adjustmentRemaining: number
+  tipDates: string[]
+  tipEmployeeCount: number
+  sheetNotice: string | null
+  cashNotice: string | null
+}) {
+  const details: string[] = []
+  if (originalItem && updatedItem) {
+    details.push(`${updatedItem.employee_name}`)
+    if ((originalItem.payment_method ?? '') !== (updatedItem.payment_method ?? '')) {
+      details.push(`Paid By: ${paymentMethodLabel(originalItem.payment_method)} -> ${paymentMethodLabel(updatedItem.payment_method)}`)
+    }
+    if (moneyChanged(originalItem.hours, updatedItem.hours)) {
+      details.push(`Hours: ${Number(originalItem.hours ?? 0).toFixed(2)} -> ${Number(updatedItem.hours ?? 0).toFixed(2)}`)
+    }
+    if (moneyChanged(originalItem.tips, updatedItem.tips)) {
+      details.push(`Tips: ${formatCurrency(Number(originalItem.tips ?? 0))} -> ${formatCurrency(Number(updatedItem.tips ?? 0))}`)
+    }
+    if (moneyChanged(originalItem.base_wages, updatedItem.base_wages)) {
+      details.push(`Base Wages: ${formatCurrency(Number(originalItem.base_wages ?? 0))} -> ${formatCurrency(Number(updatedItem.base_wages ?? 0))}`)
+    }
+    if (moneyChanged(originalItem.guarantee_top_up, updatedItem.guarantee_top_up)) {
+      details.push(`Top-Up: ${formatCurrency(Number(originalItem.guarantee_top_up ?? 0))} -> ${formatCurrency(Number(updatedItem.guarantee_top_up ?? 0))}`)
+    }
+    if (moneyChanged(originalItem.commission, updatedItem.commission)) {
+      details.push(`Commission: ${formatCurrency(Number(originalItem.commission ?? 0))} -> ${formatCurrency(Number(updatedItem.commission ?? 0))}`)
+    }
+    if (moneyChanged(originalItem.deductions, updatedItem.deductions)) {
+      details.push(`Deductions: ${formatCurrency(Number(originalItem.deductions ?? 0))} -> ${formatCurrency(Number(updatedItem.deductions ?? 0))}`)
+    }
+    if (moneyChanged(originalItem.payout_amount, updatedItem.payout_amount)) {
+      details.push(`Payout: ${formatCurrency(Number(originalItem.payout_amount ?? 0))} -> ${formatCurrency(Number(updatedItem.payout_amount ?? 0))}`)
+    }
+  }
+  for (const record of selectedClockRecords) {
+    const edit = clockEdits[record.id]
+    if (!clockEditChanged(record, edit)) continue
+    details.push(`${record.session_date} Clock: ${formatTime(record.clock_in_at)}-${formatTime(record.clock_out_at)} -> ${edit.clockIn}-${edit.clockOut}`)
+  }
+  if (adjustment !== 0) {
+    details.push(`${adjustment > 0 ? 'Balance Due' : 'Credit / Overpaid'}: ${formatBalanceCurrency(adjustment)}`)
+  }
+  if (adjustmentPaymentAmount > 0) {
+    details.push(`${adjustmentPaymentDirection === 'receive_credit' ? 'Credit Received' : 'Paid Out'}: ${formatBalanceCurrency(adjustmentPaymentDirection === 'receive_credit' ? -adjustmentPaymentAmount : adjustmentPaymentAmount)} by ${paymentMethodLabel(adjustmentPaymentMethod)}`)
+    details.push(`Remaining: ${formatRemainingBalance(adjustment, adjustmentRemaining)}`)
+  }
+  if (tipDates.length > 0) {
+    details.push(`Tip Distribution: ${tipDates.join(', ')} (${tipEmployeeCount} employee${tipEmployeeCount === 1 ? '' : 's'} affected)`)
+  }
+  if (cashNotice) details.push(cashNotice)
+  if (sheetNotice) details.push(sheetNotice)
+  return details.length > 0 ? details : ['No payroll values changed.']
 }
 
 function calculateDailyPayout(row: Pick<PayrollRunItem, 'hours' | 'payout_amount'>, hours: number) {
@@ -414,12 +506,14 @@ export default function PayrollPayoutsReportPage() {
   const [adjustmentMemo, setAdjustmentMemo] = useState('')
   const [adjustmentPaymentAmount, setAdjustmentPaymentAmount] = useState('')
   const [adjustmentPaymentMethod, setAdjustmentPaymentMethod] = useState<PaymentMethod | ''>('')
+  const [adjustmentPaymentDirection, setAdjustmentPaymentDirection] = useState<AdjustmentPaymentDirection>('pay_out')
   const [itemEdits, setItemEdits] = useState<Record<string, Partial<PayrollRunItem>>>({})
   const [clockEdits, setClockEdits] = useState<Record<string, ClockEditState>>({})
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null)
   const [tipImpactEmployeeIds, setTipImpactEmployeeIds] = useState<Set<string>>(new Set())
+  const urlRunHandledRef = useRef(false)
 
   const departmentOptions = useMemo(() => [
     { key: 'all', label: 'All' },
@@ -459,8 +553,10 @@ export default function PayrollPayoutsReportPage() {
     : 0
   const adjustmentPaymentValue = Math.max(0, normalizeMoney(adjustmentPaymentAmount))
   const adjustmentRemaining = normalizeMoney(Math.max(0, Math.abs(selectedAdjustment) - adjustmentPaymentValue))
-  const adjustmentDirection: AdjustmentPaymentDirection = selectedAdjustment >= 0 ? 'pay_out' : 'receive_credit'
   const isIndividualMode = selectedEmployeeId !== 'all' && !!selectedItem
+  const directionMatchesAdjustment = selectedAdjustment === 0 ||
+    (selectedAdjustment > 0 && adjustmentPaymentDirection === 'pay_out') ||
+    (selectedAdjustment < 0 && adjustmentPaymentDirection === 'receive_credit')
 
   const openSummary = (runId: string) => {
     const run = payrollRuns.find(item => item.id === runId)
@@ -472,15 +568,23 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentMemo('')
     setAdjustmentPaymentAmount('')
     setAdjustmentPaymentMethod('')
+    setAdjustmentPaymentDirection('pay_out')
     setTipImpactEmployeeIds(new Set())
     setEditing(false)
+    setMessage(null)
   }
 
   useEffect(() => {
+    if (urlRunHandledRef.current) return
     const params = new URLSearchParams(window.location.search)
     const runId = params.get('run')
+    if (!runId) {
+      urlRunHandledRef.current = true
+      return
+    }
     const run = payrollRuns.find(item => item.id === runId)
     if (run) {
+      urlRunHandledRef.current = true
       setSelectedRunId(run.id)
       setSelectedEmployeeId('all')
       setMemoEdit(run.memo ?? '')
@@ -489,10 +593,38 @@ export default function PayrollPayoutsReportPage() {
       setAdjustmentMemo('')
       setAdjustmentPaymentAmount('')
       setAdjustmentPaymentMethod('')
+      setAdjustmentPaymentDirection('pay_out')
       setTipImpactEmployeeIds(new Set())
       setEditing(false)
     }
   }, [payrollRuns])
+
+  useEffect(() => {
+    if (!isIndividualMode || !selectedItem) return
+    const nextAmount = Math.abs(selectedAdjustment)
+    setAdjustmentPaymentAmount(nextAmount > 0 ? nextAmount.toFixed(2) : '')
+    setAdjustmentPaymentDirection(selectedAdjustment < 0 ? 'receive_credit' : 'pay_out')
+    setAdjustmentPaymentMethod(selectedItem.payment_method ?? '')
+  }, [isIndividualMode, selectedAdjustment, selectedItem])
+
+  const returnToSummary = () => {
+    setSelectedEmployeeId('all')
+    setEditing(false)
+    setItemEdits({})
+    setClockEdits({})
+    setAdjustmentMemo('')
+    setAdjustmentPaymentAmount('')
+    setAdjustmentPaymentMethod('')
+    setAdjustmentPaymentDirection('pay_out')
+    setTipImpactEmployeeIds(new Set())
+    setMemoEdit(selectedRun?.memo ?? '')
+    setMessage(null)
+  }
+
+  const closePayrollDialog = () => {
+    returnToSummary()
+    setSelectedRunId(null)
+  }
 
   const updateItemEdit = (item: PayrollRunItem, patch: Partial<PayrollRunItem>) => {
     setItemEdits(current => ({ ...current, [item.id]: calculateSavedPayrollItem(item, { ...current[item.id], ...patch }, employees) }))
@@ -554,11 +686,15 @@ export default function PayrollPayoutsReportPage() {
   const saveEdit = async () => {
     if (!selectedRun) return
     if (adjustmentPaymentValue > 0 && !adjustmentPaymentMethod) {
-      setSaveResult({ success: false, title: 'Payment method required', details: ['Choose how the balance was paid or credit was received, or leave the amount blank to save without payment.'] })
+      setMessage('Choose how the balance was paid or credit was received, or leave the amount blank to save without payment.')
+      return
+    }
+    if (adjustmentPaymentValue > 0 && !directionMatchesAdjustment) {
+      setMessage(selectedAdjustment > 0 ? 'This change creates a balance due. Select Pay Out to record the payment.' : 'This change creates a credit/overpaid balance. Select Receive Credit to record the credit.')
       return
     }
     if (adjustmentPaymentValue > Math.abs(selectedAdjustment)) {
-      setSaveResult({ success: false, title: 'Adjustment amount is too high', details: ['The paid or credited amount cannot be greater than the balance/credit created by this correction.'] })
+      setMessage('The paid or credited amount cannot be greater than the balance/credit created by this correction.')
       return
     }
     setSaving(true)
@@ -603,15 +739,17 @@ export default function PayrollPayoutsReportPage() {
 
       const adjustmentNote = selectedItem && selectedAdjustment !== 0
         ? [
-          selectedAdjustment >= 0 ? `Balance due ${formatCurrency(Math.abs(selectedAdjustment))}.` : `Credit due ${formatCurrency(Math.abs(selectedAdjustment))}.`,
-          adjustmentPaymentValue > 0 ? `${adjustmentDirection === 'pay_out' ? 'Paid' : 'Credit received'} ${formatCurrency(adjustmentPaymentValue)} by ${paymentMethodLabel(adjustmentPaymentMethod)}.` : 'No adjustment payment recorded yet.',
-          adjustmentRemaining > 0 ? `Remaining ${formatCurrency(adjustmentRemaining)}.` : 'Adjustment settled.',
+          selectedAdjustment >= 0 ? `Balance due ${formatBalanceCurrency(selectedAdjustment)}.` : `Credit/overpaid ${formatBalanceCurrency(selectedAdjustment)}.`,
+          adjustmentPaymentValue > 0 ? `${adjustmentPaymentDirection === 'pay_out' ? 'Paid out' : 'Credit received'} ${formatBalanceCurrency(adjustmentPaymentDirection === 'receive_credit' ? -adjustmentPaymentValue : adjustmentPaymentValue)} by ${paymentMethodLabel(adjustmentPaymentMethod)}.` : 'No adjustment payment recorded yet.',
+          adjustmentRemaining > 0 ? `Remaining ${formatRemainingBalance(selectedAdjustment, adjustmentRemaining)}.` : 'Adjustment settled.',
           adjustmentMemo.trim(),
         ].filter(Boolean).join(' ')
         : adjustmentMemo.trim()
       const hasClockTimeChanges = selectedClockRecords.some(record => clockEditChanged(record, clockEdits[record.id]))
       let rowsForSave = editedItems
-      const tipNotices: string[] = []
+      const tipSyncNotices: string[] = []
+      let tipDates: string[] = []
+      let tipEmployeeCount = 0
       let tipDistributionUpdates: TipDistributionReplacement[] = []
       if (selectedItem && hasClockTimeChanges) {
         const recalculated = recalculateRowsForClockTimeChanges({
@@ -628,10 +766,9 @@ export default function PayrollPayoutsReportPage() {
         rowsForSave = recalculated.rows
         tipDistributionUpdates = recalculated.tipDistributionUpdates
         setTipImpactEmployeeIds(recalculated.affectedEmployeeIds)
-        if (recalculated.affectedDates.length > 0) {
-          tipNotices.push(`Tip redistribution recalculated for ${recalculated.affectedDates.join(', ')}.`)
-        }
-        tipNotices.push(...recalculated.warnings)
+        tipDates = recalculated.affectedDates
+        tipEmployeeCount = recalculated.affectedEmployeeIds.size
+        tipSyncNotices.push(...recalculated.warnings)
       } else if (selectedItem && (adjustmentNote || Object.keys(itemEdits[selectedItem.id] ?? {}).length > 0)) {
         rowsForSave = editedItems.map(item => item.id === selectedItem.id
           ? calculateSavedPayrollItem(item, { memo: appendMemo(item.memo, `Modified after payout. ${adjustmentNote}`) }, employees)
@@ -650,7 +787,7 @@ export default function PayrollPayoutsReportPage() {
             employee_name: selectedItem.employee_name,
             amount: adjustmentPaymentValue,
             method: adjustmentPaymentMethod || null,
-            direction: adjustmentDirection,
+            direction: adjustmentPaymentDirection,
             memo: adjustmentMemo.trim() || null,
           } : null,
         }),
@@ -681,11 +818,17 @@ export default function PayrollPayoutsReportPage() {
       if (editedClockRecords.length > 0) {
         setClockRecords(current => current.map(record => editedClockRecords.find(next => next.id === record.id) ?? record))
       }
-      const notices = ['Saved payroll payout updated. This replaced the existing payroll data.', ...tipNotices]
+      const savedSelectedItem = selectedItem ? rowsForSave.find(item => item.id === selectedItem.id) ?? selectedItem : null
+      const savedAdjustment = selectedOriginalItem && savedSelectedItem
+        ? normalizeMoney(Number(savedSelectedItem.payout_amount ?? 0) - Number(selectedOriginalItem.payout_amount ?? 0))
+        : selectedAdjustment
+      const savedAdjustmentRemaining = normalizeMoney(Math.max(0, Math.abs(savedAdjustment) - adjustmentPaymentValue))
+      let sheetNotice: string | null = null
+      let cashNotice: string | null = null
       for (const update of tipDistributionUpdates) {
         const deleteRows = await supabase.from('tip_distributions').delete().eq('eod_report_id', update.eod_report_id)
         if (deleteRows.error) {
-          notices.push(`Tip distribution sync failed: ${deleteRows.error.message}`)
+          tipSyncNotices.push(`Tip distribution sync failed: ${deleteRows.error.message}`)
           continue
         }
         try {
@@ -695,9 +838,8 @@ export default function PayrollPayoutsReportPage() {
               update.rows.map(row => ({ ...row, eod_report_id: update.eod_report_id }))
             )
           }
-          notices.push('Tip distribution records updated for EOD/reporting.')
         } catch (error) {
-          notices.push(`Tip distribution sync failed: ${error instanceof Error ? error.message : 'unknown error'}`)
+          tipSyncNotices.push(`Tip distribution sync failed: ${error instanceof Error ? error.message : 'unknown error'}`)
         }
       }
       const sheetSync = await fetch('/api/payroll-sheet-sync', {
@@ -707,20 +849,21 @@ export default function PayrollPayoutsReportPage() {
       })
       if (!sheetSync.ok) {
         const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
-        notices.push(`Google Sheets sync failed: ${sheetPayload.error ?? 'unknown error'}`)
+        sheetNotice = `Google Sheets: failed (${sheetPayload.error ?? 'unknown error'})`
       } else {
         const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { payroll?: { skipped?: boolean; reason?: string; sheetName?: string; updated?: number; appended?: number } }
         if (sheetPayload.payroll?.skipped) {
-          notices.push(`Google Sheets sync skipped: ${sheetPayload.payroll.reason ?? 'not configured.'}`)
+          sheetNotice = `Google Sheets: skipped (${sheetPayload.payroll.reason ?? 'not configured.'})`
         } else {
           const counts = [
             typeof sheetPayload.payroll?.appended === 'number' ? `${sheetPayload.payroll.appended} appended` : null,
             typeof sheetPayload.payroll?.updated === 'number' ? `${sheetPayload.payroll.updated} updated` : null,
           ].filter(Boolean).join(', ')
-          notices.push(`Google Sheets synced${sheetPayload.payroll?.sheetName ? ` (${sheetPayload.payroll.sheetName})` : ''}${counts ? `: ${counts}` : ''}.`)
+          sheetNotice = `Google Sheets: ${sheetPayload.payroll?.sheetName ?? 'Payroll'} synced${counts ? ` (${counts})` : ''}`
         }
       }
       if (payload.cash_entry_id) {
+        cashNotice = `${adjustmentPaymentDirection === 'receive_credit' ? 'Cash Credit' : 'Cash Payout'}: ${formatBalanceCurrency(adjustmentPaymentDirection === 'receive_credit' ? -adjustmentPaymentValue : adjustmentPaymentValue)} recorded`
         const cashSync = await fetch('/api/cash-balance-sheet-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -728,28 +871,48 @@ export default function PayrollPayoutsReportPage() {
         })
         if (!cashSync.ok) {
           const cashPayload = (await cashSync.json().catch(() => ({}))) as { error?: string }
-          notices.push(`Cash log Google Sheets sync failed: ${cashPayload.error ?? 'unknown error'}`)
+          cashNotice = `${cashNotice}; sheet sync failed (${cashPayload.error ?? 'unknown error'})`
         }
       }
       try {
         const refreshedRuns = await fetchPayrollRuns()
         setPayrollRuns(refreshedRuns)
       } catch (error) {
-        notices.push(error instanceof Error ? error.message : 'Payroll saved, but reload failed.')
+        tipSyncNotices.push(error instanceof Error ? error.message : 'Payroll saved, but reload failed.')
       }
+      const changedDetails = [
+        ...getPayrollChangeDetails({
+          originalItem: selectedOriginalItem,
+          updatedItem: savedSelectedItem,
+          selectedClockRecords,
+          clockEdits,
+          adjustment: savedAdjustment,
+          adjustmentPaymentAmount: adjustmentPaymentValue,
+          adjustmentPaymentMethod,
+          adjustmentPaymentDirection,
+          adjustmentRemaining: savedAdjustmentRemaining,
+          tipDates,
+          tipEmployeeCount,
+          sheetNotice,
+          cashNotice,
+        }),
+        ...tipSyncNotices,
+      ]
       notifyReportingDataChanged()
       setItemEdits({})
       setClockEdits({})
       setAdjustmentMemo('')
       setAdjustmentPaymentAmount('')
       setAdjustmentPaymentMethod('')
+      setAdjustmentPaymentDirection('pay_out')
+      setSelectedEmployeeId('all')
+      setSelectedRunId(null)
       setEditing(false)
-      setMessage(notices.join(' '))
-      setSaveResult({ success: true, title: 'Payroll payout saved', details: notices })
+      setMessage(null)
+      setSaveResult({ success: true, title: 'Payroll payout saved', details: changedDetails })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to update payroll payout.'
       setMessage(errorMessage)
-      setSaveResult({ success: false, title: 'Payroll payout was not saved', details: [errorMessage] })
     } finally {
       setSaving(false)
     }
@@ -828,18 +991,19 @@ export default function PayrollPayoutsReportPage() {
         </div>
       </div>
 
-      <Dialog open={!!selectedRun} onOpenChange={(open) => { if (!open) setSelectedRunId(null) }}>
+      <Dialog open={!!selectedRun} onOpenChange={(open) => { if (!open) closePayrollDialog() }}>
         <DialogContent className="w-[calc(100vw-2rem)] !max-w-6xl max-h-[90vh] overflow-y-auto p-6">
           <DialogHeader><DialogTitle>Saved Payroll Summary</DialogTitle></DialogHeader>
           {selectedRun && summary && (
             <div className="space-y-4">
+              {message && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">{message}</div>}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" disabled={selectedRunIndex < 0 || selectedRunIndex >= sortedRuns.length - 1} onClick={() => { const run = sortedRuns[selectedRunIndex + 1]; if (run) openSummary(run.id) }}>Previous</Button>
                   <Button variant="outline" size="sm" disabled={selectedRunIndex <= 0} onClick={() => { const run = sortedRuns[selectedRunIndex - 1]; if (run) openSummary(run.id) }}>Next</Button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {isIndividualMode && <Button variant="outline" size="sm" onClick={() => { setSelectedEmployeeId('all'); setEditing(false); setItemEdits({}); setClockEdits({}); setAdjustmentMemo(''); setAdjustmentPaymentAmount(''); setAdjustmentPaymentMethod(''); setTipImpactEmployeeIds(new Set()) }}>Back to Summary</Button>}
+                  {isIndividualMode && <Button variant="outline" size="sm" onClick={returnToSummary}>Back to Summary</Button>}
                   <Button variant="outline" size="sm" onClick={() => printSavedPayroll(selectedRun, editedItems, clockRecords, employees, schedules, departmentOptions.find(option => option.key === selectedRun.department)?.label ?? selectedRun.department)}>Reprint</Button>
                 </div>
               </div>
@@ -953,12 +1117,19 @@ export default function PayrollPayoutsReportPage() {
                 <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 md:grid-cols-4">
                   <div><div className="text-xs uppercase text-muted-foreground">Original Payout</div><div className="text-xl font-bold">{formatCurrency(Number(selectedOriginalItem?.payout_amount ?? 0))}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">Updated Payout</div><div className="text-xl font-bold">{formatCurrency(Number(selectedItem.payout_amount ?? 0))}</div></div>
-                  <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment >= 0 ? 'Balance Due' : 'Credit / Overpaid'}</div><div className={`text-xl font-bold ${selectedAdjustment >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(selectedAdjustment))}</div></div>
-                  <div><div className="text-xs uppercase text-muted-foreground">Remaining</div><div className="text-xl font-bold">{formatCurrency(adjustmentRemaining)}</div></div>
+                  <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment >= 0 ? 'Balance Due' : 'Credit / Overpaid'}</div><div className={`text-xl font-bold ${selectedAdjustment >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatBalanceCurrency(selectedAdjustment)}</div><div className="text-xs text-muted-foreground">{selectedAdjustment < 0 ? 'Negative means employee was overpaid.' : 'Positive means employee needs payout.'}</div></div>
+                  <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment < 0 ? 'Remaining Credit' : 'Remaining Balance'}</div><div className="text-xl font-bold">{formatRemainingBalance(selectedAdjustment, adjustmentRemaining)}</div></div>
                   {selectedAdjustment !== 0 && adjustmentRemaining > 0 && <div className="md:col-span-4 rounded-lg border border-amber-300 bg-amber-100 px-3 py-2 text-sm text-amber-950">This correction still has an unpaid balance or uncollected credit. You can still save it, and the payout summary memo will show the remaining amount.</div>}
                   <div>
-                    <Label>{selectedAdjustment >= 0 ? 'Amount Paid Now' : 'Credit Received Now'}</Label>
+                    <Label>{adjustmentPaymentDirection === 'receive_credit' ? 'Credit Received Now' : 'Amount Paid Now'}</Label>
                     <Input className="h-9 text-right" type="number" step="0.01" min="0" value={adjustmentPaymentAmount} onChange={event => setAdjustmentPaymentAmount(event.target.value)} placeholder="0.00" disabled={selectedAdjustment === 0} />
+                  </div>
+                  <div>
+                    <Label>Action</Label>
+                    <Select value={adjustmentPaymentDirection} onValueChange={(value: string | null) => value && setAdjustmentPaymentDirection(value as AdjustmentPaymentDirection)}>
+                      <SelectTrigger className={`h-9 ${directionMatchesAdjustment ? '' : 'border-red-400 bg-red-50'}`}><span>{adjustmentPaymentDirection === 'receive_credit' ? 'Receive Credit' : 'Pay Out'}</span></SelectTrigger>
+                      <SelectContent><SelectItem value="pay_out">Pay Out</SelectItem><SelectItem value="receive_credit">Receive Credit</SelectItem></SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label>Payment Method</Label>
@@ -967,7 +1138,9 @@ export default function PayrollPayoutsReportPage() {
                       <SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="check">Check</SelectItem><SelectItem value="ach">ACH</SelectItem></SelectContent>
                     </Select>
                   </div>
-                  <div className="md:col-span-2"><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Reason for correcting this paid payroll" /></div>
+                  <div className="md:col-span-1 md:self-end"><Button className="h-9 w-full" onClick={() => void saveEdit()} disabled={saving || selectedAdjustment === 0}>{saving ? 'Saving...' : adjustmentPaymentDirection === 'receive_credit' ? 'Save Credit' : 'Save Payout'}</Button></div>
+                  {!directionMatchesAdjustment && <div className="md:col-span-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{selectedAdjustment > 0 ? 'This is a balance due. Use Pay Out.' : 'This is credit/overpaid. Use Receive Credit.'}</div>}
+                  <div className="md:col-span-4"><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Reason for correcting this paid payroll" /></div>
                 </div>
                 <div className="overflow-x-auto rounded-lg border bg-white">
                   <div className="border-b bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-950">{selectedItem.employee_name} Time Records</div>
@@ -992,7 +1165,7 @@ export default function PayrollPayoutsReportPage() {
               {editing && (
                 <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-amber-900">This will replace existing saved payroll data and refresh reports/dashboard from the updated payout.</p>
-                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => { setEditing(false); setItemEdits({}); setClockEdits({}); setAdjustmentMemo(''); setAdjustmentPaymentAmount(''); setAdjustmentPaymentMethod(''); setTipImpactEmployeeIds(new Set()); setMemoEdit(selectedRun.memo ?? '') }} disabled={saving}>Cancel</Button><Button size="sm" onClick={() => void saveEdit()} disabled={saving}>{saving ? 'Saving...' : 'Save Replacement'}</Button></div>
+                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={closePayrollDialog} disabled={saving}>Cancel</Button><Button size="sm" onClick={() => void saveEdit()} disabled={saving}>{saving ? 'Saving...' : 'Save All Changes'}</Button></div>
                 </div>
               )}
             </div>
