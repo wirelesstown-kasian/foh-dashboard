@@ -57,6 +57,10 @@ function isPaymentMethod(value: unknown): value is PaymentMethod {
   return value === 'cash' || value === 'check' || value === 'ach'
 }
 
+function dateRangesOverlap(leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) {
+  return leftStart <= rightEnd && rightStart <= leftEnd
+}
+
 export async function GET() {
   const cookieStore = await cookies()
   if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
@@ -109,18 +113,19 @@ export async function POST(req: NextRequest) {
 
     const existingRunResult = await supabaseAdmin
       .from('payroll_runs')
-      .select('id, department, payroll_run_items(employee_id, employee_name)')
-      .eq('start_date', payload.start_date)
-      .eq('end_date', payload.end_date)
+      .select('id, department, start_date, end_date, payroll_run_items(employee_id, employee_name)')
+      .lte('start_date', payload.end_date)
+      .gte('end_date', payload.start_date)
 
     if (existingRunResult.error) {
       return NextResponse.json({ error: existingRunResult.error.message }, { status: 500 })
     }
 
     const relatedExistingRuns = (existingRunResult.data ?? []).filter(run =>
-      run.department === payload.department ||
-      run.department === 'all' ||
-      payload.department === 'all'
+      dateRangesOverlap(run.start_date, run.end_date, payload.start_date!, payload.end_date!) &&
+      (run.department === payload.department ||
+        run.department === 'all' ||
+        payload.department === 'all')
     )
     const requestedEmployeeIds = new Set(rows.map(row => row.employee_id).filter(Boolean))
     const duplicateEmployee = relatedExistingRuns

@@ -101,6 +101,10 @@ function getSignedCashAmount(entry: Pick<CashBalanceEntry, 'entry_type' | 'amoun
   return entry.entry_type === 'cash_in' ? Number(entry.amount ?? 0) : Number(entry.amount ?? 0) * -1
 }
 
+function dateRangesOverlap(leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) {
+  return leftStart <= rightEnd && rightStart <= leftEnd
+}
+
 function isoToTimeInput(value: string | null | undefined) {
   if (!value) return ''
   const date = new Date(value)
@@ -495,11 +499,11 @@ export default function WageWorksheetPage() {
     .sort((left, right) => right.pay_date.localeCompare(left.pay_date) || right.created_at.localeCompare(left.created_at))
   , [payrollRuns])
   const existingPayoutRun = useMemo(() => payrollRuns.find(run => {
-    if (run.start_date !== startDate || run.end_date !== endDate) return false
+    if (!dateRangesOverlap(run.start_date, run.end_date, startDate, endDate)) return false
     return run.department === department || run.department === 'all' || department === 'all'
   }) ?? null, [department, endDate, payrollRuns, startDate])
   const paidEmployeeIdsForRange = useMemo(() => new Set(payrollRuns
-    .filter(run => run.start_date === startDate && run.end_date === endDate)
+    .filter(run => dateRangesOverlap(run.start_date, run.end_date, startDate, endDate))
     .filter(run => run.department === department || run.department === 'all' || department === 'all')
     .flatMap(run => (run.payroll_run_items ?? []).map(item => item.employee_id).filter((id): id is string => Boolean(id)))
   ), [department, endDate, payrollRuns, startDate])
