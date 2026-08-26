@@ -129,6 +129,7 @@ export async function POST(req: NextRequest) {
     )
     const requestedEmployeeIds = new Set(rows.map(row => row.employee_id).filter(Boolean))
     const duplicateEmployee = relatedExistingRuns
+      .filter(run => run.start_date <= payload.start_date! && run.end_date >= payload.end_date!)
       .flatMap(run => run.payroll_run_items ?? [])
       .find(item => item.employee_id && requestedEmployeeIds.has(item.employee_id))
     if (duplicateEmployee) {

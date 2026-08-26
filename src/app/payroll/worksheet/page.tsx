@@ -24,12 +24,14 @@ import {
   calculatePayrollAmounts,
   getPayrollTotals,
   normalizeMoney,
+  payrollItemToDraftRow,
   paymentMethodLabel,
 } from '@/lib/payroll'
 import { CashBalanceEntry, Employee, PaymentMethod, PayrollRun, PayrollRunItem, ShiftClock } from '@/lib/types'
 import { DepartmentDefinition } from '@/lib/appSettings'
 
 type Step = 'setup' | 'worksheet'
+type WorksheetMode = 'editable' | 'paid_view'
 type PayrollCycle = 'weekly' | 'semi_monthly'
 type SavedPayrollRun = PayrollRun & { payroll_run_items?: PayrollRunItem[] }
 type BreakEditState = {
@@ -439,6 +441,7 @@ export default function WageWorksheetPage() {
   const initialPayrollCycle = getPayrollCycleForDepartment('all', departmentDefinitions)
   const initialPayrollPeriod = getDefaultPayrollPeriod(initialPayrollCycle)
   const [step, setStep] = useState<Step>('setup')
+  const [worksheetMode, setWorksheetMode] = useState<WorksheetMode>('editable')
   const [department, setDepartment] = useState('all')
   const [payrollCycle, setPayrollCycle] = useState<PayrollCycle>(initialPayrollCycle)
   const [startDate, setStartDate] = useState(initialPayrollPeriod.startDate)
@@ -502,11 +505,37 @@ export default function WageWorksheetPage() {
     if (!dateRangesOverlap(run.start_date, run.end_date, startDate, endDate)) return false
     return run.department === department || run.department === 'all' || department === 'all'
   }) ?? null, [department, endDate, payrollRuns, startDate])
-  const paidEmployeeIdsForRange = useMemo(() => new Set(payrollRuns
-    .filter(run => dateRangesOverlap(run.start_date, run.end_date, startDate, endDate))
-    .filter(run => run.department === department || run.department === 'all' || department === 'all')
-    .flatMap(run => (run.payroll_run_items ?? []).map(item => item.employee_id).filter((id): id is string => Boolean(id)))
-  ), [department, endDate, payrollRuns, startDate])
+  const paidClockRecordIdsForRange = useMemo(() => {
+    const paidIds = new Set<string>()
+    const employeeById = new Map(employees.map(employee => [employee.id, employee]))
+    const relatedRuns = payrollRuns
+      .filter(run => dateRangesOverlap(run.start_date, run.end_date, startDate, endDate))
+      .filter(run => run.department === department || run.department === 'all' || department === 'all')
+
+    for (const record of clockRecords) {
+      if (record.session_date < startDate || record.session_date > endDate) continue
+      const employee = employeeById.get(record.employee_id)
+      const paid = relatedRuns.some(run => {
+        if (record.session_date < run.start_date || record.session_date > run.end_date) return false
+        if (!(run.payroll_run_items ?? []).some(item => item.employee_id === record.employee_id)) return false
+        return run.department === 'all' || clockMatchesWorkDepartment(record, run.department, employee, schedules)
+      })
+      if (paid) paidIds.add(record.id)
+    }
+    return paidIds
+  }, [clockRecords, department, employees, endDate, payrollRuns, schedules, startDate])
+  const paidEmployeeDateKeysForRange = useMemo(() => new Set(clockRecords
+    .filter(record => paidClockRecordIdsForRange.has(record.id))
+    .map(record => `${record.employee_id}|${record.session_date}`)
+  ), [clockRecords, paidClockRecordIdsForRange])
+  const unpaidClockRecords = useMemo(() => clockRecords.filter(record => !paidClockRecordIdsForRange.has(record.id)), [clockRecords, paidClockRecordIdsForRange])
+  const unpaidEodReports = useMemo(() => eodReports.map(report => {
+    if (report.session_date < startDate || report.session_date > endDate) return report
+    return {
+      ...report,
+      tip_distributions: (report.tip_distributions ?? []).filter(distribution => !paidEmployeeDateKeysForRange.has(`${distribution.employee_id}|${report.session_date}`)),
+    }
+  }), [endDate, eodReports, paidEmployeeDateKeysForRange, startDate])
   const selectedSummaryRun = useMemo(
     () => payrollRuns.find(run => run.id === summaryRunId) ?? null,
     [payrollRuns, summaryRunId]
@@ -557,7 +586,7 @@ export default function WageWorksheetPage() {
     if (excludedEmployeeIds.includes(employee.id)) return false
     return department === 'all' ||
       getEmployeeScheduleDepartments(employee).includes(department) ||
-      clockRecords.some(record =>
+      unpaidClockRecords.some(record =>
         record.employee_id === employee.id &&
         record.session_date >= startDate &&
         record.session_date <= endDate &&
@@ -589,6 +618,7 @@ export default function WageWorksheetPage() {
 
   const returnToSetup = () => {
     setStep('setup')
+    setWorksheetMode('editable')
     setMessage(null)
   }
 
@@ -609,48 +639,55 @@ export default function WageWorksheetPage() {
   const buildWorksheet = () => {
     const nextRows = buildPayrollDraftRows({
       employees,
-      clockRecords,
-      eodReports,
+      clockRecords: unpaidClockRecords,
+      eodReports: unpaidEodReports,
       department,
       startDate,
       endDate,
       schedules,
-    }).filter(row => row.hours > 0 && !paidEmployeeIdsForRange.has(row.employee_id))
+    }).filter(row => row.hours > 0)
     if (nextRows.length === 0) {
-      setMessage(existingPayoutRun
-        ? 'Everything in this period is already paid. Open Payroll Payouts to edit the saved payout instead of creating another payout.'
-        : 'No unpaid hours found for this period.'
-      )
-      if (existingPayoutRun) openSavedSummary(existingPayoutRun.id)
+      if (existingPayoutRun) {
+        setRows(sortPayrollRows((existingPayoutRun.payroll_run_items ?? []).map(payrollItemToDraftRow)))
+        setExcludedEmployeeIds([])
+        setWorksheetMode('paid_view')
+        setStep('worksheet')
+        window.history.pushState({ wageWorksheetStep: 'worksheet' }, '', window.location.href)
+        setMessage('This payroll period is already paid. Viewing only; edit paid payroll from Payroll Payouts.')
+        return
+      }
+      setMessage('No unpaid hours found for this period.')
       return
     }
     setRows(sortPayrollRows(nextRows))
     setExcludedEmployeeIds([])
+    setWorksheetMode('editable')
     setStep('worksheet')
     window.history.pushState({ wageWorksheetStep: 'worksheet' }, '', window.location.href)
-    setMessage(null)
+    setMessage(existingPayoutRun ? 'Already-paid clock records were removed from this worksheet. Only unpaid hours are payable.' : null)
   }
 
   useEffect(() => {
     if (step !== 'worksheet') return
+    if (worksheetMode === 'paid_view') return
     const sourceRows = buildPayrollDraftRows({
       employees,
-      clockRecords,
-      eodReports,
+      clockRecords: unpaidClockRecords,
+      eodReports: unpaidEodReports,
       department,
       startDate,
       endDate,
       schedules,
     }).filter(row => row.hours > 0 && !excludedEmployeeIds.includes(row.employee_id))
-      .filter(row => !paidEmployeeIdsForRange.has(row.employee_id))
 
     setRows(currentRows => {
       const nextRows = sortPayrollRows(mergeWorksheetRowsWithClockSource(currentRows, sourceRows))
       return arePayrollRowsEqual(currentRows, nextRows) ? currentRows : nextRows
     })
-  }, [clockRecords, department, employees, endDate, eodReports, excludedEmployeeIds, paidEmployeeIdsForRange, schedules, startDate, step])
+  }, [department, employees, endDate, excludedEmployeeIds, schedules, startDate, step, unpaidClockRecords, unpaidEodReports, worksheetMode])
 
   const updateRow = (employeeId: string, patch: Partial<PayrollDraftRow>) => {
+    if (worksheetMode === 'paid_view') return
     setRows(currentRows => sortPayrollRows(currentRows.map(row => {
       if (row.employee_id !== employeeId) return row
       const employee = employees.find(item => item.id === employeeId)
@@ -682,8 +719,8 @@ export default function WageWorksheetPage() {
     if (!employee) return
     const nextRows = buildPayrollDraftRows({
       employees: [employee],
-      clockRecords: nextClockRecords,
-      eodReports,
+      clockRecords: nextClockRecords.filter(record => !paidClockRecordIdsForRange.has(record.id)),
+      eodReports: unpaidEodReports,
       department,
       startDate,
       endDate,
@@ -822,6 +859,10 @@ export default function WageWorksheetPage() {
   }
 
   const saveBreakEdit = async (record: ShiftClock) => {
+    if (worksheetMode === 'paid_view') {
+      setMessage('This payroll period is already paid. Edit paid records from Payroll Payouts.')
+      return
+    }
     const edit = breakEdits[record.id]
     if (!edit) return
     const mealBreakStartAt = timeInputToIso(record.session_date, edit.mealBreakStart)
@@ -882,17 +923,19 @@ export default function WageWorksheetPage() {
   }
 
   const removeRow = (employeeId: string) => {
+    if (worksheetMode === 'paid_view') return
     setExcludedEmployeeIds(current => current.includes(employeeId) ? current : [...current, employeeId])
     setRows(currentRows => currentRows.filter(row => row.employee_id !== employeeId))
   }
 
   const addEmployee = () => {
+    if (worksheetMode === 'paid_view') return
     const employee = employees.find(item => item.id === employeeToAdd)
     if (!employee) return
     const nextRows = buildPayrollDraftRows({
       employees: [employee],
-      clockRecords,
-      eodReports,
+      clockRecords: unpaidClockRecords,
+      eodReports: unpaidEodReports,
       department,
       startDate,
       endDate,
@@ -1020,6 +1063,10 @@ export default function WageWorksheetPage() {
   }
 
   const savePayroll = async () => {
+    if (worksheetMode === 'paid_view') {
+      setMessage('This payroll period is already paid. Open Payroll Payouts to edit the saved payout instead of creating another payout.')
+      return
+    }
     if (missingPaymentRows.length > 0) {
       setMessage('Select a payment method for every employee before saving.')
       return
@@ -1355,11 +1402,16 @@ export default function WageWorksheetPage() {
               One or more employees have auto-clock-out or open/pending clock records. Review Clock In Records before final payroll.
             </div>
           )}
+          {worksheetMode === 'paid_view' && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
+              This is already paid payroll data. The worksheet is view-only here; use Payroll Payouts to edit paid hours, tips, or payout corrections.
+            </div>
+          )}
 
           <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-white p-2">
             <div className="min-w-64">
               <Label>Add Employee</Label>
-              <Select value={employeeToAdd || undefined} onValueChange={(value: string | null) => value && setEmployeeToAdd(value)}>
+              <Select value={employeeToAdd || undefined} onValueChange={(value: string | null) => value && setEmployeeToAdd(value)} disabled={worksheetMode === 'paid_view'}>
                 <SelectTrigger><span>{employees.find(employee => employee.id === employeeToAdd)?.name ?? 'Select staff'}</span></SelectTrigger>
                 <SelectContent>
                   {availableEmployees.map(employee => (
@@ -1368,10 +1420,10 @@ export default function WageWorksheetPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button variant="outline" onClick={addEmployee} disabled={!employeeToAdd}>Add</Button>
+            <Button variant="outline" onClick={addEmployee} disabled={!employeeToAdd || worksheetMode === 'paid_view'}>Add</Button>
             <Button
               onClick={openPayoutConfirmation}
-              disabled={rows.length === 0 || missingPaymentRows.length > 0}
+              disabled={worksheetMode === 'paid_view' || rows.length === 0 || missingPaymentRows.length > 0}
             >
               Payout
             </Button>
@@ -1421,7 +1473,7 @@ export default function WageWorksheetPage() {
                   return (
                   <TableRow key={row.employee_id} className="border-b">
                     <TableCell className="border-r p-1 align-middle">
-                      <Select value={row.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(row.employee_id, { payment_method: value as PaymentMethod })}>
+                      <Select value={row.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(row.employee_id, { payment_method: value as PaymentMethod })} disabled={worksheetMode === 'paid_view'}>
                         <SelectTrigger className="h-8 w-full"><span>{paymentMethodLabel(row.payment_method)}</span></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
@@ -1451,7 +1503,7 @@ export default function WageWorksheetPage() {
                       </Button>
                     </TableCell>
                     <TableCell className="border-r p-1 text-right align-middle">
-                      <Input className="h-8 w-full text-right" type="number" step="0.01" value={row.hours} onChange={event => {
+                      <Input className="h-8 w-full text-right" type="number" step="0.01" value={row.hours} disabled={worksheetMode === 'paid_view'} onChange={event => {
                         const hours = normalizeMoney(event.target.value)
                         updateRow(row.employee_id, { hours })
                       }} />
@@ -1462,23 +1514,24 @@ export default function WageWorksheetPage() {
                         type="number"
                         step="0.01"
                         value={row.has_tip_data || row.tips > 0 ? row.tips : ''}
+                        disabled={worksheetMode === 'paid_view'}
                         onChange={event => updateRow(row.employee_id, { tips: normalizeMoney(event.target.value), has_tip_data: event.target.value.trim().length > 0 })}
                       />
                     </TableCell>
                     <TableCell className="border-r p-1 align-middle">
-                      <Input className="h-8 w-full text-right" type="number" step="0.01" value={row.base_wages} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
+                      <Input className="h-8 w-full text-right" type="number" step="0.01" value={row.base_wages} disabled={worksheetMode === 'paid_view'} onChange={event => updateRow(row.employee_id, { base_wages: normalizeMoney(event.target.value) })} />
                       <div className="mt-0.5 text-right text-[10px] leading-none text-muted-foreground">
                         {formatCurrency(hourlyRate)}/hr
                       </div>
                     </TableCell>
-                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.guarantee_top_up} onChange={event => updateRow(row.employee_id, { guarantee_top_up: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.guarantee_top_up} disabled={worksheetMode === 'paid_view'} onChange={event => updateRow(row.employee_id, { guarantee_top_up: normalizeMoney(event.target.value) })} /></TableCell>
                     <TableCell className="border-r p-1 align-middle">
                       <Input
                         className="h-8 w-full text-right disabled:bg-slate-100"
                         type="number"
                         step="0.01"
                         value={commissionAvailable ? row.commission : 0}
-                        disabled={!commissionAvailable}
+                        disabled={!commissionAvailable || worksheetMode === 'paid_view'}
                         title={commissionAvailable ? undefined : 'Commission unavailable for this staffing profile'}
                         onChange={event => updateRow(row.employee_id, { commission: normalizeMoney(event.target.value) })}
                       />
@@ -1486,15 +1539,15 @@ export default function WageWorksheetPage() {
                         <div className="mt-0.5 text-right text-[10px] leading-none text-muted-foreground">Unavailable</div>
                       )}
                     </TableCell>
-                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.deductions} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
+                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.deductions} disabled={worksheetMode === 'paid_view'} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
                     <TableCell className="border-r p-1 text-right align-middle font-semibold">
                       {formatCurrency(row.payout_amount)}
                       {row.payment_method === 'cash' && row.cash_rounding > 0 && (
                         <div className="text-[10px] leading-none text-muted-foreground">rounded {formatCurrency(row.cash_rounding)}</div>
                       )}
                     </TableCell>
-                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full" value={row.memo} onChange={event => updateRow(row.employee_id, { memo: event.target.value })} /></TableCell>
-                    <TableCell className="p-1 align-middle"><Button variant="ghost" size="sm" onClick={() => removeRow(row.employee_id)}>Remove</Button></TableCell>
+                    <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full" value={row.memo} disabled={worksheetMode === 'paid_view'} onChange={event => updateRow(row.employee_id, { memo: event.target.value })} /></TableCell>
+                    <TableCell className="p-1 align-middle"><Button variant="ghost" size="sm" onClick={() => removeRow(row.employee_id)} disabled={worksheetMode === 'paid_view'}>Remove</Button></TableCell>
                   </TableRow>
                   )
                 })}
