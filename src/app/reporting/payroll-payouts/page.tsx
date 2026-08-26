@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { ReportingNav } from '@/components/reporting/ReportingNav'
-import { notifyReportingDataChanged, useClockRecords, useEmployees, usePayrollRuns, useSchedulesByRange } from '@/components/reporting/useReportingData'
+import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns, useSchedulesByRange } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,14 +14,34 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState } from '@/lib/clockUtils'
+import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getClockWorkDepartment, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { calculatePayrollAmounts, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
 import { formatCurrency } from '@/lib/reporting'
-import type { Employee, PaymentMethod, PayrollRun, PayrollRunItem, ShiftClock } from '@/lib/types'
+import { supabase } from '@/lib/supabase'
+import { calculateTips } from '@/lib/tipCalc'
+import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
+import { isTipEligibleForWork } from '@/lib/tipEligibility'
+import type { Employee, EodReport, PaymentMethod, PayrollRun, PayrollRunItem, Schedule, ShiftClock, TipDistribution } from '@/lib/types'
 
 type SavedPayrollRun = PayrollRun & { payroll_run_items?: PayrollRunItem[] }
+type EodReportWithTips = EodReport & { tip_distributions: (TipDistribution & { employee: Employee })[] }
 type PayoutPeriod = 'week' | 'month' | 'custom'
+type ClockEditState = { clockIn: string; clockOut: string }
+type SaveResult = { success: boolean; title: string; details: string[] }
+type AdjustmentPaymentDirection = 'pay_out' | 'receive_credit'
+type TipDistributionReplacement = {
+  eod_report_id: string
+  rows: Array<{
+    employee_id: string
+    start_time: string | null
+    end_time: string | null
+    hours_worked: number
+    tip_share: number
+    house_deduction: number
+    net_tip: number
+  }>
+}
 
 function formatTime(value: string | null | undefined) {
   return value ? format(new Date(value), 'h:mm a') : ''
@@ -46,6 +66,12 @@ function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
   const relatedEmployee = record.employee as Employee | Employee[] | undefined
   if (Array.isArray(relatedEmployee)) return relatedEmployee[0] ?? employees.find(employee => employee.id === record.employee_id) ?? null
   return relatedEmployee ?? employees.find(employee => employee.id === record.employee_id) ?? null
+}
+
+function getPayrollItemEmployee(item: PayrollRunItem, employees: Employee[]) {
+  const relatedEmployee = item.employee as Employee | Employee[] | null | undefined
+  if (Array.isArray(relatedEmployee)) return relatedEmployee[0] ?? employees.find(employee => employee.id === item.employee_id) ?? null
+  return relatedEmployee ?? employees.find(employee => employee.id === item.employee_id) ?? null
 }
 
 function getEmployeeClockRecords({
@@ -93,10 +119,10 @@ function buildSavedPayrollSummary(run: SavedPayrollRun) {
   }
 }
 
-function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollRunItem>) {
+function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollRunItem>, employees: Employee[] = []) {
   const paymentMethod = patch.payment_method ?? item.payment_method
   const hours = normalizeMoney(patch.hours ?? item.hours)
-  const employee = item.employee ?? null
+  const employee = getPayrollItemEmployee({ ...item, ...patch }, employees)
   const hourlyRate = Number(employee?.hourly_wage ?? 0)
   const guaranteedRate = Number(employee?.guaranteed_hourly ?? 0)
   const tips = normalizeMoney(patch.tips ?? item.tips)
@@ -128,6 +154,14 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
   }) }
 }
 
+function appendMemo(existing: string | null | undefined, note: string) {
+  const trimmedNote = note.trim()
+  const trimmedExisting = existing?.trim()
+  if (!trimmedNote) return trimmedExisting || null
+  if (trimmedExisting?.includes(trimmedNote)) return trimmedExisting
+  return [trimmedExisting, trimmedNote].filter(Boolean).join(' | ')
+}
+
 function calculateDailyPayout(row: Pick<PayrollRunItem, 'hours' | 'payout_amount'>, hours: number) {
   if (Number(row.hours ?? 0) <= 0) return 0
   return normalizeMoney(Number(row.payout_amount ?? 0) * (hours / Number(row.hours ?? 0)))
@@ -138,6 +172,141 @@ function getEditedClockHours(record: ShiftClock, edit?: { clockIn: string; clock
   const clockOut = edit?.clockOut ? timeInputToIso(record.session_date, edit.clockOut) : record.clock_out_at
   if (!clockIn || !clockOut) return 0
   return calculateClockHoursAfterBreak(clockIn, clockOut, getClockBreakMinutes(record))
+}
+
+function recalculateRowsForClockTimeChanges({
+  rows,
+  selectedItem,
+  selectedClockRecords,
+  clockRecords,
+  clockEdits,
+  employees,
+  eodReports,
+  schedules,
+  adjustmentNote,
+}: {
+  rows: PayrollRunItem[]
+  selectedItem: PayrollRunItem
+  selectedClockRecords: ShiftClock[]
+  clockRecords: ShiftClock[]
+  clockEdits: Record<string, ClockEditState>
+  employees: Employee[]
+  eodReports: EodReportWithTips[]
+  schedules: Schedule[]
+  adjustmentNote: string
+}) {
+  const changedRecords = selectedClockRecords.filter(record => clockEditChanged(record, clockEdits[record.id]))
+  const affectedDates = Array.from(new Set(changedRecords.map(record => record.session_date))).sort()
+  const affectedEmployeeIds = new Set<string>()
+  const warnings: string[] = []
+  const tipDistributionUpdates: TipDistributionReplacement[] = []
+  const selectedEditedHours = normalizeMoney(
+    selectedClockRecords.reduce((sum, record) => sum + getEditedClockHours(record, clockEdits[record.id]), 0)
+  )
+  const oldTipsByEmployee = new Map<string, number>()
+  const nextTipsByEmployee = new Map<string, number>()
+
+  for (const date of affectedDates) {
+    const dayReports = eodReports.filter(report => report.session_date === date)
+    if (dayReports.length === 0) {
+      warnings.push(`No EOD tip report found for ${date}; hours were updated but tips were not redistributed for that day.`)
+      continue
+    }
+
+    for (const report of dayReports) {
+      for (const distribution of report.tip_distributions ?? []) {
+        oldTipsByEmployee.set(
+          distribution.employee_id,
+          normalizeMoney((oldTipsByEmployee.get(distribution.employee_id) ?? 0) + Number(distribution.net_tip ?? 0))
+        )
+      }
+    }
+
+    const hoursByEmployee = new Map<string, { employee_id: string; hours_worked: number; tip_pool_hourly_rate?: number | null; start_time: string | null; end_time: string | null }>()
+    for (const record of clockRecords.filter(item => item.session_date === date)) {
+      const employee = getClockRecordEmployee(record, employees)
+      if (!employee) continue
+      const workDepartment = getClockWorkDepartment(record, employee, schedules)
+      if (!isTipEligibleForWork(employee, workDepartment)) continue
+      const editedRecord = changedRecords.some(changedRecord => changedRecord.id === record.id)
+      const editedClockIn = editedRecord ? timeInputToIso(record.session_date, clockEdits[record.id]?.clockIn ?? '') : record.clock_in_at
+      const editedClockOut = editedRecord ? timeInputToIso(record.session_date, clockEdits[record.id]?.clockOut ?? '') : record.clock_out_at
+      const hours = changedRecords.some(changedRecord => changedRecord.id === record.id)
+        ? getEditedClockHours(record, clockEdits[record.id])
+        : getEffectiveClockHours(record)
+      if (hours <= 0) continue
+      const current = hoursByEmployee.get(record.employee_id)
+      const startTime = editedClockIn ? format(new Date(editedClockIn), 'HH:mm:ss') : null
+      const endTime = editedClockOut ? format(new Date(editedClockOut), 'HH:mm:ss') : null
+      hoursByEmployee.set(record.employee_id, {
+        employee_id: record.employee_id,
+        hours_worked: normalizeMoney((current?.hours_worked ?? 0) + hours),
+        tip_pool_hourly_rate: employee.tip_pool_hourly_rate,
+        start_time: !current?.start_time || (startTime && startTime < current.start_time) ? startTime : current.start_time,
+        end_time: !current?.end_time || (endTime && endTime > current.end_time) ? endTime : current.end_time,
+      })
+    }
+
+    const tipRows = Array.from(hoursByEmployee.values())
+    for (const report of dayReports) {
+      const results = calculateTips(Number(report.tip_total ?? 0), tipRows)
+      for (const result of results) {
+        nextTipsByEmployee.set(
+          result.employee_id,
+          normalizeMoney((nextTipsByEmployee.get(result.employee_id) ?? 0) + result.net_tip)
+        )
+      }
+      tipDistributionUpdates.push({
+        eod_report_id: report.id,
+        rows: results.map(result => {
+          const row = hoursByEmployee.get(result.employee_id)
+          return {
+            employee_id: result.employee_id,
+            start_time: row?.start_time ?? null,
+            end_time: row?.end_time ?? null,
+            hours_worked: result.hours_worked,
+            tip_share: result.tip_share,
+            house_deduction: result.house_deduction,
+            net_tip: result.net_tip,
+          }
+        }),
+      })
+    }
+  }
+
+  const note = [
+    'Modified after payout.',
+    affectedDates.length > 0 ? `Tip redistribution recalculated for ${affectedDates.join(', ')}.` : '',
+    adjustmentNote.trim(),
+  ].filter(Boolean).join(' ')
+
+  const recalculatedRows = rows.map(row => {
+    const patch: Partial<PayrollRunItem> = {}
+    if (row.id === selectedItem.id) patch.hours = selectedEditedHours
+    if (row.employee_id && affectedDates.length > 0) {
+      const oldTip = oldTipsByEmployee.get(row.employee_id) ?? 0
+      const nextTip = nextTipsByEmployee.get(row.employee_id) ?? oldTip
+      const tipDifference = normalizeMoney(nextTip - oldTip)
+      if (tipDifference !== 0) {
+        patch.tips = normalizeMoney(Number(row.tips ?? 0) + tipDifference)
+        patch.memo = appendMemo(row.memo, note)
+        affectedEmployeeIds.add(row.employee_id)
+      }
+    }
+    if (row.id === selectedItem.id) {
+      patch.memo = appendMemo(patch.memo ?? row.memo, note)
+      return calculateSavedPayrollItem(row, patch, employees)
+    }
+    return Object.keys(patch).length > 0 ? calculateSavedPayrollItem(row, patch, employees) : row
+  })
+
+  return { rows: recalculatedRows, affectedEmployeeIds, affectedDates, warnings, tipDistributionUpdates }
+}
+
+function clockEditChanged(record: ShiftClock, edit?: ClockEditState) {
+  if (!edit) return false
+  return edit.clockIn !== isoToTimeInput(record.clock_in_at) ||
+    edit.clockOut !== isoToTimeInput(record.clock_out_at)
 }
 
 function getDateInputValue(date: Date) {
@@ -229,6 +398,7 @@ function printSavedPayroll(run: SavedPayrollRun, items: PayrollRunItem[], clockR
 export default function PayrollPayoutsReportPage() {
   const { payrollRuns, setPayrollRuns } = usePayrollRuns()
   const { clockRecords, setClockRecords } = useClockRecords()
+  const { eodReports } = useEodReports()
   const employees = useEmployees({ includeArchived: true })
   const { departmentDefinitions } = useAppSettings()
   const [search, setSearch] = useState('')
@@ -242,11 +412,14 @@ export default function PayrollPayoutsReportPage() {
   const [editing, setEditing] = useState(false)
   const [memoEdit, setMemoEdit] = useState('')
   const [adjustmentMemo, setAdjustmentMemo] = useState('')
-  const [adjustmentSettled, setAdjustmentSettled] = useState(false)
+  const [adjustmentPaymentAmount, setAdjustmentPaymentAmount] = useState('')
+  const [adjustmentPaymentMethod, setAdjustmentPaymentMethod] = useState<PaymentMethod | ''>('')
   const [itemEdits, setItemEdits] = useState<Record<string, Partial<PayrollRunItem>>>({})
-  const [clockEdits, setClockEdits] = useState<Record<string, { clockIn: string; clockOut: string }>>({})
+  const [clockEdits, setClockEdits] = useState<Record<string, ClockEditState>>({})
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [saveResult, setSaveResult] = useState<SaveResult | null>(null)
+  const [tipImpactEmployeeIds, setTipImpactEmployeeIds] = useState<Set<string>>(new Set())
 
   const departmentOptions = useMemo(() => [
     { key: 'all', label: 'All' },
@@ -270,7 +443,7 @@ export default function PayrollPayoutsReportPage() {
   const selectedRunIndex = selectedRun ? sortedRuns.findIndex(run => run.id === selectedRun.id) : -1
   const editedItems = useMemo(() => [...(selectedRun?.payroll_run_items ?? [])]
     .sort((left, right) => left.display_order - right.display_order || left.employee_name.localeCompare(right.employee_name))
-    .map(item => itemEdits[item.id] ? calculateSavedPayrollItem(item, itemEdits[item.id]) : item), [itemEdits, selectedRun])
+    .map(item => itemEdits[item.id] ? calculateSavedPayrollItem(item, itemEdits[item.id], employees) : item), [employees, itemEdits, selectedRun])
   const displayedItems = selectedEmployeeId !== 'all'
     ? editedItems.filter(item => item.employee_id === selectedEmployeeId || item.employee_name === selectedEmployeeId)
     : editedItems
@@ -284,6 +457,10 @@ export default function PayrollPayoutsReportPage() {
   const selectedAdjustment = selectedItem && selectedOriginalItem
     ? normalizeMoney(Number(selectedItem.payout_amount ?? 0) - Number(selectedOriginalItem.payout_amount ?? 0))
     : 0
+  const adjustmentPaymentValue = Math.max(0, normalizeMoney(adjustmentPaymentAmount))
+  const adjustmentRemaining = normalizeMoney(Math.max(0, Math.abs(selectedAdjustment) - adjustmentPaymentValue))
+  const adjustmentDirection: AdjustmentPaymentDirection = selectedAdjustment >= 0 ? 'pay_out' : 'receive_credit'
+  const isIndividualMode = selectedEmployeeId !== 'all' && !!selectedItem
 
   const openSummary = (runId: string) => {
     const run = payrollRuns.find(item => item.id === runId)
@@ -293,7 +470,9 @@ export default function PayrollPayoutsReportPage() {
     setItemEdits({})
     setClockEdits({})
     setAdjustmentMemo('')
-    setAdjustmentSettled(false)
+    setAdjustmentPaymentAmount('')
+    setAdjustmentPaymentMethod('')
+    setTipImpactEmployeeIds(new Set())
     setEditing(false)
   }
 
@@ -308,13 +487,15 @@ export default function PayrollPayoutsReportPage() {
       setItemEdits({})
       setClockEdits({})
       setAdjustmentMemo('')
-      setAdjustmentSettled(false)
+      setAdjustmentPaymentAmount('')
+      setAdjustmentPaymentMethod('')
+      setTipImpactEmployeeIds(new Set())
       setEditing(false)
     }
   }, [payrollRuns])
 
   const updateItemEdit = (item: PayrollRunItem, patch: Partial<PayrollRunItem>) => {
-    setItemEdits(current => ({ ...current, [item.id]: calculateSavedPayrollItem(item, { ...current[item.id], ...patch }) }))
+    setItemEdits(current => ({ ...current, [item.id]: calculateSavedPayrollItem(item, { ...current[item.id], ...patch }, employees) }))
   }
 
   const openEmployeeAdjustment = (item: PayrollRunItem) => {
@@ -322,7 +503,9 @@ export default function PayrollPayoutsReportPage() {
     setSelectedEmployeeId(employeeKey)
     setEditing(true)
     setAdjustmentMemo('')
-    setAdjustmentSettled(false)
+    setAdjustmentPaymentAmount('')
+    setAdjustmentPaymentMethod('')
+    setTipImpactEmployeeIds(new Set())
     setClockEdits(() => {
       if (!selectedRun || !item.employee_id) return {}
       const records = getEmployeeClockRecords({
@@ -341,7 +524,7 @@ export default function PayrollPayoutsReportPage() {
     })
   }
 
-  const updateClockEdit = (record: ShiftClock, patch: Partial<{ clockIn: string; clockOut: string }>) => {
+  const updateClockEdit = (record: ShiftClock, patch: Partial<ClockEditState>) => {
     setClockEdits(current => {
       const previous = current[record.id] ?? {
         clockIn: isoToTimeInput(record.clock_in_at),
@@ -361,7 +544,7 @@ export default function PayrollPayoutsReportPage() {
           [selectedItem.id]: calculateSavedPayrollItem(selectedOriginalItem ?? selectedItem, {
             ...(itemEditsCurrent[selectedItem.id] ?? {}),
             hours: normalizeMoney(nextHours),
-          }),
+          }, employees),
         }))
       }
       return next
@@ -370,8 +553,17 @@ export default function PayrollPayoutsReportPage() {
 
   const saveEdit = async () => {
     if (!selectedRun) return
+    if (adjustmentPaymentValue > 0 && !adjustmentPaymentMethod) {
+      setSaveResult({ success: false, title: 'Payment method required', details: ['Choose how the balance was paid or credit was received, or leave the amount blank to save without payment.'] })
+      return
+    }
+    if (adjustmentPaymentValue > Math.abs(selectedAdjustment)) {
+      setSaveResult({ success: false, title: 'Adjustment amount is too high', details: ['The paid or credited amount cannot be greater than the balance/credit created by this correction.'] })
+      return
+    }
     setSaving(true)
     setMessage(null)
+    setSaveResult(null)
     try {
       const editedClockRecords: ShiftClock[] = []
       for (const record of selectedClockRecords) {
@@ -409,23 +601,59 @@ export default function PayrollPayoutsReportPage() {
         })
       }
 
-      const rowsForSave = editedItems.map(item => {
-        if (!selectedItem || item.id !== selectedItem.id || selectedClockRecords.length === 0) return item
-        const editedHours = selectedClockRecords.reduce((sum, record) => sum + getEditedClockHours(record, clockEdits[record.id]), 0)
-        return calculateSavedPayrollItem(selectedOriginalItem ?? item, {
-          ...(itemEdits[item.id] ?? {}),
-          hours: normalizeMoney(editedHours),
-          memo: [
-            item.memo?.trim(),
-            `Modified after payout${adjustmentSettled ? ' and settled' : ''}. ${adjustmentMemo.trim()}`,
-          ].filter(Boolean).join(' | '),
+      const adjustmentNote = selectedItem && selectedAdjustment !== 0
+        ? [
+          selectedAdjustment >= 0 ? `Balance due ${formatCurrency(Math.abs(selectedAdjustment))}.` : `Credit due ${formatCurrency(Math.abs(selectedAdjustment))}.`,
+          adjustmentPaymentValue > 0 ? `${adjustmentDirection === 'pay_out' ? 'Paid' : 'Credit received'} ${formatCurrency(adjustmentPaymentValue)} by ${paymentMethodLabel(adjustmentPaymentMethod)}.` : 'No adjustment payment recorded yet.',
+          adjustmentRemaining > 0 ? `Remaining ${formatCurrency(adjustmentRemaining)}.` : 'Adjustment settled.',
+          adjustmentMemo.trim(),
+        ].filter(Boolean).join(' ')
+        : adjustmentMemo.trim()
+      const hasClockTimeChanges = selectedClockRecords.some(record => clockEditChanged(record, clockEdits[record.id]))
+      let rowsForSave = editedItems
+      const tipNotices: string[] = []
+      let tipDistributionUpdates: TipDistributionReplacement[] = []
+      if (selectedItem && hasClockTimeChanges) {
+        const recalculated = recalculateRowsForClockTimeChanges({
+          rows: editedItems,
+          selectedItem,
+          selectedClockRecords,
+          clockRecords,
+          clockEdits,
+          employees,
+          eodReports,
+          schedules,
+          adjustmentNote,
         })
-      })
+        rowsForSave = recalculated.rows
+        tipDistributionUpdates = recalculated.tipDistributionUpdates
+        setTipImpactEmployeeIds(recalculated.affectedEmployeeIds)
+        if (recalculated.affectedDates.length > 0) {
+          tipNotices.push(`Tip redistribution recalculated for ${recalculated.affectedDates.join(', ')}.`)
+        }
+        tipNotices.push(...recalculated.warnings)
+      } else if (selectedItem && (adjustmentNote || Object.keys(itemEdits[selectedItem.id] ?? {}).length > 0)) {
+        rowsForSave = editedItems.map(item => item.id === selectedItem.id
+          ? calculateSavedPayrollItem(item, { memo: appendMemo(item.memo, `Modified after payout. ${adjustmentNote}`) }, employees)
+          : item)
+      }
 
       const res = await fetch('/api/payroll-runs', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run_id: selectedRun.id, memo: memoEdit, rows: rowsForSave }),
+        body: JSON.stringify({
+          run_id: selectedRun.id,
+          memo: memoEdit,
+          rows: rowsForSave,
+          adjustment: selectedItem && selectedAdjustment !== 0 ? {
+            employee_id: selectedItem.employee_id,
+            employee_name: selectedItem.employee_name,
+            amount: adjustmentPaymentValue,
+            method: adjustmentPaymentMethod || null,
+            direction: adjustmentDirection,
+            memo: adjustmentMemo.trim() || null,
+          } : null,
+        }),
       })
       const payload = (await res.json().catch(() => ({}))) as { error?: string; cash_entry_id?: string | null; payroll_run?: SavedPayrollRun }
       if (!res.ok) throw new Error(payload.error ?? 'Failed to update payroll payout.')
@@ -453,7 +681,25 @@ export default function PayrollPayoutsReportPage() {
       if (editedClockRecords.length > 0) {
         setClockRecords(current => current.map(record => editedClockRecords.find(next => next.id === record.id) ?? record))
       }
-      const notices = ['Saved payroll payout updated. This replaced the existing payroll data.']
+      const notices = ['Saved payroll payout updated. This replaced the existing payroll data.', ...tipNotices]
+      for (const update of tipDistributionUpdates) {
+        const deleteRows = await supabase.from('tip_distributions').delete().eq('eod_report_id', update.eod_report_id)
+        if (deleteRows.error) {
+          notices.push(`Tip distribution sync failed: ${deleteRows.error.message}`)
+          continue
+        }
+        try {
+          if (update.rows.length > 0) {
+            await insertTipDistributionsWithFallback(
+              supabase,
+              update.rows.map(row => ({ ...row, eod_report_id: update.eod_report_id }))
+            )
+          }
+          notices.push('Tip distribution records updated for EOD/reporting.')
+        } catch (error) {
+          notices.push(`Tip distribution sync failed: ${error instanceof Error ? error.message : 'unknown error'}`)
+        }
+      }
       const sheetSync = await fetch('/api/payroll-sheet-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -463,11 +709,15 @@ export default function PayrollPayoutsReportPage() {
         const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
         notices.push(`Google Sheets sync failed: ${sheetPayload.error ?? 'unknown error'}`)
       } else {
-        const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { payroll?: { skipped?: boolean; reason?: string; sheetName?: string } }
+        const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { payroll?: { skipped?: boolean; reason?: string; sheetName?: string; updated?: number; appended?: number } }
         if (sheetPayload.payroll?.skipped) {
           notices.push(`Google Sheets sync skipped: ${sheetPayload.payroll.reason ?? 'not configured.'}`)
         } else {
-          notices.push(`Google Sheets synced${sheetPayload.payroll?.sheetName ? ` (${sheetPayload.payroll.sheetName})` : ''}.`)
+          const counts = [
+            typeof sheetPayload.payroll?.appended === 'number' ? `${sheetPayload.payroll.appended} appended` : null,
+            typeof sheetPayload.payroll?.updated === 'number' ? `${sheetPayload.payroll.updated} updated` : null,
+          ].filter(Boolean).join(', ')
+          notices.push(`Google Sheets synced${sheetPayload.payroll?.sheetName ? ` (${sheetPayload.payroll.sheetName})` : ''}${counts ? `: ${counts}` : ''}.`)
         }
       }
       if (payload.cash_entry_id) {
@@ -491,11 +741,15 @@ export default function PayrollPayoutsReportPage() {
       setItemEdits({})
       setClockEdits({})
       setAdjustmentMemo('')
-      setAdjustmentSettled(false)
+      setAdjustmentPaymentAmount('')
+      setAdjustmentPaymentMethod('')
       setEditing(false)
       setMessage(notices.join(' '))
+      setSaveResult({ success: true, title: 'Payroll payout saved', details: notices })
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to update payroll payout.')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update payroll payout.'
+      setMessage(errorMessage)
+      setSaveResult({ success: false, title: 'Payroll payout was not saved', details: [errorMessage] })
     } finally {
       setSaving(false)
     }
@@ -585,7 +839,7 @@ export default function PayrollPayoutsReportPage() {
                   <Button variant="outline" size="sm" disabled={selectedRunIndex <= 0} onClick={() => { const run = sortedRuns[selectedRunIndex - 1]; if (run) openSummary(run.id) }}>Next</Button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {selectedEmployeeId !== 'all' && <Button variant="outline" size="sm" onClick={() => { setSelectedEmployeeId('all'); setEditing(false); setItemEdits({}); setClockEdits({}); setAdjustmentMemo(''); setAdjustmentSettled(false) }}>Back to Summary</Button>}
+                  {isIndividualMode && <Button variant="outline" size="sm" onClick={() => { setSelectedEmployeeId('all'); setEditing(false); setItemEdits({}); setClockEdits({}); setAdjustmentMemo(''); setAdjustmentPaymentAmount(''); setAdjustmentPaymentMethod(''); setTipImpactEmployeeIds(new Set()) }}>Back to Summary</Button>}
                   <Button variant="outline" size="sm" onClick={() => printSavedPayroll(selectedRun, editedItems, clockRecords, employees, schedules, departmentOptions.find(option => option.key === selectedRun.department)?.label ?? selectedRun.department)}>Reprint</Button>
                 </div>
               </div>
@@ -609,56 +863,111 @@ export default function PayrollPayoutsReportPage() {
                 <div className="rounded-xl border bg-slate-50 p-3 text-sm text-slate-700"><span className="font-semibold text-slate-950">Memo: </span>{selectedRun.memo}</div>
               ) : null}
 
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                {[
-                  ['Staff', String(summary.employeeCount), 'bg-white text-slate-950'],
-                  ['Hours', summary.hours.toFixed(2), 'bg-white text-slate-950'],
-                  ['Cash', formatCurrency(summary.cash), 'bg-emerald-50 text-emerald-950'],
-                  ['Check', formatCurrency(summary.check), 'bg-white text-slate-950'],
-                  ['ACH', formatCurrency(summary.ach), 'bg-blue-50 text-blue-950'],
-                  ['Tips', formatCurrency(summary.tips), 'bg-white text-slate-950'],
-                  ['Base Wages', formatCurrency(summary.baseWages), 'bg-white text-slate-950'],
-                  ['Top-Up', formatCurrency(summary.topUp), 'bg-white text-slate-950'],
-                  ['Deductions', formatCurrency(summary.deductions), 'bg-white text-red-700'],
-                  ['Total', formatCurrency(summary.net), 'bg-slate-950 text-white'],
-                ].map(([label, value, className]) => (
-                  <div key={label} className={`rounded-lg border p-3 ${className}`}><div className="text-xs uppercase opacity-70">{label}</div><div className="mt-1 text-xl font-bold">{value}</div></div>
-                ))}
-              </div>
-
-              <div className="overflow-x-auto rounded-lg border bg-white">
-                <Table className="min-w-[980px] text-xs">
-                  <TableHeader><TableRow className="bg-slate-50 hover:bg-slate-50"><TableHead>Paid By</TableHead><TableHead>Name</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Payout</TableHead><TableHead>Memo</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {displayedItems.map(item => (
-                      <TableRow key={item.id}>
-                        <TableCell>{editing ? <Select value={item.payment_method ?? undefined} onValueChange={(value: string | null) => value && updateItemEdit(item, { payment_method: value as PaymentMethod })}><SelectTrigger className="h-8 w-28"><span>{paymentMethodLabel(item.payment_method)}</span></SelectTrigger><SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="check">Check</SelectItem><SelectItem value="ach">ACH</SelectItem></SelectContent></Select> : paymentMethodLabel(item.payment_method)}</TableCell>
-                        <TableCell className="font-medium"><button type="button" className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline" onClick={() => openEmployeeAdjustment(item)}>{item.employee_name}</button></TableCell>
-                        <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>
-                        <TableCell className="text-right">{Number(item.hours ?? 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(Number(item.tips ?? 0))}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(Number(item.base_wages ?? 0))}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(Number(item.guarantee_top_up ?? 0))}</TableCell>
-                        <TableCell className="text-right">{editing ? <Input className="h-8 text-right" type="number" step="0.01" value={Number(item.commission ?? 0)} onChange={event => updateItemEdit(item, { commission: normalizeMoney(event.target.value) })} /> : formatCurrency(Number(item.commission ?? 0))}</TableCell>
-                        <TableCell className="text-right text-red-700">{editing ? <Input className="h-8 text-right" type="number" step="0.01" value={Number(item.deductions ?? 0)} onChange={event => updateItemEdit(item, { deductions: normalizeMoney(event.target.value) })} /> : formatCurrency(Number(item.deductions ?? 0))}</TableCell>
-                        <TableCell className="text-right font-semibold">{formatCurrency(Number(item.payout_amount ?? 0))}</TableCell>
-                        <TableCell>{editing && selectedEmployeeId !== 'all' ? <Input className="h-8" value={item.memo || ''} onChange={event => updateItemEdit(item, { memo: event.target.value })} /> : item.memo || ''}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {selectedEmployeeId !== 'all' && selectedItem && (
+              {!isIndividualMode && (
                 <>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                    {[
+                      ['Staff', String(summary.employeeCount), 'bg-white text-slate-950'],
+                      ['Hours', summary.hours.toFixed(2), 'bg-white text-slate-950'],
+                      ['Cash', formatCurrency(summary.cash), 'bg-emerald-50 text-emerald-950'],
+                      ['Check', formatCurrency(summary.check), 'bg-white text-slate-950'],
+                      ['ACH', formatCurrency(summary.ach), 'bg-blue-50 text-blue-950'],
+                      ['Tips', formatCurrency(summary.tips), 'bg-white text-slate-950'],
+                      ['Base Wages', formatCurrency(summary.baseWages), 'bg-white text-slate-950'],
+                      ['Top-Up', formatCurrency(summary.topUp), 'bg-white text-slate-950'],
+                      ['Deductions', formatCurrency(summary.deductions), 'bg-white text-red-700'],
+                      ['Total', formatCurrency(summary.net), 'bg-slate-950 text-white'],
+                    ].map(([label, value, className]) => (
+                      <div key={label} className={`rounded-lg border p-3 ${className}`}><div className="text-xs uppercase opacity-70">{label}</div><div className="mt-1 text-xl font-bold">{value}</div></div>
+                    ))}
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border bg-white">
+                    <Table className="min-w-[980px] text-xs">
+                      <TableHeader><TableRow className="bg-slate-50 hover:bg-slate-50"><TableHead>Paid By</TableHead><TableHead>Name</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Payout</TableHead><TableHead>Memo</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                        {editedItems.map(item => (
+                          <TableRow key={item.id}>
+                            <TableCell>{paymentMethodLabel(item.payment_method)}</TableCell>
+                            <TableCell className="font-medium">
+                              <button type="button" className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline" onClick={() => openEmployeeAdjustment(item)}>{item.employee_name}</button>
+                              {item.employee_id && tipImpactEmployeeIds.has(item.employee_id) && <Badge variant="outline" className="ml-2 border-amber-300 bg-amber-50 text-amber-800">Tip Recalculated</Badge>}
+                            </TableCell>
+                            <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>
+                            <TableCell className="text-right">{Number(item.hours ?? 0).toFixed(2)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(Number(item.tips ?? 0))}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(Number(item.base_wages ?? 0))}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(Number(item.guarantee_top_up ?? 0))}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(Number(item.commission ?? 0))}</TableCell>
+                            <TableCell className="text-right text-red-700">{formatCurrency(Number(item.deductions ?? 0))}</TableCell>
+                            <TableCell className="text-right font-semibold">{formatCurrency(Number(item.payout_amount ?? 0))}</TableCell>
+                            <TableCell>{item.memo || ''}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
+              )}
+
+              {isIndividualMode && selectedItem && (
+                <>
+                <div className="rounded-xl border bg-white p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-lg font-bold text-slate-950">{selectedItem.employee_name}</p>
+                      <p className="text-sm text-muted-foreground">{departmentOptions.find(option => option.key === selectedItem.department)?.label ?? selectedItem.department} | {Number(selectedItem.hours ?? 0).toFixed(2)} hours</p>
+                    </div>
+                    {selectedItem.employee_id && tipImpactEmployeeIds.has(selectedItem.employee_id) && <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Tip Recalculated</Badge>}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-5">
+                    <div>
+                      <Label>Paid By</Label>
+                      <Select value={selectedItem.payment_method ?? undefined} onValueChange={(value: string | null) => value && updateItemEdit(selectedItem, { payment_method: value as PaymentMethod })}>
+                        <SelectTrigger className="h-9"><span>{paymentMethodLabel(selectedItem.payment_method)}</span></SelectTrigger>
+                        <SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="check">Check</SelectItem><SelectItem value="ach">ACH</SelectItem></SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Tips</Label>
+                      <Input className="h-9 text-right" type="number" step="0.01" value={Number(selectedItem.tips ?? 0)} onChange={event => updateItemEdit(selectedItem, { tips: normalizeMoney(event.target.value) })} />
+                    </div>
+                    <div>
+                      <Label>Commission</Label>
+                      <Input className="h-9 text-right" type="number" step="0.01" value={Number(selectedItem.commission ?? 0)} onChange={event => updateItemEdit(selectedItem, { commission: normalizeMoney(event.target.value) })} />
+                    </div>
+                    <div>
+                      <Label>Deduction</Label>
+                      <Input className="h-9 text-right" type="number" step="0.01" value={Number(selectedItem.deductions ?? 0)} onChange={event => updateItemEdit(selectedItem, { deductions: normalizeMoney(event.target.value) })} />
+                    </div>
+                    <div>
+                      <Label>Updated Payout</Label>
+                      <div className="flex h-9 items-center justify-end rounded-md border bg-slate-50 px-3 text-sm font-bold">{formatCurrency(Number(selectedItem.payout_amount ?? 0))}</div>
+                    </div>
+                    <div className="md:col-span-5">
+                      <Label>Employee Memo</Label>
+                      <Input className="h-9" value={selectedItem.memo || ''} onChange={event => updateItemEdit(selectedItem, { memo: event.target.value })} />
+                    </div>
+                  </div>
+                </div>
                 <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 md:grid-cols-4">
                   <div><div className="text-xs uppercase text-muted-foreground">Original Payout</div><div className="text-xl font-bold">{formatCurrency(Number(selectedOriginalItem?.payout_amount ?? 0))}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">Updated Payout</div><div className="text-xl font-bold">{formatCurrency(Number(selectedItem.payout_amount ?? 0))}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment >= 0 ? 'Balance Due' : 'Credit / Overpaid'}</div><div className={`text-xl font-bold ${selectedAdjustment >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(selectedAdjustment))}</div></div>
-                  <div><div className="text-xs uppercase text-muted-foreground">Status</div><div className="text-sm font-semibold">{selectedAdjustment === 0 ? 'No balance' : adjustmentSettled ? 'Marked settled' : 'Unsettled adjustment'}</div></div>
-                  {selectedAdjustment !== 0 && !adjustmentSettled && <div className="md:col-span-4 rounded-lg border border-amber-300 bg-amber-100 px-3 py-2 text-sm text-amber-950">Balance or credit is not marked collected/paid. You can still save, but the payout summary will show it as a post-payout modification.</div>}
-                  <div className="md:col-span-3"><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Required note for why this paid payroll was changed" /></div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-800 md:items-end"><input type="checkbox" checked={adjustmentSettled} onChange={event => setAdjustmentSettled(event.target.checked)} />Balance/credit collected or paid</label>
+                  <div><div className="text-xs uppercase text-muted-foreground">Remaining</div><div className="text-xl font-bold">{formatCurrency(adjustmentRemaining)}</div></div>
+                  {selectedAdjustment !== 0 && adjustmentRemaining > 0 && <div className="md:col-span-4 rounded-lg border border-amber-300 bg-amber-100 px-3 py-2 text-sm text-amber-950">This correction still has an unpaid balance or uncollected credit. You can still save it, and the payout summary memo will show the remaining amount.</div>}
+                  <div>
+                    <Label>{selectedAdjustment >= 0 ? 'Amount Paid Now' : 'Credit Received Now'}</Label>
+                    <Input className="h-9 text-right" type="number" step="0.01" min="0" value={adjustmentPaymentAmount} onChange={event => setAdjustmentPaymentAmount(event.target.value)} placeholder="0.00" disabled={selectedAdjustment === 0} />
+                  </div>
+                  <div>
+                    <Label>Payment Method</Label>
+                    <Select value={adjustmentPaymentMethod || undefined} onValueChange={(value: string | null) => value && setAdjustmentPaymentMethod(value as PaymentMethod)}>
+                      <SelectTrigger className="h-9"><span>{paymentMethodLabel(adjustmentPaymentMethod)}</span></SelectTrigger>
+                      <SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="check">Check</SelectItem><SelectItem value="ach">ACH</SelectItem></SelectContent>
+                    </Select>
+                  </div>
+                  <div className="md:col-span-2"><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Reason for correcting this paid payroll" /></div>
                 </div>
                 <div className="overflow-x-auto rounded-lg border bg-white">
                   <div className="border-b bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-950">{selectedItem.employee_name} Time Records</div>
@@ -683,9 +992,28 @@ export default function PayrollPayoutsReportPage() {
               {editing && (
                 <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-amber-900">This will replace existing saved payroll data and refresh reports/dashboard from the updated payout.</p>
-                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => { setEditing(false); setItemEdits({}); setClockEdits({}); setAdjustmentMemo(''); setAdjustmentSettled(false); setMemoEdit(selectedRun.memo ?? '') }} disabled={saving}>Cancel</Button><Button size="sm" onClick={() => void saveEdit()} disabled={saving}>{saving ? 'Saving...' : 'Save Replacement'}</Button></div>
+                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => { setEditing(false); setItemEdits({}); setClockEdits({}); setAdjustmentMemo(''); setAdjustmentPaymentAmount(''); setAdjustmentPaymentMethod(''); setTipImpactEmployeeIds(new Set()); setMemoEdit(selectedRun.memo ?? '') }} disabled={saving}>Cancel</Button><Button size="sm" onClick={() => void saveEdit()} disabled={saving}>{saving ? 'Saving...' : 'Save Replacement'}</Button></div>
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!saveResult} onOpenChange={(open) => { if (!open) setSaveResult(null) }}>
+        <DialogContent className="w-[calc(100vw-2rem)] !max-w-lg p-6">
+          <DialogHeader><DialogTitle>{saveResult?.title}</DialogTitle></DialogHeader>
+          {saveResult && (
+            <div className="space-y-3">
+              <Badge variant="outline" className={saveResult.success ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}>
+                {saveResult.success ? 'Saved' : 'Needs Attention'}
+              </Badge>
+              <div className="space-y-2 text-sm text-slate-700">
+                {saveResult.details.map((detail, index) => <p key={`${detail}-${index}`}>{detail}</p>)}
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => setSaveResult(null)}>OK</Button>
+              </div>
             </div>
           )}
         </DialogContent>
