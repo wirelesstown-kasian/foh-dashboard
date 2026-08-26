@@ -244,29 +244,41 @@ export async function PATCH(req: NextRequest) {
 
     if (updateRun.error) return NextResponse.json({ error: updateRun.error.message }, { status: 500 })
 
-    for (const [index, row] of rows.entries()) {
-      if (!row.id) return NextResponse.json({ error: `Missing payroll item id for ${row.employee_name || 'employee row'}` }, { status: 400 })
-      const updateItem = await supabaseAdmin
-        .from('payroll_run_items')
-        .update({
-          payment_method: row.payment_method,
-          hours: normalizeNumber(row.hours),
-          tips: normalizeNumber(row.tips),
-          base_wages: normalizeNumber(row.base_wages),
-          guarantee_top_up: normalizeNumber(row.guarantee_top_up),
-          commission: normalizeNumber(row.commission),
-          deductions: normalizeNumber(row.deductions),
-          gross_pay: normalizeNumber(row.gross_pay),
-          net_pay: normalizeNumber(row.net_pay),
-          payout_amount: normalizeNumber(row.payout_amount),
-          cash_rounding: normalizeNumber(row.cash_rounding),
-          memo: row.memo?.trim() || null,
-          display_order: index,
-        })
-        .eq('id', row.id)
-        .eq('run_id', payload.run_id)
+    const itemRows = rows.map((row, index) => {
+      if (!row.id) throw new Error(`Missing payroll item id for ${row.employee_name || 'employee row'}`)
+      return {
+        id: row.id,
+        run_id: payload.run_id!,
+        employee_id: row.employee_id || null,
+        employee_name: row.employee_name || 'Unknown employee',
+        role: row.role || null,
+        department: row.department || existingRun.department,
+        payment_method: row.payment_method as PaymentMethod,
+        hours: normalizeNumber(row.hours),
+        tips: normalizeNumber(row.tips),
+        base_wages: normalizeNumber(row.base_wages),
+        guarantee_top_up: normalizeNumber(row.guarantee_top_up),
+        commission: normalizeNumber(row.commission),
+        deductions: normalizeNumber(row.deductions),
+        gross_pay: normalizeNumber(row.gross_pay),
+        net_pay: normalizeNumber(row.net_pay),
+        payout_amount: normalizeNumber(row.payout_amount),
+        cash_rounding: normalizeNumber(row.cash_rounding),
+        has_auto_clock_out: row.has_auto_clock_out === true,
+        has_open_clock: row.has_open_clock === true,
+        memo: row.memo?.trim() || null,
+        display_order: index,
+      }
+    })
 
-      if (updateItem.error) return NextResponse.json({ error: updateItem.error.message }, { status: 500 })
+    const upsertItems = await supabaseAdmin
+      .from('payroll_run_items')
+      .upsert(itemRows, { onConflict: 'id' })
+      .select('id')
+
+    if (upsertItems.error) return NextResponse.json({ error: upsertItems.error.message }, { status: 500 })
+    if ((upsertItems.data ?? []).length !== itemRows.length) {
+      return NextResponse.json({ error: 'Payroll item save verification failed. Not all rows were saved.' }, { status: 500 })
     }
 
     let cashEntryId: string | null = null

@@ -158,6 +158,13 @@ function getPayoutRange(period: PayoutPeriod, refDate: string, customStart: stri
   return [customStart, customEnd] as const
 }
 
+async function fetchPayrollRuns() {
+  const res = await fetch('/api/payroll-runs', { cache: 'no-store' })
+  const payload = (await res.json().catch(() => ({}))) as { payroll_runs?: SavedPayrollRun[]; error?: string }
+  if (!res.ok) throw new Error(payload.error ?? 'Failed to reload saved payroll payouts.')
+  return payload.payroll_runs ?? []
+}
+
 function escapePrintValue(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
@@ -446,6 +453,7 @@ export default function PayrollPayoutsReportPage() {
       if (editedClockRecords.length > 0) {
         setClockRecords(current => current.map(record => editedClockRecords.find(next => next.id === record.id) ?? record))
       }
+      const notices = ['Saved payroll payout updated. This replaced the existing payroll data.']
       const sheetSync = await fetch('/api/payroll-sheet-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -453,14 +461,31 @@ export default function PayrollPayoutsReportPage() {
       })
       if (!sheetSync.ok) {
         const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
-        throw new Error(sheetPayload.error ?? 'Payroll updated, but Google Sheets sync failed.')
+        notices.push(`Google Sheets sync failed: ${sheetPayload.error ?? 'unknown error'}`)
+      } else {
+        const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { payroll?: { skipped?: boolean; reason?: string; sheetName?: string } }
+        if (sheetPayload.payroll?.skipped) {
+          notices.push(`Google Sheets sync skipped: ${sheetPayload.payroll.reason ?? 'not configured.'}`)
+        } else {
+          notices.push(`Google Sheets synced${sheetPayload.payroll?.sheetName ? ` (${sheetPayload.payroll.sheetName})` : ''}.`)
+        }
       }
       if (payload.cash_entry_id) {
-        await fetch('/api/cash-balance-sheet-sync', {
+        const cashSync = await fetch('/api/cash-balance-sheet-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ entry_id: payload.cash_entry_id }),
         })
+        if (!cashSync.ok) {
+          const cashPayload = (await cashSync.json().catch(() => ({}))) as { error?: string }
+          notices.push(`Cash log Google Sheets sync failed: ${cashPayload.error ?? 'unknown error'}`)
+        }
+      }
+      try {
+        const refreshedRuns = await fetchPayrollRuns()
+        setPayrollRuns(refreshedRuns)
+      } catch (error) {
+        notices.push(error instanceof Error ? error.message : 'Payroll saved, but reload failed.')
       }
       notifyReportingDataChanged()
       setItemEdits({})
@@ -468,7 +493,7 @@ export default function PayrollPayoutsReportPage() {
       setAdjustmentMemo('')
       setAdjustmentSettled(false)
       setEditing(false)
-      setMessage('Saved payroll payout updated. This replaced the existing payroll data and synced reporting.')
+      setMessage(notices.join(' '))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Failed to update payroll payout.')
     } finally {
