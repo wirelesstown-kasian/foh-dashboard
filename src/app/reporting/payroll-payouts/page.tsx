@@ -545,9 +545,9 @@ export default function PayrollPayoutsReportPage() {
   const selectedItem = displayedItems[0] ?? null
   const summary = selectedRun ? buildSavedPayrollSummary({ ...selectedRun, payroll_run_items: editedItems }) : null
   const schedules = useSchedulesByRange(selectedRun?.start_date ?? '', selectedRun?.end_date ?? '')
-  const selectedClockRecords = selectedRun && selectedItem?.employee_id
+  const selectedClockRecords = useMemo(() => selectedRun && selectedItem?.employee_id
     ? getEmployeeClockRecords({ employeeId: selectedItem.employee_id, clockRecords, employees, department: selectedRun.department, startDate: selectedRun.start_date, endDate: selectedRun.end_date, schedules })
-    : []
+    : [], [clockRecords, employees, schedules, selectedItem?.employee_id, selectedRun])
   const selectedOriginalItem = selectedRun?.payroll_run_items?.find(item => selectedItem && item.id === selectedItem.id) ?? null
   const selectedAdjustment = selectedItem && selectedOriginalItem
     ? normalizeMoney(Number(selectedItem.payout_amount ?? 0) - Number(selectedOriginalItem.payout_amount ?? 0))
@@ -677,19 +677,28 @@ export default function PayrollPayoutsReportPage() {
           ...patch,
         },
       }
-      if (selectedItem) {
-        const nextHours = selectedClockRecords.reduce((sum, item) => sum + getEditedClockHours(item, next[item.id]), 0)
-        setItemEdits(itemEditsCurrent => ({
-          ...itemEditsCurrent,
-          [selectedItem.id]: calculateSavedPayrollItem(selectedOriginalItem ?? selectedItem, {
-            ...(itemEditsCurrent[selectedItem.id] ?? {}),
-            hours: normalizeMoney(nextHours),
-          }, employees),
-        }))
-      }
       return next
     })
   }
+
+  useEffect(() => {
+    if (!isIndividualMode || !selectedItem || !selectedOriginalItem || selectedClockRecords.length === 0) return
+    const hasReadyEdits = selectedClockRecords.every(record => clockEdits[record.id])
+    if (!hasReadyEdits) return
+    const nextHours = normalizeMoney(selectedClockRecords.reduce((sum, record) => sum + getEditedClockHours(record, clockEdits[record.id]), 0))
+    setItemEdits(current => {
+      const currentPatch = current[selectedOriginalItem.id] ?? {}
+      const currentHours = normalizeMoney(currentPatch.hours ?? selectedOriginalItem.hours)
+      if (currentHours === nextHours) return current
+      return {
+        ...current,
+        [selectedOriginalItem.id]: calculateSavedPayrollItem(selectedOriginalItem, {
+          ...currentPatch,
+          hours: nextHours,
+        }, employees),
+      }
+    })
+  }, [clockEdits, employees, isIndividualMode, selectedClockRecords, selectedItem, selectedOriginalItem])
 
   const saveEdit = async () => {
     if (!selectedRun) return
