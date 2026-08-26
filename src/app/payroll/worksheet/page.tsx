@@ -138,6 +138,30 @@ function calculateDailyPayout(row: Pick<PayrollDraftRow | PayrollRunItem, 'hours
   return normalizeMoney(row.payout_amount * (hours / row.hours))
 }
 
+function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollRunItem>) {
+  const paymentMethod = patch.payment_method ?? item.payment_method
+  const baseWages = normalizeMoney(item.base_wages)
+  const topUp = normalizeMoney(item.guarantee_top_up)
+  const tips = normalizeMoney(item.tips)
+  const commission = normalizeMoney(patch.commission ?? item.commission)
+  const deductions = normalizeMoney(patch.deductions ?? item.deductions)
+  const grossPay = normalizeMoney(baseWages + topUp + tips + commission)
+  const netPay = normalizeMoney(Math.max(0, grossPay - deductions))
+  const payoutAmount = paymentMethod === 'cash' ? Math.floor(netPay) : netPay
+
+  return {
+    ...item,
+    ...patch,
+    payment_method: paymentMethod,
+    commission,
+    deductions,
+    gross_pay: grossPay,
+    net_pay: netPay,
+    payout_amount: payoutAmount,
+    cash_rounding: normalizeMoney(netPay - payoutAmount),
+  }
+}
+
 function getEmployeeClockRecords({
   employeeId,
   clockRecords,
@@ -404,7 +428,7 @@ export default function WageWorksheetPage() {
   const employees = useEmployees()
   const { clockRecords, setClockRecords } = useClockRecords()
   const { eodReports } = useEodReports()
-  const { payrollRuns } = usePayrollRuns()
+  const { payrollRuns, setPayrollRuns } = usePayrollRuns()
   const { departmentDefinitions } = useAppSettings()
   const initialPayrollCycle = getPayrollCycleForDepartment('all', departmentDefinitions)
   const initialPayrollPeriod = getDefaultPayrollPeriod(initialPayrollCycle)
@@ -426,6 +450,10 @@ export default function WageWorksheetPage() {
   const [summaryRunId, setSummaryRunId] = useState<string | null>(null)
   const [summaryView, setSummaryView] = useState<'department' | 'individual'>('department')
   const [summaryEmployeeId, setSummaryEmployeeId] = useState<string>('all')
+  const [editingSummary, setEditingSummary] = useState(false)
+  const [summaryMemoEdit, setSummaryMemoEdit] = useState('')
+  const [summaryItemEdits, setSummaryItemEdits] = useState<Record<string, Partial<PayrollRunItem>>>({})
+  const [savingSummaryEdit, setSavingSummaryEdit] = useState(false)
   const [breakReviewEmployeeId, setBreakReviewEmployeeId] = useState<string | null>(null)
   const [breakEdits, setBreakEdits] = useState<Record<string, BreakEditState>>({})
   const [savingBreakId, setSavingBreakId] = useState<string | null>(null)
@@ -463,6 +491,10 @@ export default function WageWorksheetPage() {
   const recentPayrollRuns = useMemo(() => [...payrollRuns]
     .sort((left, right) => right.pay_date.localeCompare(left.pay_date) || right.created_at.localeCompare(left.created_at))
   , [payrollRuns])
+  const existingPayoutRun = useMemo(() => payrollRuns.find(run => {
+    if (run.start_date !== startDate || run.end_date !== endDate) return false
+    return run.department === department || run.department === 'all' || department === 'all'
+  }) ?? null, [department, endDate, payrollRuns, startDate])
   const selectedSummaryRun = useMemo(
     () => payrollRuns.find(run => run.id === summaryRunId) ?? null,
     [payrollRuns, summaryRunId]
@@ -472,10 +504,11 @@ export default function WageWorksheetPage() {
   const selectedSummaryItems = useMemo(() => {
     const items = [...(selectedSummaryRun?.payroll_run_items ?? [])]
       .sort((left, right) => left.display_order - right.display_order || left.employee_name.localeCompare(right.employee_name))
+      .map(item => summaryItemEdits[item.id] ? calculateSavedPayrollItem(item, summaryItemEdits[item.id]) : item)
     return summaryView === 'individual' && summaryEmployeeId !== 'all'
       ? items.filter(item => item.employee_id === summaryEmployeeId || item.employee_name === summaryEmployeeId)
       : items
-  }, [selectedSummaryRun, summaryEmployeeId, summaryView])
+  }, [selectedSummaryRun, summaryEmployeeId, summaryItemEdits, summaryView])
   const selectedSummaryItem = selectedSummaryItems[0] ?? null
   const selectedSummaryClockRecords = selectedSummaryRun && selectedSummaryItem?.employee_id
     ? getEmployeeClockRecords({
@@ -558,6 +591,11 @@ export default function WageWorksheetPage() {
   }
 
   const buildWorksheet = () => {
+    if (existingPayoutRun) {
+      setMessage('A payroll payout already exists for this period. Open the saved payout summary to edit it instead of creating another payout.')
+      openSavedSummary(existingPayoutRun.id)
+      return
+    }
     const nextRows = buildPayrollDraftRows({
       employees,
       clockRecords,
@@ -682,9 +720,85 @@ export default function WageWorksheetPage() {
   }
 
   const openSavedSummary = (runId: string) => {
-    setSummaryRunId(runId)
-    setSummaryView('department')
-    setSummaryEmployeeId('all')
+    window.location.href = `/reporting/payroll-payouts?run=${encodeURIComponent(runId)}`
+  }
+
+  const updateSummaryItemEdit = (item: PayrollRunItem, patch: Partial<PayrollRunItem>) => {
+    setSummaryItemEdits(current => ({
+      ...current,
+      [item.id]: calculateSavedPayrollItem(item, { ...current[item.id], ...patch }),
+    }))
+  }
+
+  const saveSummaryEdit = async () => {
+    if (!selectedSummaryRun) return
+    const editedItems = [...(selectedSummaryRun.payroll_run_items ?? [])]
+      .sort((left, right) => left.display_order - right.display_order || left.employee_name.localeCompare(right.employee_name))
+      .map(item => summaryItemEdits[item.id] ? calculateSavedPayrollItem(item, summaryItemEdits[item.id]) : item)
+
+    setSavingSummaryEdit(true)
+    setMessage(null)
+    try {
+      const res = await fetch('/api/payroll-runs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          run_id: selectedSummaryRun.id,
+          memo: summaryMemoEdit,
+          rows: editedItems,
+        }),
+      })
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; run_id?: string; cash_entry_id?: string | null }
+      if (!res.ok) throw new Error(payload.error ?? 'Failed to update payroll payout.')
+
+      const updatedTotals = getPayrollTotals(editedItems.map(item => ({
+        payment_method: item.payment_method ?? '',
+        payout_amount: Number(item.payout_amount ?? 0),
+        gross_pay: Number(item.gross_pay ?? 0),
+        deductions: Number(item.deductions ?? 0),
+        net_pay: Number(item.net_pay ?? 0),
+      })))
+      setPayrollRuns(currentRuns => currentRuns.map(run => run.id === selectedSummaryRun.id
+        ? {
+            ...run,
+            memo: summaryMemoEdit.trim() || null,
+            total_cash: updatedTotals.cash,
+            total_check: updatedTotals.check,
+            total_ach: updatedTotals.ach,
+            total_gross: updatedTotals.gross,
+            total_deductions: updatedTotals.deductions,
+            total_net: updatedTotals.net,
+            updated_at: new Date().toISOString(),
+            payroll_run_items: editedItems,
+          }
+        : run
+      ))
+
+      const sheetSync = await fetch('/api/payroll-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: selectedSummaryRun.id }),
+      })
+      if (!sheetSync.ok) {
+        const sheetPayload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
+        throw new Error(sheetPayload.error ?? 'Payroll updated, but Google Sheets sync failed.')
+      }
+      if (payload.cash_entry_id) {
+        await fetch('/api/cash-balance-sheet-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entry_id: payload.cash_entry_id }),
+        })
+      }
+      notifyReportingDataChanged()
+      setSummaryItemEdits({})
+      setEditingSummary(false)
+      setMessage('Saved payroll payout updated.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Failed to update payroll payout.')
+    } finally {
+      setSavingSummaryEdit(false)
+    }
   }
 
   const saveBreakEdit = async (record: ShiftClock) => {
@@ -866,6 +980,11 @@ export default function WageWorksheetPage() {
   const savePayroll = async () => {
     if (missingPaymentRows.length > 0) {
       setMessage('Select a payment method for every employee before saving.')
+      return
+    }
+    if (existingPayoutRun) {
+      setMessage('A payroll payout already exists for this period. Open the saved payout summary to edit it instead of creating another payout.')
+      openSavedSummary(existingPayoutRun.id)
       return
     }
     setSaving(true)
@@ -1097,63 +1216,30 @@ export default function WageWorksheetPage() {
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-              <p className="text-sm text-muted-foreground">Rows with zero recorded hours are skipped unless added manually.</p>
-              <Button className="min-w-32" onClick={buildWorksheet} disabled={!startDate || !endDate || !payDate}>Next</Button>
+              <div>
+                <p className="text-sm text-muted-foreground">Rows with zero recorded hours are skipped unless added manually.</p>
+                {existingPayoutRun && (
+                  <p className="mt-1 text-sm font-medium text-red-700">
+                    Payout already saved for this period. Open the saved payout summary to edit it.
+                  </p>
+                )}
+              </div>
+              <Button className="min-w-32" onClick={buildWorksheet} disabled={!startDate || !endDate || !payDate || !!existingPayoutRun}>Next</Button>
             </div>
           </div>
 
-          <div className="mt-4 rounded-xl border bg-white">
-            <div className="flex flex-col gap-2 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-4 rounded-xl border bg-white p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="font-semibold text-slate-950">Saved Payroll Payouts</h3>
-                <p className="text-xs text-muted-foreground">Created wage worksheets and payout method totals.</p>
+                <p className="text-xs text-muted-foreground">Search, reprint, and edit saved payouts from Reporting.</p>
               </div>
-              <Badge variant="outline" className="w-fit border-emerald-300 bg-emerald-50 text-emerald-800">Payout Saved</Badge>
-            </div>
-            <div className="overflow-x-auto">
-              <Table className="min-w-[960px] text-xs">
-                <TableHeader>
-                  <TableRow className="bg-slate-50 hover:bg-slate-50">
-                    <TableHead>Status</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Pay Date</TableHead>
-                    <TableHead>Period</TableHead>
-                    <TableHead className="text-right">Cash</TableHead>
-                    <TableHead className="text-right">Check</TableHead>
-                    <TableHead className="text-right">ACH</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Summary</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentPayrollRuns.map(run => (
-                    <TableRow key={run.id}>
-                      <TableCell>
-                        <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Saved</Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">{departmentOptions.find(option => option.key === run.department)?.label ?? run.department}</TableCell>
-                      <TableCell>{run.pay_date}</TableCell>
-                      <TableCell>{run.start_date} to {run.end_date}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(Number(run.total_cash ?? 0))}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(Number(run.total_check ?? 0))}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(Number(run.total_ach ?? 0))}</TableCell>
-                      <TableCell className="text-right font-semibold">{formatCurrency(Number(run.total_net ?? 0))}</TableCell>
-                      <TableCell>{format(new Date(run.created_at), 'MMM d, h:mm a')}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="outline" size="sm" onClick={() => openSavedSummary(run.id)}>Open</Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {recentPayrollRuns.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={10} className="py-6 text-center text-muted-foreground">
-                        No saved payroll payouts yet. After Save Worksheet, the payout summary will appear here.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+              <Link
+                href="/reporting/payroll-payouts"
+                className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                Open Payroll Payouts
+              </Link>
             </div>
           </div>
         </div>
@@ -1504,6 +1590,9 @@ export default function WageWorksheetPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant={summaryView === 'department' ? 'default' : 'outline'} size="sm" onClick={() => setSummaryView('department')}>Department</Button>
                   <Button variant={summaryView === 'individual' ? 'default' : 'outline'} size="sm" onClick={() => setSummaryView('individual')}>Individual</Button>
+                  <Button variant={editingSummary ? 'default' : 'outline'} size="sm" onClick={() => setEditingSummary(value => !value)}>
+                    {editingSummary ? 'Editing' : 'Edit'}
+                  </Button>
                   {summaryView === 'individual' && (
                     <Select value={summaryEmployeeId === 'all' ? undefined : summaryEmployeeId} onValueChange={(value: string | null) => value && setSummaryEmployeeId(value)}>
                       <SelectTrigger className="h-8 w-48">
@@ -1540,6 +1629,12 @@ export default function WageWorksheetPage() {
               {selectedSummaryRun.memo && (
                 <div className="rounded-xl border bg-slate-50 p-3 text-sm text-slate-700">
                   <span className="font-semibold text-slate-950">Memo: </span>{selectedSummaryRun.memo}
+                </div>
+              )}
+              {editingSummary && (
+                <div className="rounded-xl border bg-white p-3">
+                  <Label>Payroll Memo</Label>
+                  <Textarea value={summaryMemoEdit} onChange={event => setSummaryMemoEdit(event.target.value)} />
                 </div>
               )}
 
@@ -1606,22 +1701,57 @@ export default function WageWorksheetPage() {
                   <TableBody>
                     {selectedSummaryItems.map(item => (
                         <TableRow key={item.id}>
-                          <TableCell>{paymentMethodLabel(item.payment_method)}</TableCell>
+                          <TableCell>
+                            {editingSummary ? (
+                              <Select value={item.payment_method ?? undefined} onValueChange={(value: string | null) => value && updateSummaryItemEdit(item, { payment_method: value as PaymentMethod })}>
+                                <SelectTrigger className="h-8 w-28"><span>{paymentMethodLabel(item.payment_method)}</span></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="cash">Cash</SelectItem>
+                                  <SelectItem value="check">Check</SelectItem>
+                                  <SelectItem value="ach">ACH</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : paymentMethodLabel(item.payment_method)}
+                          </TableCell>
                           <TableCell className="font-medium">{item.employee_name}</TableCell>
                           <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>
                           <TableCell className="text-right">{Number(item.hours ?? 0).toFixed(2)}</TableCell>
                           <TableCell className="text-right">{formatCurrency(Number(item.tips ?? 0))}</TableCell>
                           <TableCell className="text-right">{formatCurrency(Number(item.base_wages ?? 0))}</TableCell>
                           <TableCell className="text-right">{formatCurrency(Number(item.guarantee_top_up ?? 0))}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(Number(item.commission ?? 0))}</TableCell>
-                          <TableCell className="text-right text-red-700">{formatCurrency(Number(item.deductions ?? 0))}</TableCell>
+                          <TableCell className="text-right">
+                            {editingSummary ? (
+                              <Input className="h-8 text-right" type="number" step="0.01" value={Number(item.commission ?? 0)} onChange={event => updateSummaryItemEdit(item, { commission: normalizeMoney(event.target.value) })} />
+                            ) : formatCurrency(Number(item.commission ?? 0))}
+                          </TableCell>
+                          <TableCell className="text-right text-red-700">
+                            {editingSummary ? (
+                              <Input className="h-8 text-right" type="number" step="0.01" value={Number(item.deductions ?? 0)} onChange={event => updateSummaryItemEdit(item, { deductions: normalizeMoney(event.target.value) })} />
+                            ) : formatCurrency(Number(item.deductions ?? 0))}
+                          </TableCell>
                           <TableCell className="text-right font-semibold">{formatCurrency(Number(item.payout_amount ?? 0))}</TableCell>
-                          <TableCell>{item.memo || ''}</TableCell>
+                          <TableCell>
+                            {editingSummary ? (
+                              <Input className="h-8" value={item.memo || ''} onChange={event => updateSummaryItemEdit(item, { memo: event.target.value })} />
+                            ) : item.memo || ''}
+                          </TableCell>
                         </TableRow>
                       ))}
                   </TableBody>
                 </Table>
               </div>
+
+              {editingSummary && (
+                <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-amber-900">
+                    Editing this saved payout updates the original payroll record. If cash payout changes, a cash in/out adjustment will be recorded.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setEditingSummary(false); setSummaryItemEdits({}); setSummaryMemoEdit(selectedSummaryRun.memo ?? '') }} disabled={savingSummaryEdit}>Cancel</Button>
+                    <Button size="sm" onClick={() => void saveSummaryEdit()} disabled={savingSummaryEdit}>{savingSummaryEdit ? 'Saving...' : 'Save Changes'}</Button>
+                  </div>
+                </div>
+              )}
 
               {summaryView === 'individual' && selectedSummaryItem && (
                 <div className="overflow-x-auto rounded-lg border bg-white">
@@ -1798,14 +1928,14 @@ export default function WageWorksheetPage() {
               )}
             </div>
           )}
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => printSummary({ rows, totals, startDate, endDate, payDate, department, memo, clockRecords, employees, schedules })}>Print Summary</Button>
+          <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
+            <Button className="w-full sm:w-auto" variant="outline" onClick={() => printSummary({ rows, totals, startDate, endDate, payDate, department, memo, clockRecords, employees, schedules })}>Print Summary</Button>
             {confirmStep === 'summary' ? (
-              <Button onClick={() => setConfirmStep('final')}>Continue</Button>
+              <Button className="w-full sm:w-auto" onClick={() => setConfirmStep('final')}>Continue</Button>
             ) : (
               <>
-                <Button variant="outline" onClick={() => setConfirmStep('summary')} disabled={saving}>Back</Button>
-                <Button onClick={savePayroll} disabled={saving}>{saving ? 'Saving...' : 'Confirm & Save Payroll'}</Button>
+                <Button className="w-full sm:w-auto" variant="outline" onClick={() => setConfirmStep('summary')} disabled={saving}>Back</Button>
+                <Button className="w-full sm:w-auto" onClick={savePayroll} disabled={saving}>{saving ? 'Saving...' : 'Confirm & Save Payroll'}</Button>
               </>
             )}
           </div>

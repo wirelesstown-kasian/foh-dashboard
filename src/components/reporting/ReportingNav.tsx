@@ -8,6 +8,7 @@ const links = [
   { href: '/reporting/task-performance', label: 'Task Performance' },
   { href: '/reporting/task-detail', label: 'Task Detail' },
   { href: '/reporting/wages', label: 'Wage Report' },
+  { href: '/reporting/payroll-payouts', label: 'Payroll Payouts' },
   { href: '/reporting/clock-records', label: 'Clock Records' },
   { href: '/reporting/eod-history', label: 'EOD History' },
   { href: '/roles-departments', label: 'Roles and Departments' },

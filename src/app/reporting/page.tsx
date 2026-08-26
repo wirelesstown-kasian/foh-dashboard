@@ -30,6 +30,12 @@ const reportingCards = [
     icon: DollarSign,
   },
   {
+    href: '/reporting/payroll-payouts',
+    title: 'Payroll Payouts',
+    description: 'Search, reprint, and edit saved payroll payouts.',
+    icon: DollarSign,
+  },
+  {
     href: '/reporting/eod-history',
     title: 'EOD History',
     description: 'Review store-wide revenue, tips, deposits, and period totals.',
