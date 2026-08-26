@@ -299,7 +299,7 @@ export default function PayrollPayoutsReportPage() {
 
   return (
     <div className="p-6">
-      <AdminSubpageHeader title="Payroll Payouts" subtitle="Search, reprint, and edit saved payroll payouts." backHref="/reporting" backLabel="Back to Reporting" />
+      <AdminSubpageHeader title="Payroll Payouts" subtitle="Search, reprint, and edit saved payroll payouts." backHref="/admin" backLabel="Back to Admin Board" />
       <ReportingNav />
       {message && <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{message}</div>}
       <div className="rounded-xl border bg-white">

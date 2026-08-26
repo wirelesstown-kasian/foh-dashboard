@@ -443,7 +443,8 @@ export default function WageWorksheetPage() {
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([])
   const [employeeToAdd, setEmployeeToAdd] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [confirmStep, setConfirmStep] = useState<'summary' | 'final'>('summary')
+  const [confirmStep, setConfirmStep] = useState<'summary' | 'final' | 'done'>('summary')
+  const [confirmMessage, setConfirmMessage] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [cashBalancePreview, setCashBalancePreview] = useState<number | null>(null)
@@ -582,12 +583,16 @@ export default function WageWorksheetPage() {
 
   const openPayoutConfirmation = () => {
     setConfirmStep('summary')
+    setConfirmMessage(null)
     setConfirmOpen(true)
   }
 
   const closePayoutConfirmation = (open: boolean) => {
     setConfirmOpen(open)
-    if (!open) setConfirmStep('summary')
+    if (!open) {
+      setConfirmStep('summary')
+      setConfirmMessage(null)
+    }
   }
 
   const buildWorksheet = () => {
@@ -989,6 +994,7 @@ export default function WageWorksheetPage() {
     }
     setSaving(true)
     setMessage(null)
+    setConfirmMessage(null)
     try {
       const payrollSave = await fetch('/api/payroll-runs', {
         method: 'POST',
@@ -1036,7 +1042,6 @@ export default function WageWorksheetPage() {
       }
 
       notifyReportingDataChanged()
-      setConfirmOpen(false)
       const notices = ['Payroll worksheet saved.']
       if (!sheetSync.ok) {
         notices.push(`Payroll Google Sheets sync failed${sheetSyncPayload.error ? `: ${sheetSyncPayload.error}` : '.'}`)
@@ -1065,9 +1070,14 @@ export default function WageWorksheetPage() {
         notices.push('Payroll summary email sent.')
       }
       notices.push('Wage Report and Dashboard can now use this payroll run.')
-      setMessage(notices.join(' '))
+      const nextMessage = notices.join(' ')
+      setConfirmStep('done')
+      setConfirmMessage(nextMessage)
+      setMessage(nextMessage)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to save payroll worksheet.')
+      const nextMessage = error instanceof Error ? error.message : 'Failed to save payroll worksheet.'
+      setConfirmMessage(nextMessage)
+      setMessage(nextMessage)
     } finally {
       setSaving(false)
     }
@@ -1814,8 +1824,15 @@ export default function WageWorksheetPage() {
       <Dialog open={confirmOpen} onOpenChange={closePayoutConfirmation}>
         <DialogContent className="w-[calc(100vw-2rem)] !max-w-4xl p-6">
           <DialogHeader>
-            <DialogTitle>{confirmStep === 'summary' ? 'Payout Summary' : 'Confirm Save Payroll'}</DialogTitle>
+            <DialogTitle>
+              {confirmStep === 'summary' ? 'Payout Summary' : confirmStep === 'final' ? 'Confirm Save Payroll' : 'Payroll Save Result'}
+            </DialogTitle>
           </DialogHeader>
+          {confirmMessage && confirmStep !== 'done' && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {confirmMessage}
+            </div>
+          )}
           {confirmStep === 'summary' ? (
             <>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -1886,7 +1903,7 @@ export default function WageWorksheetPage() {
                 </div>
               )}
             </>
-          ) : (
+          ) : confirmStep === 'final' ? (
             <div className="space-y-4">
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-sm font-semibold text-amber-950">Final confirmation before saving payroll payout</p>
@@ -1927,16 +1944,49 @@ export default function WageWorksheetPage() {
                 </div>
               )}
             </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-950">Payroll save completed</p>
+                <p className="mt-2 text-sm leading-6 text-emerald-900">{confirmMessage ?? 'Payroll worksheet saved.'}</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-lg border bg-white p-3">
+                  <div className="text-xs uppercase text-muted-foreground">Employees</div>
+                  <div className="mt-1 text-xl font-bold text-slate-950">{worksheetSummary.employeeCount}</div>
+                </div>
+                <div className="rounded-lg border bg-emerald-50 p-3">
+                  <div className="text-xs uppercase text-emerald-700">Cash Out</div>
+                  <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(totals.cash)}</div>
+                </div>
+                <div className="rounded-lg border bg-white p-3">
+                  <div className="text-xs uppercase text-muted-foreground">Non-Cash</div>
+                  <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(totals.check + totals.ach)}</div>
+                </div>
+                <div className="rounded-lg border bg-slate-950 p-3 text-white">
+                  <div className="text-xs uppercase text-slate-300">Total Payout</div>
+                  <div className="mt-1 text-xl font-bold">{formatCurrency(totals.net)}</div>
+                </div>
+              </div>
+              <Link
+                href="/reporting/payroll-payouts"
+                className="inline-flex h-10 w-full items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-slate-800 sm:w-auto"
+              >
+                Open Payroll Payouts
+              </Link>
+            </div>
           )}
           <div className="grid gap-2 sm:flex sm:flex-wrap sm:justify-end">
             <Button className="w-full sm:w-auto" variant="outline" onClick={() => printSummary({ rows, totals, startDate, endDate, payDate, department, memo, clockRecords, employees, schedules })}>Print Summary</Button>
             {confirmStep === 'summary' ? (
               <Button className="w-full sm:w-auto" onClick={() => setConfirmStep('final')}>Continue</Button>
-            ) : (
+            ) : confirmStep === 'final' ? (
               <>
                 <Button className="w-full sm:w-auto" variant="outline" onClick={() => setConfirmStep('summary')} disabled={saving}>Back</Button>
                 <Button className="w-full sm:w-auto" onClick={savePayroll} disabled={saving}>{saving ? 'Saving...' : 'Confirm & Save Payroll'}</Button>
               </>
+            ) : (
+              <Button className="w-full sm:w-auto" onClick={() => closePayoutConfirmation(false)}>Done</Button>
             )}
           </div>
         </DialogContent>

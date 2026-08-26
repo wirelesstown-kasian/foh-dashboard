@@ -231,12 +231,12 @@ export function usePayrollRuns() {
     let mounted = true
 
     const load = async () => {
-      const res = await supabase
-        .from('payroll_runs')
-        .select('*, payroll_run_items(*)')
-        .order('pay_date', { ascending: false })
+      const res = await fetch('/api/payroll-runs', { cache: 'no-store' })
+      const payload = (await res.json().catch(() => ({}))) as {
+        payroll_runs?: (PayrollRun & { payroll_run_items?: PayrollRunItem[] })[]
+      }
       if (!mounted) return
-      setPayrollRuns((res.data ?? []) as (PayrollRun & { payroll_run_items?: PayrollRunItem[] })[])
+      setPayrollRuns(res.ok ? (payload.payroll_runs ?? []) : [])
     }
 
     void load()

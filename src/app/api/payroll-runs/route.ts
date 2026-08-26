@@ -57,6 +57,22 @@ function isPaymentMethod(value: unknown): value is PaymentMethod {
   return value === 'cash' || value === 'check' || value === 'ach'
 }
 
+export async function GET() {
+  const cookieStore = await cookies()
+  if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('payroll_runs')
+    .select('*, payroll_run_items(*)')
+    .order('pay_date', { ascending: false })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ payroll_runs: data ?? [] })
+}
+
 function getPayrollTotals(rows: NonNullable<PayrollRunPayload['rows']>) {
   return rows.reduce<{ cash: number; check: number; ach: number; gross: number; deductions: number; net: number }>((totals, row) => {
     const payout = normalizeNumber(row.payout_amount)

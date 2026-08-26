@@ -33,6 +33,7 @@ const adminGroups = [
     links: [
       { label: 'Dashboard', href: '/reporting/dashboard', icon: LayoutDashboard },
       { label: 'Wage Report', href: '/reporting/wages', icon: DollarSign },
+      { label: 'Payroll Payouts', href: '/reporting/payroll-payouts', icon: DollarSign },
       { label: 'Roles and Departments', href: '/roles-departments', icon: BriefcaseBusiness },
       { label: 'EOD History', href: '/reporting/eod-history', icon: ReceiptText },
     ],
