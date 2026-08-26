@@ -514,6 +514,7 @@ export default function PayrollPayoutsReportPage() {
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null)
   const [tipImpactEmployeeIds, setTipImpactEmployeeIds] = useState<Set<string>>(new Set())
   const urlRunHandledRef = useRef(false)
+  const paymentPreloadKeyRef = useRef('')
 
   const departmentOptions = useMemo(() => [
     { key: 'all', label: 'All' },
@@ -570,6 +571,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentMethod('')
     setAdjustmentPaymentDirection('pay_out')
     setTipImpactEmployeeIds(new Set())
+    paymentPreloadKeyRef.current = ''
     setEditing(false)
     setMessage(null)
   }
@@ -595,17 +597,21 @@ export default function PayrollPayoutsReportPage() {
       setAdjustmentPaymentMethod('')
       setAdjustmentPaymentDirection('pay_out')
       setTipImpactEmployeeIds(new Set())
+      paymentPreloadKeyRef.current = ''
       setEditing(false)
     }
   }, [payrollRuns])
 
   useEffect(() => {
     if (!isIndividualMode || !selectedItem) return
+    const preloadKey = `${selectedRun?.id ?? ''}|${selectedItem.id}|${selectedAdjustment.toFixed(2)}`
+    if (paymentPreloadKeyRef.current === preloadKey) return
+    paymentPreloadKeyRef.current = preloadKey
     const nextAmount = Math.abs(selectedAdjustment)
     setAdjustmentPaymentAmount(nextAmount > 0 ? nextAmount.toFixed(2) : '')
     setAdjustmentPaymentDirection(selectedAdjustment < 0 ? 'receive_credit' : 'pay_out')
     setAdjustmentPaymentMethod(selectedItem.payment_method ?? '')
-  }, [isIndividualMode, selectedAdjustment, selectedItem])
+  }, [isIndividualMode, selectedAdjustment, selectedItem, selectedRun?.id])
 
   const returnToSummary = () => {
     setSelectedEmployeeId('all')
@@ -617,6 +623,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentMethod('')
     setAdjustmentPaymentDirection('pay_out')
     setTipImpactEmployeeIds(new Set())
+    paymentPreloadKeyRef.current = ''
     setMemoEdit(selectedRun?.memo ?? '')
     setMessage(null)
   }
@@ -638,6 +645,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentAmount('')
     setAdjustmentPaymentMethod('')
     setTipImpactEmployeeIds(new Set())
+    paymentPreloadKeyRef.current = ''
     setClockEdits(() => {
       if (!selectedRun || !item.employee_id) return {}
       const records = getEmployeeClockRecords({
@@ -907,6 +915,7 @@ export default function PayrollPayoutsReportPage() {
       setAdjustmentPaymentDirection('pay_out')
       setSelectedEmployeeId('all')
       setSelectedRunId(null)
+      paymentPreloadKeyRef.current = ''
       setEditing(false)
       setMessage(null)
       setSaveResult({ success: true, title: 'Payroll payout saved', details: changedDetails })
