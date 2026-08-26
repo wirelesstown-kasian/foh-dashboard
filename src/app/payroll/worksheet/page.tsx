@@ -226,6 +226,7 @@ export default function WageWorksheetPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [cashBalancePreview, setCashBalancePreview] = useState<number | null>(null)
   const stepRef = useRef(step)
 
   useEffect(() => {
@@ -393,6 +394,22 @@ export default function WageWorksheetPage() {
     return normalizeMoney(eodCashTotal + cashEntryTotal)
   }
 
+  useEffect(() => {
+    if (!confirmOpen) return
+    let mounted = true
+    void (async () => {
+      try {
+        const cashOnHand = await getCurrentCashOnHand()
+        if (mounted) setCashBalancePreview(cashOnHand)
+      } catch {
+        if (mounted) setCashBalancePreview(null)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [confirmOpen])
+
   const recordPayrollCashOut = async (runId: string) => {
     const cashTotal = normalizeMoney(totals.cash)
     if (cashTotal <= 0) {
@@ -405,7 +422,7 @@ export default function WageWorksheetPage() {
       .map(row => `${row.employee_name} ${formatCurrency(row.payout_amount)}`)
       .join(', ')
     const description = [
-      `Payroll cash payout - ${departmentLabel}`,
+      `Wage Worksheet cash payout - ${departmentLabel}`,
       `${startDate} to ${endDate}`,
       `Pay date ${payDate}`,
       `Run ${runId}`,
@@ -431,6 +448,7 @@ export default function WageWorksheetPage() {
     }
 
     const cashOnHand = await getCurrentCashOnHand()
+    setCashBalancePreview(cashOnHand)
     const sheetSync = await fetch('/api/cash-balance-sheet-sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -444,6 +462,7 @@ export default function WageWorksheetPage() {
 
     return {
       recorded: true,
+      cashOnHand,
       skipped: sheetPayload.skipped === true,
       reason: sheetPayload.reason,
       error: sheetSync.ok ? undefined : sheetPayload.error ?? 'Cash log Google Sheets sync failed.',
@@ -537,7 +556,7 @@ export default function WageWorksheetPage() {
         notices.push(`Payroll synced to Google Sheets${sheetSyncPayload.payroll?.sheetName ? ` (${sheetSyncPayload.payroll.sheetName})` : ''}.`)
       }
       if (cashOutResult.recorded) {
-        notices.push('Cash payout was recorded as Cash Out.')
+        notices.push(`Cash payout was recorded as Cash Out. Current cash on hand: ${formatCurrency(cashOutResult.cashOnHand ?? 0)}.`)
         if (cashOutResult.error) {
           notices.push(`Cash log Google Sheets sync failed: ${cashOutResult.error}`)
         } else if (cashOutResult.skipped) {
@@ -582,7 +601,7 @@ export default function WageWorksheetPage() {
             </Link>
             <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Create Payroll Worksheet</h2>
+                <h2 className="text-xl font-semibold">Wage Worksheet</h2>
               </div>
               <div className="rounded-lg border border-white/20 px-3 py-1.5 text-right">
                 <div className="text-xs uppercase text-slate-300">Selected Period</div>
@@ -962,6 +981,12 @@ export default function WageWorksheetPage() {
               <div className="text-xs uppercase text-emerald-700">Cash Payout</div>
               <div className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(totals.cash)}</div>
             </div>
+            <div className="rounded-lg border bg-red-50 p-3">
+              <div className="text-xs uppercase text-red-700">Cash After Payout</div>
+              <div className="mt-1 text-xl font-bold text-red-950">
+                {cashBalancePreview == null ? 'Loading...' : formatCurrency(cashBalancePreview - totals.cash)}
+              </div>
+            </div>
             <div className="rounded-lg border bg-white p-3">
               <div className="text-xs uppercase text-muted-foreground">Check Payout</div>
               <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(totals.check)}</div>
@@ -989,6 +1014,11 @@ export default function WageWorksheetPage() {
               <div className="mt-1 font-semibold text-slate-950">{formatCurrency(totals.net)}</div>
             </div>
           </div>
+          {totals.cash > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+              Saving this worksheet records a Cash Out for {formatCurrency(totals.cash)} in EOD History / Cash In-Out with a wage worksheet note.
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => printSummary({ rows, totals, startDate, endDate, payDate, department, memo })}>Print Summary</Button>
             <Button onClick={savePayroll} disabled={saving}>{saving ? 'Saving…' : 'Save Worksheet'}</Button>

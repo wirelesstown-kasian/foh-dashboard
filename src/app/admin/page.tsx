@@ -10,7 +10,7 @@ const adminGroups = [
     icon: Users,
     description: 'Employee setup, pay settings, payroll worksheet, and wage review.',
     links: [
-      { label: 'New Wage Worksheet', href: '/payroll/worksheet', icon: DollarSign },
+      { label: 'Wage Worksheet', href: '/payroll/worksheet', icon: DollarSign },
       { label: 'Tip Distribution Editor', href: '/payroll/tip-distribution-editor', icon: HandCoins },
       { label: 'Staffing', href: '/staffing', icon: Users },
       { label: 'Clock In Records', href: '/reporting/clock-records', icon: FileClock },
