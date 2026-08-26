@@ -386,6 +386,28 @@ export default function WageReportPage() {
     )) ?? null
   }, [department, endDate, payrollRuns, startDate])
 
+  const periodPayrollRuns = useMemo(() => payrollRuns.filter(run => {
+    if (run.start_date !== startDate || run.end_date !== endDate) return false
+    if (department === 'all') return true
+    return run.department === department || run.department === 'all'
+  }), [department, endDate, payrollRuns, startDate])
+
+  const payoutStatus = useMemo(() => {
+    if (matchingPayrollRun) return 'created'
+    if (periodPayrollRuns.length > 0) return 'partial'
+    return 'preview'
+  }, [matchingPayrollRun, periodPayrollRuns.length])
+
+  const payoutStatusTotals = useMemo(() => {
+    const sourceRuns = matchingPayrollRun ? [matchingPayrollRun] : periodPayrollRuns
+    return sourceRuns.reduce((totals, run) => ({
+      cash: totals.cash + Number(run.total_cash ?? 0),
+      check: totals.check + Number(run.total_check ?? 0),
+      ach: totals.ach + Number(run.total_ach ?? 0),
+      net: totals.net + Number(run.total_net ?? 0),
+    }), { cash: 0, check: 0, ach: 0, net: 0 })
+  }, [matchingPayrollRun, periodPayrollRuns])
+
   const detailRowsByEmployeeId = useMemo(() => {
     const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
     const reportByDate = new Map(rangeReports.map(report => [report.session_date, report]))
@@ -667,7 +689,7 @@ export default function WageReportPage() {
     <div className="p-6">
       <AdminSubpageHeader
         title="Wage Report"
-        subtitle={matchingPayrollRun ? 'Saved payroll worksheet data is driving this range.' : 'Compare verified hours, tips, wages, and guaranteed top-up.'}
+        subtitle={payoutStatus === 'created' ? 'Saved payroll worksheet payout is driving this range.' : 'Preview wages before creating payroll payout.'}
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
@@ -725,6 +747,68 @@ export default function WageReportPage() {
             </>
           }
         />
+        <div className={[
+          'mb-4 rounded-xl border px-4 py-3',
+          payoutStatus === 'created' ? 'border-emerald-200 bg-emerald-50' : payoutStatus === 'partial' ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50',
+        ].join(' ')}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className={[
+                'text-xs font-semibold uppercase',
+                payoutStatus === 'created' ? 'text-emerald-700' : payoutStatus === 'partial' ? 'text-amber-700' : 'text-slate-500',
+              ].join(' ')}>
+                Payout Status
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                {payoutStatus === 'created' ? (
+                  <Badge variant="outline" className="border-emerald-300 bg-white text-emerald-800">Payout Created</Badge>
+                ) : payoutStatus === 'partial' ? (
+                  <Badge variant="outline" className="border-amber-300 bg-white text-amber-800">Partial Payout Created</Badge>
+                ) : (
+                  <Badge variant="outline" className="border-slate-300 bg-white text-slate-700">Preview Only</Badge>
+                )}
+                <span className="text-sm font-medium text-slate-950">
+                  {payoutStatus === 'created'
+                    ? 'This report is using a saved Wage Worksheet payout.'
+                    : payoutStatus === 'partial'
+                      ? 'Some payouts exist for this date range, but this view is still showing calculated report data.'
+                      : 'This is calculated from clock records, EOD tips, and staffing settings. No payout has been saved yet.'}
+                </span>
+              </div>
+              {matchingPayrollRun ? (
+                <p className="mt-1 text-xs text-slate-600">
+                  Run created {format(new Date(matchingPayrollRun.created_at), 'MMM d, yyyy h:mm a')} · Pay date {matchingPayrollRun.pay_date} · {matchingPayrollRun.department === 'all' ? 'All Staff' : matchingPayrollRun.department}
+                </p>
+              ) : periodPayrollRuns.length > 0 ? (
+                <p className="mt-1 text-xs text-slate-600">
+                  Saved runs in this range: {periodPayrollRuns.map(run => `${run.department} ${formatCurrency(Number(run.total_net ?? 0))}`).join(', ')}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-slate-600">Save from Wage Worksheet when payroll is actually paid or ready to record.</p>
+              )}
+            </div>
+            {payoutStatus !== 'preview' && (
+              <div className="grid grid-cols-2 gap-2 text-right sm:grid-cols-4 lg:min-w-[480px]">
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <p className="text-[11px] font-medium uppercase text-slate-500">Cash</p>
+                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.cash)}</p>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <p className="text-[11px] font-medium uppercase text-slate-500">Check</p>
+                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.check)}</p>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <p className="text-[11px] font-medium uppercase text-slate-500">ACH</p>
+                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.ach)}</p>
+                </div>
+                <div className="rounded-lg border bg-white px-3 py-2">
+                  <p className="text-[11px] font-medium uppercase text-slate-500">Total</p>
+                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.net)}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
         <div className="mb-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border bg-emerald-50 p-3">
             <p className="text-xs font-medium uppercase text-emerald-700">Total Tip Collected</p>
@@ -771,7 +855,7 @@ export default function WageReportPage() {
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Paid By</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead>Clock Status</TableHead>
               <TableHead className="text-right">Hours</TableHead>
               <TableHead className="text-right">Tips</TableHead>
               <TableHead className="text-right">Tips / Hr</TableHead>
