@@ -510,6 +510,9 @@ export default function PayrollPayoutsReportPage() {
   const [itemEdits, setItemEdits] = useState<Record<string, Partial<PayrollRunItem>>>({})
   const [clockEdits, setClockEdits] = useState<Record<string, ClockEditState>>({})
   const [balanceCalculated, setBalanceCalculated] = useState(false)
+  const [calculatedTipDistributionUpdates, setCalculatedTipDistributionUpdates] = useState<TipDistributionReplacement[]>([])
+  const [calculatedTipDates, setCalculatedTipDates] = useState<string[]>([])
+  const [adjustmentOriginalItems, setAdjustmentOriginalItems] = useState<Record<string, PayrollRunItem>>({})
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null)
@@ -549,7 +552,7 @@ export default function PayrollPayoutsReportPage() {
   const selectedClockRecords = useMemo(() => selectedRun && selectedItem?.employee_id
     ? getEmployeeClockRecords({ employeeId: selectedItem.employee_id, clockRecords, employees, department: selectedRun.department, startDate: selectedRun.start_date, endDate: selectedRun.end_date, schedules })
     : [], [clockRecords, employees, schedules, selectedItem?.employee_id, selectedRun])
-  const selectedOriginalItem = selectedRun?.payroll_run_items?.find(item => selectedItem && item.id === selectedItem.id) ?? null
+  const selectedOriginalItem = selectedItem ? adjustmentOriginalItems[selectedItem.id] ?? selectedRun?.payroll_run_items?.find(item => item.id === selectedItem.id) ?? null : null
   const selectedAdjustment = selectedItem && selectedOriginalItem
     ? normalizeMoney(Number(selectedItem.payout_amount ?? 0) - Number(selectedOriginalItem.payout_amount ?? 0))
     : 0
@@ -575,6 +578,9 @@ export default function PayrollPayoutsReportPage() {
     setTipImpactEmployeeIds(new Set())
     paymentPreloadKeyRef.current = ''
     setBalanceCalculated(false)
+    setCalculatedTipDistributionUpdates([])
+    setCalculatedTipDates([])
+    setAdjustmentOriginalItems({})
     setEditing(false)
     setMessage(null)
   }
@@ -602,6 +608,9 @@ export default function PayrollPayoutsReportPage() {
       setTipImpactEmployeeIds(new Set())
       paymentPreloadKeyRef.current = ''
       setBalanceCalculated(false)
+      setCalculatedTipDistributionUpdates([])
+      setCalculatedTipDates([])
+      setAdjustmentOriginalItems({})
       setEditing(false)
     }
   }, [payrollRuns])
@@ -617,7 +626,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentMethod(selectedItem.payment_method ?? '')
   }, [isIndividualMode, selectedAdjustment, selectedItem, selectedRun?.id])
 
-  const returnToSummary = () => {
+  const resetEditorState = () => {
     setSelectedEmployeeId('all')
     setEditing(false)
     setItemEdits({})
@@ -629,17 +638,32 @@ export default function PayrollPayoutsReportPage() {
     setTipImpactEmployeeIds(new Set())
     paymentPreloadKeyRef.current = ''
     setBalanceCalculated(false)
+    setCalculatedTipDistributionUpdates([])
+    setCalculatedTipDates([])
+    setAdjustmentOriginalItems({})
+    setMemoEdit(selectedRun?.memo ?? '')
+    setMessage(null)
+  }
+
+  const returnToSummary = () => {
+    setSelectedEmployeeId('all')
+    setEditing(false)
+    setClockEdits({})
+    setAdjustmentMemo('')
+    setAdjustmentPaymentAmount('')
+    setAdjustmentPaymentMethod('')
+    setAdjustmentPaymentDirection('pay_out')
+    paymentPreloadKeyRef.current = ''
     setMemoEdit(selectedRun?.memo ?? '')
     setMessage(null)
   }
 
   const closePayrollDialog = () => {
-    returnToSummary()
+    resetEditorState()
     setSelectedRunId(null)
   }
 
   const updateItemEdit = (item: PayrollRunItem, patch: Partial<PayrollRunItem>) => {
-    setBalanceCalculated(false)
     setItemEdits(current => ({ ...current, [item.id]: { ...(current[item.id] ?? {}), ...patch } }))
   }
 
@@ -650,9 +674,7 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentMemo('')
     setAdjustmentPaymentAmount('')
     setAdjustmentPaymentMethod('')
-    setTipImpactEmployeeIds(new Set())
     paymentPreloadKeyRef.current = ''
-    setBalanceCalculated(false)
     setClockEdits(() => {
       if (!selectedRun || !item.employee_id) return {}
       const records = getEmployeeClockRecords({
@@ -673,6 +695,8 @@ export default function PayrollPayoutsReportPage() {
 
   const updateClockEdit = (record: ShiftClock, patch: Partial<ClockEditState>) => {
     setBalanceCalculated(false)
+    setCalculatedTipDistributionUpdates([])
+    setCalculatedTipDates([])
     setClockEdits(current => {
       const previous = current[record.id] ?? {
         clockIn: isoToTimeInput(record.clock_in_at),
@@ -693,22 +717,53 @@ export default function PayrollPayoutsReportPage() {
     if (!isIndividualMode || !selectedOriginalItem || selectedClockRecords.length === 0) return
     const hasReadyEdits = selectedClockRecords.every(record => clockEdits[record.id])
     if (!hasReadyEdits) return
-    const nextHours = normalizeMoney(selectedClockRecords.reduce((sum, record) => sum + getEditedClockHours(record, clockEdits[record.id]), 0))
-    setItemEdits(current => {
-      const currentPatch = current[selectedOriginalItem.id] ?? {}
-      const currentHours = normalizeMoney(currentPatch.hours ?? selectedOriginalItem.hours)
-      if (currentHours === nextHours) {
-        setBalanceCalculated(true)
-        return current
-      }
-      return {
-        ...current,
-        [selectedOriginalItem.id]: {
-          ...currentPatch,
-          hours: nextHours,
-        },
-      }
+    const recalculated = recalculateRowsForClockTimeChanges({
+      rows: editedItems,
+      selectedItem: selectedOriginalItem,
+      selectedClockRecords,
+      clockRecords,
+      clockEdits,
+      employees,
+      eodReports,
+      schedules,
+      adjustmentNote: '',
     })
+    setItemEdits(current => {
+      const next = { ...current }
+      for (const row of recalculated.rows) {
+        const original = selectedRun?.payroll_run_items?.find(item => item.id === row.id)
+        if (!original) continue
+        const changed = moneyChanged(original.hours, row.hours) ||
+          moneyChanged(original.tips, row.tips) ||
+          moneyChanged(original.base_wages, row.base_wages) ||
+          moneyChanged(original.guarantee_top_up, row.guarantee_top_up) ||
+          moneyChanged(original.commission, row.commission) ||
+          moneyChanged(original.deductions, row.deductions) ||
+          moneyChanged(original.payout_amount, row.payout_amount) ||
+          (original.payment_method ?? '') !== (row.payment_method ?? '') ||
+          (original.memo ?? '') !== (row.memo ?? '')
+        if (changed) {
+          next[row.id] = {
+            ...(next[row.id] ?? {}),
+            hours: row.hours,
+            tips: row.tips,
+            base_wages: row.base_wages,
+            guarantee_top_up: row.guarantee_top_up,
+            commission: row.commission,
+            deductions: row.deductions,
+            payment_method: row.payment_method,
+            memo: row.memo,
+          }
+        }
+      }
+      return next
+    })
+    setTipImpactEmployeeIds(recalculated.affectedEmployeeIds)
+    setCalculatedTipDistributionUpdates(recalculated.tipDistributionUpdates)
+    setCalculatedTipDates(recalculated.affectedDates)
+    setAdjustmentOriginalItems(Object.fromEntries((selectedRun?.payroll_run_items ?? []).map(item => [item.id, item])))
+    if (recalculated.warnings.length > 0) setMessage(recalculated.warnings.join(' '))
+    else setMessage('Balance calculated for all affected tip employees. Open each employee to pay or receive the balance.')
     setBalanceCalculated(true)
   }
 
@@ -719,7 +774,7 @@ export default function PayrollPayoutsReportPage() {
       return
     }
     if (adjustmentPaymentValue > 0 && !adjustmentPaymentMethod) {
-      setMessage('Choose how the balance was paid or credit was received, or leave the amount blank to save without payment.')
+      setMessage('Choose how the balance was paid or credit was received.')
       return
     }
     if (adjustmentPaymentValue > 0 && !directionMatchesAdjustment) {
@@ -780,27 +835,13 @@ export default function PayrollPayoutsReportPage() {
         : adjustmentMemo.trim()
       let rowsForSave = editedItems
       const tipSyncNotices: string[] = []
-      let tipDates: string[] = []
-      let tipEmployeeCount = 0
-      let tipDistributionUpdates: TipDistributionReplacement[] = []
+      const tipDates = calculatedTipDates
+      const tipEmployeeCount = tipImpactEmployeeIds.size
+      const tipDistributionUpdates = calculatedTipDistributionUpdates
       if (selectedItem && hasClockTimeChanges) {
-        const recalculated = recalculateRowsForClockTimeChanges({
-          rows: editedItems,
-          selectedItem,
-          selectedClockRecords,
-          clockRecords,
-          clockEdits,
-          employees,
-          eodReports,
-          schedules,
-          adjustmentNote,
-        })
-        rowsForSave = recalculated.rows
-        tipDistributionUpdates = recalculated.tipDistributionUpdates
-        setTipImpactEmployeeIds(recalculated.affectedEmployeeIds)
-        tipDates = recalculated.affectedDates
-        tipEmployeeCount = recalculated.affectedEmployeeIds.size
-        tipSyncNotices.push(...recalculated.warnings)
+        rowsForSave = editedItems.map(item => item.id === selectedItem.id
+          ? calculateSavedPayrollItem(item, { memo: appendMemo(item.memo, `Modified after payout. ${adjustmentNote}`) }, employees)
+          : item)
       } else if (selectedItem && (adjustmentNote || Object.keys(itemEdits[selectedItem.id] ?? {}).length > 0)) {
         rowsForSave = editedItems.map(item => item.id === selectedItem.id
           ? calculateSavedPayrollItem(item, { memo: appendMemo(item.memo, `Modified after payout. ${adjustmentNote}`) }, employees)
@@ -931,18 +972,43 @@ export default function PayrollPayoutsReportPage() {
         ...tipSyncNotices,
       ]
       notifyReportingDataChanged()
-      setItemEdits({})
-      setClockEdits({})
-      setAdjustmentMemo('')
-      setAdjustmentPaymentAmount('')
-      setAdjustmentPaymentMethod('')
-      setAdjustmentPaymentDirection('pay_out')
-      setSelectedEmployeeId('all')
-      setSelectedRunId(null)
-      paymentPreloadKeyRef.current = ''
-      setBalanceCalculated(false)
-      setEditing(false)
-      setMessage(null)
+      const keepAdjustmentSession = !!selectedItem && selectedAdjustment !== 0 && Object.keys(adjustmentOriginalItems).length > 0
+      if (keepAdjustmentSession) {
+        if (savedSelectedItem) {
+          setAdjustmentOriginalItems(current => ({ ...current, [savedSelectedItem.id]: savedSelectedItem }))
+          setItemEdits(current => {
+            const next = { ...current }
+            delete next[savedSelectedItem.id]
+            return next
+          })
+        }
+        setClockEdits({})
+        setAdjustmentMemo('')
+        setAdjustmentPaymentAmount('')
+        setAdjustmentPaymentMethod('')
+        setAdjustmentPaymentDirection('pay_out')
+        setSelectedEmployeeId('all')
+        paymentPreloadKeyRef.current = ''
+        setEditing(false)
+        setMessage(null)
+      } else {
+        setItemEdits({})
+        setClockEdits({})
+        setAdjustmentMemo('')
+        setAdjustmentPaymentAmount('')
+        setAdjustmentPaymentMethod('')
+        setAdjustmentPaymentDirection('pay_out')
+        setSelectedEmployeeId('all')
+        setSelectedRunId(null)
+        paymentPreloadKeyRef.current = ''
+        setBalanceCalculated(false)
+        setCalculatedTipDistributionUpdates([])
+        setCalculatedTipDates([])
+        setAdjustmentOriginalItems({})
+        setTipImpactEmployeeIds(new Set())
+        setEditing(false)
+        setMessage(null)
+      }
       setSaveResult({ success: true, title: 'Payroll payout saved', details: changedDetails })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to update payroll payout.'
@@ -1081,27 +1147,39 @@ export default function PayrollPayoutsReportPage() {
                   </div>
 
                   <div className="overflow-x-auto rounded-lg border bg-white">
-                    <Table className="min-w-[980px] text-xs">
-                      <TableHeader><TableRow className="bg-slate-50 hover:bg-slate-50"><TableHead>Paid By</TableHead><TableHead>Name</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Payout</TableHead><TableHead>Memo</TableHead></TableRow></TableHeader>
+                    <Table className="min-w-[1080px] text-xs">
+                      <TableHeader><TableRow className="bg-slate-50 hover:bg-slate-50"><TableHead>Paid By</TableHead><TableHead>Name</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Payout</TableHead><TableHead className="text-right">Balance/Credit</TableHead><TableHead>Memo</TableHead></TableRow></TableHeader>
                       <TableBody>
-                        {editedItems.map(item => (
-                          <TableRow key={item.id}>
-                            <TableCell>{paymentMethodLabel(item.payment_method)}</TableCell>
-                            <TableCell className="font-medium">
-                              <button type="button" className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline" onClick={() => openEmployeeAdjustment(item)}>{item.employee_name}</button>
-                              {item.employee_id && tipImpactEmployeeIds.has(item.employee_id) && <Badge variant="outline" className="ml-2 border-amber-300 bg-amber-50 text-amber-800">Tip Recalculated</Badge>}
-                            </TableCell>
-                            <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>
-                            <TableCell className="text-right">{Number(item.hours ?? 0).toFixed(2)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(Number(item.tips ?? 0))}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(Number(item.base_wages ?? 0))}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(Number(item.guarantee_top_up ?? 0))}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(Number(item.commission ?? 0))}</TableCell>
-                            <TableCell className="text-right text-red-700">{formatCurrency(Number(item.deductions ?? 0))}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatCurrency(Number(item.payout_amount ?? 0))}</TableCell>
-                            <TableCell>{item.memo || ''}</TableCell>
-                          </TableRow>
-                        ))}
+                        {editedItems.map(item => {
+                          const original = adjustmentOriginalItems[item.id] ?? selectedRun.payroll_run_items?.find(originalItem => originalItem.id === item.id)
+                          const delta = normalizeMoney(Number(item.payout_amount ?? 0) - Number(original?.payout_amount ?? item.payout_amount ?? 0))
+                          return (
+                            <TableRow key={item.id}>
+                              <TableCell>{paymentMethodLabel(item.payment_method)}</TableCell>
+                              <TableCell className="font-medium">
+                                <button type="button" className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline" onClick={() => openEmployeeAdjustment(item)}>{item.employee_name}</button>
+                                {item.employee_id && tipImpactEmployeeIds.has(item.employee_id) && <Badge variant="outline" className="ml-2 border-amber-300 bg-amber-50 text-amber-800">Tip Recalculated</Badge>}
+                              </TableCell>
+                              <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>
+                              <TableCell className="text-right">{Number(item.hours ?? 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(Number(item.tips ?? 0))}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(Number(item.base_wages ?? 0))}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(Number(item.guarantee_top_up ?? 0))}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(Number(item.commission ?? 0))}</TableCell>
+                              <TableCell className="text-right text-red-700">{formatCurrency(Number(item.deductions ?? 0))}</TableCell>
+                              <TableCell className="text-right font-semibold">{formatCurrency(Number(item.payout_amount ?? 0))}</TableCell>
+                              <TableCell className={`text-right font-semibold ${delta < 0 ? 'text-red-700' : delta > 0 ? 'text-emerald-700' : 'text-muted-foreground'}`}>
+                                {delta === 0 ? '-' : (
+                                  <div>
+                                    <div>{formatBalanceCurrency(delta)}</div>
+                                    <div className="text-[10px] font-medium uppercase">{delta > 0 ? 'Balance Due' : 'Credit'}</div>
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell>{item.memo || ''}</TableCell>
+                            </TableRow>
+                          )
+                        })}
                       </TableBody>
                     </Table>
                   </div>
@@ -1161,8 +1239,8 @@ export default function PayrollPayoutsReportPage() {
                   <div>
                     <Label>Action</Label>
                     <Select value={adjustmentPaymentDirection} onValueChange={(value: string | null) => value && setAdjustmentPaymentDirection(value as AdjustmentPaymentDirection)}>
-                      <SelectTrigger className={`h-9 ${directionMatchesAdjustment ? '' : 'border-red-400 bg-red-50'}`}><span>{adjustmentPaymentDirection === 'receive_credit' ? 'Receive Credit' : 'Pay Out'}</span></SelectTrigger>
-                      <SelectContent><SelectItem value="pay_out">Pay Out</SelectItem><SelectItem value="receive_credit">Receive Credit</SelectItem></SelectContent>
+                      <SelectTrigger className={`h-9 ${directionMatchesAdjustment ? '' : 'border-red-400 bg-red-50'}`}><span>{adjustmentPaymentDirection === 'receive_credit' ? 'Receive' : 'Pay'}</span></SelectTrigger>
+                      <SelectContent><SelectItem value="pay_out">Pay</SelectItem><SelectItem value="receive_credit">Receive</SelectItem></SelectContent>
                     </Select>
                   </div>
                   <div>
@@ -1172,7 +1250,7 @@ export default function PayrollPayoutsReportPage() {
                       <SelectContent><SelectItem value="cash">Cash</SelectItem><SelectItem value="check">Check</SelectItem><SelectItem value="ach">ACH</SelectItem></SelectContent>
                     </Select>
                   </div>
-                  <div className="md:col-span-1 md:self-end"><Button className="h-9 w-full" onClick={() => void saveEdit()} disabled={saving || selectedAdjustment === 0 || (hasClockTimeChanges && !balanceCalculated)}>{saving ? 'Saving...' : adjustmentPaymentDirection === 'receive_credit' ? 'Save Credit' : 'Save Payout'}</Button></div>
+                  <div className="md:col-span-1 md:self-end"><Button className="h-9 w-full" onClick={() => void saveEdit()} disabled={saving || selectedAdjustment === 0 || adjustmentPaymentValue <= 0 || (hasClockTimeChanges && !balanceCalculated)}>{saving ? 'Processing...' : adjustmentPaymentDirection === 'receive_credit' ? 'Receive' : 'Pay'}</Button></div>
                   {!directionMatchesAdjustment && <div className="md:col-span-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{selectedAdjustment > 0 ? 'This is a balance due. Use Pay Out.' : 'This is credit/overpaid. Use Receive Credit.'}</div>}
                   <div className="md:col-span-4"><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Reason for correcting this paid payroll" /></div>
                 </div>
@@ -1208,7 +1286,7 @@ export default function PayrollPayoutsReportPage() {
               {editing && (
                 <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-amber-900">This will replace existing saved payroll data and refresh reports/dashboard from the updated payout.</p>
-                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={closePayrollDialog} disabled={saving}>Cancel</Button><Button size="sm" onClick={() => void saveEdit()} disabled={saving || (hasClockTimeChanges && !balanceCalculated)}>{saving ? 'Saving...' : 'Save All Changes'}</Button></div>
+                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={closePayrollDialog} disabled={saving}>Cancel</Button></div>
                 </div>
               )}
             </div>
