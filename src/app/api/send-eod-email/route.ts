@@ -395,24 +395,20 @@ export async function POST(req: NextRequest) {
       ${attendanceWarningHtml}
       <h2 style="color:#111827;margin:0">FOH End of Day Report</h2>
       <p style="margin:6px 0 0;color:#475569"><strong>${report.session_date}</strong> · Closed by ${closedByName}</p>
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0 12px">
-        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:#f8fafc">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b">Gross Revenue</div>
-          <div style="font-size:24px;font-weight:800;color:#111827;margin-top:4px">$${grossRevenue.toFixed(2)}</div>
-        </div>
-        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:#ecfeff">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0f766e">Net Revenue</div>
-          <div style="font-size:24px;font-weight:800;color:#0f766e;margin-top:4px">$${netRevenue.toFixed(2)}</div>
-        </div>
-        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:#fff7ed">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#c2410c">Expected Cash</div>
-          <div style="font-size:24px;font-weight:800;color:#9a3412;margin-top:4px">$${expectedCash.toFixed(2)}</div>
-        </div>
-        <div style="border:1px solid #d1d5db;border-radius:12px;padding:12px;background:${variance === 0 ? '#f8fafc' : variance > 0 ? '#ecfdf5' : '#fef2f2'}">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${variance === 0 ? '#64748b' : variance > 0 ? '#047857' : '#b91c1c'}">Variance</div>
-          <div style="font-size:24px;font-weight:800;color:${variance === 0 ? '#111827' : variance > 0 ? '#047857' : '#b91c1c'};margin-top:4px">$${variance.toFixed(2)}</div>
-        </div>
-      </div>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:12px 0 10px;border:1px solid #d1d5db">
+        <tr style="background:#f8fafc">
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:#64748b;font-size:10px;font-weight:700;text-transform:uppercase">Gross</td>
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:#111827;font-size:14px;font-weight:800;text-align:right">$${grossRevenue.toFixed(2)}</td>
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:#0f766e;font-size:10px;font-weight:700;text-transform:uppercase">Net</td>
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:#0f766e;font-size:14px;font-weight:800;text-align:right">$${netRevenue.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:#c2410c;font-size:10px;font-weight:700;text-transform:uppercase">Expected Cash</td>
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:#9a3412;font-size:14px;font-weight:800;text-align:right">$${expectedCash.toFixed(2)}</td>
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:${variance === 0 ? '#64748b' : variance > 0 ? '#047857' : '#b91c1c'};font-size:10px;font-weight:700;text-transform:uppercase">Variance</td>
+          <td style="padding:7px 8px;border:1px solid #d1d5db;color:${variance === 0 ? '#111827' : variance > 0 ? '#047857' : '#b91c1c'};font-size:14px;font-weight:800;text-align:right">$${variance.toFixed(2)}</td>
+        </tr>
+      </table>
       <h3 style="margin-top:18px">Revenue Summary</h3>
       <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
         <tr><td>Starting Cash</td><td style="text-align:right">$${startingCash.toFixed(2)}</td></tr>
