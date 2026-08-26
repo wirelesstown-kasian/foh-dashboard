@@ -714,11 +714,12 @@ export default function PayrollPayoutsReportPage() {
   }
 
   const calculateBalanceFromClockEdits = () => {
-    if (!isIndividualMode || !selectedOriginalItem || selectedClockRecords.length === 0) return
+    if (!isIndividualMode || !selectedOriginalItem || !selectedRun || selectedClockRecords.length === 0) return
     const hasReadyEdits = selectedClockRecords.every(record => clockEdits[record.id])
     if (!hasReadyEdits) return
+    const baseRows = selectedRun.payroll_run_items ?? []
     const recalculated = recalculateRowsForClockTimeChanges({
-      rows: editedItems,
+      rows: baseRows,
       selectedItem: selectedOriginalItem,
       selectedClockRecords,
       clockRecords,
@@ -728,10 +729,10 @@ export default function PayrollPayoutsReportPage() {
       schedules,
       adjustmentNote: '',
     })
-    setItemEdits(current => {
-      const next = { ...current }
+    setItemEdits(() => {
+      const next: Record<string, Partial<PayrollRunItem>> = {}
       for (const row of recalculated.rows) {
-        const original = selectedRun?.payroll_run_items?.find(item => item.id === row.id)
+        const original = baseRows.find(item => item.id === row.id)
         if (!original) continue
         const changed = moneyChanged(original.hours, row.hours) ||
           moneyChanged(original.tips, row.tips) ||
