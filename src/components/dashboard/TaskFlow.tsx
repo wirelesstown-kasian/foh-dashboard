@@ -34,6 +34,12 @@ const isSystemClockTask = (task: Task) => {
   return title === 'clock in' || title === 'clock out'
 }
 
+const getTaskPointLabel = (task: Task) => {
+  const points = Number(task.points ?? 0)
+  const normalizedPoints = Number.isFinite(points) ? Math.max(0, Math.round(points)) : 0
+  return `${normalizedPoints} ${normalizedPoints === 1 ? 'pt' : 'pts'}`
+}
+
 export function TaskFlow({ categories, tasks, completions, session, employees, today, onRefresh }: Props) {
   const router = useRouter()
   const [taskActionTarget, setTaskActionTarget] = useState<Task | null>(null)
@@ -329,6 +335,9 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
                       <span className={status === 'incomplete' ? 'text-red-700' : status === 'pending' ? 'text-muted-foreground' : ''}>
                         {task.title}
                       </span>
+                      <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                        {getTaskPointLabel(task)}
+                      </span>
                       {employee && <span className="ml-auto text-xs text-muted-foreground">by {employee.name}</span>}
                     </div>
                   )
@@ -424,6 +433,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
               const employee = getCompletionEmployee(completion)
               const selected = selectedTaskIds.includes(task.id)
               const pending = status === 'pending'
+              const taskPointLabel = getTaskPointLabel(task)
 
               return (
                 <button
@@ -447,7 +457,7 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
                   }}
                 >
                   <div className="flex min-h-[72px] flex-col gap-1.5">
-                    <div className="flex items-start gap-2 text-left">
+                    <div className="flex items-start justify-between gap-2 text-left">
                       {pending ? (
                         <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] font-bold ${
                           selected ? 'border-amber-600 bg-amber-500 text-white' : 'border-slate-300 bg-white text-transparent'
@@ -464,6 +474,15 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
                       }`}>
                         {task.title}
                       </p>
+                      <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                        status === 'complete'
+                          ? 'border-green-200 bg-white/80 text-green-700'
+                          : status === 'incomplete'
+                            ? 'border-red-200 bg-white/80 text-red-700'
+                            : 'border-amber-200 bg-amber-50 text-amber-700'
+                      }`}>
+                        {taskPointLabel}
+                      </span>
                     </div>
                     {employee ? (
                       <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
