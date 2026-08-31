@@ -78,9 +78,13 @@ export function ReviewBoardSummary({
 }: ReviewBoardSummaryProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 px-5 py-5">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Review Filters</div>
-        <div className="mt-3 flex flex-wrap gap-2">
+      <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Review Filters</div>
+            <p className="mt-1 text-sm text-slate-500">Controls all four review panels below.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
           {rangeOptions.map(option => (
             <Button
               key={option.value}
@@ -91,6 +95,7 @@ export function ReviewBoardSummary({
               {option.label}
             </Button>
           ))}
+          </div>
         </div>
         {dateFilter.mode === 'custom' && (
           <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -110,9 +115,9 @@ export function ReviewBoardSummary({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-5">
-        <div className="grid min-h-full grid-cols-1 gap-4">
-          <section className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+      <div className="min-h-0 flex-1 px-5 py-5">
+        <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-2">
+          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('leaderboard')}
@@ -120,14 +125,14 @@ export function ReviewBoardSummary({
               className="flex w-full items-start justify-between gap-3 text-left"
             >
               <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">Section {sectionDetails.leaderboard.number}</div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.leaderboard.number}</div>
                 <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.leaderboard.title}</div>
                 <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.leaderboard.description}</p>
               </div>
               {collapsedSections.leaderboard ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.leaderboard && (
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {reviewLeaderboard.length === 0 ? (
                   <div className="rounded-lg bg-white px-4 py-4 text-sm text-slate-500">No attributed reviews in this range yet.</div>
                 ) : (
@@ -166,7 +171,7 @@ export function ReviewBoardSummary({
             )}
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('rewards')}
@@ -174,14 +179,14 @@ export function ReviewBoardSummary({
               className="flex w-full items-start justify-between gap-3 text-left"
             >
               <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">Section {sectionDetails.rewards.number}</div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.rewards.number}</div>
                 <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.rewards.title}</div>
                 <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.rewards.description}</p>
               </div>
               {collapsedSections.rewards ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.rewards && (
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {rewards.length === 0 ? (
                   <div className="rounded-lg bg-white px-4 py-4 text-sm text-slate-500">No rewards created yet.</div>
                 ) : (
@@ -199,7 +204,7 @@ export function ReviewBoardSummary({
             )}
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('mentions')}
@@ -207,14 +212,14 @@ export function ReviewBoardSummary({
               className="flex w-full items-start justify-between gap-3 text-left"
             >
               <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">Section {sectionDetails.mentions.number}</div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.mentions.number}</div>
                 <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.mentions.title}</div>
                 <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.mentions.description}</p>
               </div>
               {collapsedSections.mentions ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.mentions && (
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {staffMentionSummary.length === 0 ? (
                   <div className="rounded-lg bg-white px-4 py-4 text-sm text-slate-500">No direct staff mentions in this range.</div>
                 ) : (
@@ -239,7 +244,7 @@ export function ReviewBoardSummary({
             )}
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('categories')}
@@ -247,14 +252,14 @@ export function ReviewBoardSummary({
               className="flex w-full items-start justify-between gap-3 text-left"
             >
               <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">Section {sectionDetails.categories.number}</div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.categories.number}</div>
                 <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.categories.title}</div>
                 <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.categories.description}</p>
               </div>
               {collapsedSections.categories ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.categories && (
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {categorySummary.map(item => (
                   <div key={item.category} className="flex items-center justify-between rounded-lg bg-white px-4 py-3 text-sm">
                     <span className="font-medium text-slate-700">{item.label}</span>
