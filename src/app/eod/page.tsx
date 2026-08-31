@@ -996,7 +996,7 @@ export default function EodPage() {
             <p className="text-muted-foreground max-w-sm">
               {eodAlreadySaved
                 ? "Today's EOD has been saved. Complete tomorrow's tasks to unlock the next EOD."
-                : 'Complete all tasks on the Dashboard (Pre-Shift → Operations → Closing) to unlock EOD.'
+                : 'Complete all tasks on the Task Board (Pre-Shift → Operations → Closing) to unlock EOD.'
               }
             </p>
             {(openClockRecords.length > 0 || pendingApprovalRecords.length > 0) && (

@@ -21,9 +21,9 @@ import {
 } from 'lucide-react'
 
 const publicTabs = [
-  { label: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { label: 'Task Board', href: '/', icon: LayoutDashboard },
   { label: 'Leaderboard', href: '/leaderboard', icon: Trophy },
-  { label: 'Review Board', href: '/review-board', icon: MessageSquareQuote },
+  { label: 'Review', href: '/review-board', icon: MessageSquareQuote },
   { label: 'Schedule', href: '/schedule', icon: Calendar },
   { label: 'EOD', href: '/eod', icon: FileText },
 ]

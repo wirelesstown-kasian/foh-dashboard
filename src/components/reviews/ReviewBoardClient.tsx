@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { PinModal } from '@/components/layout/PinModal'
 import { AssignReviewDialog } from '@/components/reviews/AssignReviewDialog'
 import { ReviewBoardSummary } from '@/components/reviews/ReviewBoardSummary'
@@ -14,7 +15,7 @@ import {
   ReviewBoardRange,
   ReviewDateRangeFilter,
 } from '@/lib/reviewScoring'
-import { Employee, GoogleReview } from '@/lib/types'
+import { Employee, GoogleReview, RewardCatalogItem } from '@/lib/types'
 import { ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 
 interface ReviewBoardResponse {
@@ -46,8 +47,10 @@ export function ReviewBoardClient() {
   const [managerPinError, setManagerPinError] = useState<string | null>(null)
   const [staffPinError, setStaffPinError] = useState<string | null>(null)
   const [dateFilter, setDateFilter] = useState<ReviewDateRangeFilter>(() => createDefaultReviewDateRange())
+  const [reviewSearch, setReviewSearch] = useState('')
   const [employees, setEmployees] = useState<Employee[]>([])
   const [reviews, setReviews] = useState<GoogleReview[]>([])
+  const [rewards, setRewards] = useState<RewardCatalogItem[]>([])
   const [performanceScores, setPerformanceScores] = useState<Record<string, number>>({})
   const [managerUnlocked, setManagerUnlocked] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
@@ -61,6 +64,7 @@ export function ReviewBoardClient() {
     categories: true,
     mentions: true,
     leaderboard: false,
+    rewards: false,
   })
 
   const loadBoard = async () => {
@@ -68,14 +72,19 @@ export function ReviewBoardClient() {
     setError(null)
 
     try {
-      const res = await fetch('/api/reviews', { cache: 'no-store' })
+      const [res, rewardsRes] = await Promise.all([
+        fetch('/api/reviews', { cache: 'no-store' }),
+        fetch('/api/rewards', { cache: 'no-store' }),
+      ])
       const payload = (await res.json().catch(() => ({}))) as ReviewBoardResponse & { error?: string }
+      const rewardsPayload = (await rewardsRes.json().catch(() => ({}))) as { rewards?: RewardCatalogItem[] }
       if (!res.ok) {
         throw new Error(payload.error ?? 'Failed to load review board')
       }
 
       setEmployees(payload.employees ?? [])
       setReviews(payload.reviews ?? [])
+      setRewards(rewardsPayload.rewards ?? [])
       setPerformanceScores(payload.performanceScores ?? {})
       setManagerUnlocked(payload.manager_unlocked === true)
       setSetupRequired(payload.setup_required === true)
@@ -91,12 +100,27 @@ export function ReviewBoardClient() {
   }, [])
 
   const filteredByRange = filterReviewsByRange(reviews, dateFilter)
+  const filteredBySearch = filteredByRange.filter(review => {
+    const query = reviewSearch.trim().toLowerCase()
+    if (!query) return true
+    const matchedNames = (review.matched_employees ?? [])
+      .map(employee => employee.name)
+      .join(' ')
+    return [
+      review.author_name,
+      review.review_text,
+      review.reason ?? '',
+      matchedNames,
+      review.staff_mentions.join(' '),
+      review.categories.join(' '),
+    ].join(' ').toLowerCase().includes(query)
+  })
   const visibleReviews = activeEmployeeFilter
-    ? filteredByRange.filter(review => (
+    ? filteredBySearch.filter(review => (
       (review.matched_employee_ids ?? []).includes(activeEmployeeFilter.employeeId) ||
       review.matched_employee_id === activeEmployeeFilter.employeeId
     ))
-    : filteredByRange
+    : filteredBySearch
   const activeRangeLabel = resolveReviewDateRange(dateFilter).label
 
   const summary = buildReviewBoardSummary({
@@ -349,10 +373,10 @@ export function ReviewBoardClient() {
       <div className="min-h-full bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.18),_transparent_28%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)] px-4 py-4 md:px-6 md:py-6">
         <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">FOH Dashboard</div>
-            <h1 className="mt-1 text-3xl font-black tracking-tight text-slate-950">Review Board</h1>
+            <div className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">FOH Review</div>
+            <h1 className="mt-1 text-3xl font-black tracking-tight text-slate-950">Review</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              Google reviews, staff attribution, and review scoring in one tablet-friendly board.
+              Google reviews, reward points, staff attribution, and content summaries in one tablet-friendly board.
             </p>
           </div>
 
@@ -433,7 +457,7 @@ export function ReviewBoardClient() {
 
         {loading ? (
           <div className="rounded-[28px] border border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500">
-            Loading Review Board...
+            Loading Review...
           </div>
         ) : (
           <div className="grid gap-5 lg:grid-cols-[minmax(300px,30%)_minmax(0,70%)] lg:items-start">
@@ -445,6 +469,7 @@ export function ReviewBoardClient() {
                 categorySummary={summary.categorySummary}
                 staffMentionSummary={summary.staffMentionSummary}
                 reviewLeaderboard={summary.reviewLeaderboard}
+                rewards={rewards}
                 selectedEmployeeId={activeEmployeeFilter?.source === 'manager' ? activeEmployeeFilter.employeeId : null}
                 onSelectEmployee={requestManagerEmployeeFilter}
                 collapsedSections={collapsedSections}
@@ -464,6 +489,14 @@ export function ReviewBoardClient() {
                   <div className="text-sm text-slate-500">
                     {visibleReviews.length} review{visibleReviews.length === 1 ? '' : 's'} shown
                   </div>
+                </div>
+                <div className="mt-3">
+                  <Input
+                    value={reviewSearch}
+                    onChange={event => setReviewSearch(event.target.value)}
+                    placeholder="Filter by name, review text, AI category, or memo"
+                    className="h-11"
+                  />
                 </div>
               </div>
 

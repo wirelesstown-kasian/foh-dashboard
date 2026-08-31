@@ -66,6 +66,7 @@ export interface Task {
   is_active: boolean
   created_at: string
   days_of_week: number[] | null
+  points?: number | null
   category?: TaskCategory
 }
 
@@ -76,8 +77,33 @@ export interface TaskCompletion {
   completed_at: string
   session_date: string
   status?: TaskCompletionStatus
+  points_awarded?: number | null
   employee?: Employee
   task?: Task
+}
+
+export interface RewardCatalogItem {
+  id: string
+  name: string
+  points_cost: number
+  description: string | null
+  is_active: boolean
+  display_order: number
+  created_at: string
+  updated_at?: string
+}
+
+export interface RewardRedemption {
+  id: string
+  employee_id: string
+  reward_id: string | null
+  points_delta: number
+  memo: string
+  redeemed_at: string
+  created_by_employee_id: string | null
+  created_at: string
+  employee?: Employee | null
+  reward?: RewardCatalogItem | null
 }
 
 export interface DailySession {

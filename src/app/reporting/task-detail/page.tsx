@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportPeriod, getReportRange } from '@/lib/reporting'
+import { getCompletionPoints, getTaskPointValue } from '@/lib/rewards'
 import { Task, TaskCompletion, TaskCompletionStatus } from '@/lib/types'
 
 type TaskSummaryRow = {
@@ -238,6 +239,7 @@ export default function TaskDetailPage() {
               <TableHead>Task</TableHead>
               <TableHead>Phase</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead className="text-right">Points</TableHead>
               <TableHead>Completed By</TableHead>
               <TableHead>Incomplete By</TableHead>
               <TableHead className="text-right">Summary</TableHead>
@@ -272,6 +274,9 @@ export default function TaskDetailPage() {
                           : 'Complete'}
                   </Badge>
                 </TableCell>
+                <TableCell className="text-right font-semibold text-amber-700">
+                  {row.completion ? getCompletionPoints(row.completion, row.task) : getTaskPointValue(row.task)}
+                </TableCell>
                 <TableCell className="text-sm text-emerald-700">
                   {row.completeEntries.length > 0 ? row.completeEntries.join(', ') : '—'}
                 </TableCell>
@@ -290,7 +295,7 @@ export default function TaskDetailPage() {
             ))}
             {taskSummaryRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">No tasks found for this range</TableCell>
+                <TableCell colSpan={9} className="py-6 text-center text-muted-foreground">No tasks found for this range</TableCell>
               </TableRow>
             )}
           </TableBody>

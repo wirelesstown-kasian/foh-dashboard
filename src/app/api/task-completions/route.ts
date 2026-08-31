@@ -35,6 +35,39 @@ async function getActiveClockRecord(employeeId: string, sessionDate: string) {
   return (data ?? [])[0] ?? null
 }
 
+function isMissingPointsColumn(error: { message?: string; code?: string } | null | undefined) {
+  const message = error?.message?.toLowerCase() ?? ''
+  return message.includes('points_awarded') || message.includes('points')
+}
+
+function getTaskPoints(task: { points?: unknown } | null | undefined) {
+  const points = Number(task?.points ?? 0)
+  return Number.isFinite(points) ? Math.max(0, Math.round(points)) : 0
+}
+
+async function updateTaskCompletion(
+  id: string,
+  payload: Record<string, unknown>,
+) {
+  let result = await supabaseAdmin.from('task_completions').update(payload).eq('id', id)
+  if (result.error && isMissingPointsColumn(result.error) && 'points_awarded' in payload) {
+    const fallbackPayload = { ...payload }
+    delete fallbackPayload.points_awarded
+    result = await supabaseAdmin.from('task_completions').update(fallbackPayload).eq('id', id)
+  }
+  return result
+}
+
+async function insertTaskCompletion(payload: Record<string, unknown>) {
+  let result = await supabaseAdmin.from('task_completions').insert(payload)
+  if (result.error && isMissingPointsColumn(result.error) && 'points_awarded' in payload) {
+    const fallbackPayload = { ...payload }
+    delete fallbackPayload.points_awarded
+    result = await supabaseAdmin.from('task_completions').insert(fallbackPayload)
+  }
+  return result
+}
+
 export async function POST(req: NextRequest) {
   const { pin, task_id, session_date, status } = await req.json()
 
@@ -69,11 +102,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
   }
 
-  const { data: task, error: taskError } = await supabaseAdmin
+  let taskResult = await supabaseAdmin
     .from('tasks')
-    .select('title')
+    .select('title, points')
     .eq('id', task_id)
     .single()
+  if (taskResult.error && isMissingPointsColumn(taskResult.error)) {
+    taskResult = await supabaseAdmin
+      .from('tasks')
+      .select('title')
+      .eq('id', task_id)
+      .single()
+  }
+  const { data: task, error: taskError } = taskResult
 
   if (taskError || !task) {
     return NextResponse.json({ error: taskError?.message ?? 'Task not found' }, { status: 404 })
@@ -103,17 +144,19 @@ export async function POST(req: NextRequest) {
     .maybeSingle()
 
   if (existing?.id) {
-    const { error } = await supabaseAdmin
-      .from('task_completions')
-      .update({ employee_id: employeeId, status: status ?? 'complete' })
-      .eq('id', existing.id)
+    const { error } = await updateTaskCompletion(existing.id, {
+      employee_id: employeeId,
+      status: status ?? 'complete',
+      points_awarded: status === 'incomplete' ? 0 : getTaskPoints(task),
+    })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   } else {
-    const { error } = await supabaseAdmin.from('task_completions').insert({
+    const { error } = await insertTaskCompletion({
       task_id,
       employee_id: employeeId,
       session_date,
       status: status ?? 'complete',
+      points_awarded: status === 'incomplete' ? 0 : getTaskPoints(task),
     })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
@@ -230,14 +273,24 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (existingCompletionId) {
-      const { error } = await supabaseAdmin
-        .from('task_completions')
-        .update({
-          employee_id,
-          status,
-          completed_at: new Date().toISOString(),
-        })
-        .eq('id', existingCompletionId)
+      let completionTaskId = task_id
+      if (!completionTaskId) {
+        const { data: existingCompletion } = await supabaseAdmin
+          .from('task_completions')
+          .select('task_id')
+          .eq('id', existingCompletionId)
+          .maybeSingle()
+        completionTaskId = existingCompletion?.task_id
+      }
+      const { data: task } = completionTaskId
+        ? await supabaseAdmin.from('tasks').select('points').eq('id', completionTaskId).maybeSingle()
+        : { data: null }
+      const { error } = await updateTaskCompletion(existingCompletionId, {
+        employee_id,
+        status,
+        completed_at: new Date().toISOString(),
+        points_awarded: status === 'incomplete' ? 0 : getTaskPoints(task),
+      })
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -253,7 +306,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Missing task completion payload' }, { status: 400 })
     }
 
-    const { data: inserted, error } = await supabaseAdmin
+    const { data: task } = await supabaseAdmin.from('tasks').select('points').eq('id', task_id).maybeSingle()
+    let insertResult = await supabaseAdmin
       .from('task_completions')
       .insert({
         task_id,
@@ -261,9 +315,24 @@ export async function PATCH(req: NextRequest) {
         session_date,
         status,
         completed_at: new Date().toISOString(),
+        points_awarded: status === 'incomplete' ? 0 : getTaskPoints(task),
       })
       .select('id')
       .single()
+    if (insertResult.error && isMissingPointsColumn(insertResult.error)) {
+      insertResult = await supabaseAdmin
+        .from('task_completions')
+        .insert({
+          task_id,
+          employee_id,
+          session_date,
+          status,
+          completed_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single()
+    }
+    const { data: inserted, error } = insertResult
 
     if (error || !inserted) {
       return NextResponse.json({ error: error?.message ?? 'Failed to create completion' }, { status: 500 })
@@ -330,10 +399,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const payload = status ? { employee_id: employeeId, status } : { employee_id: employeeId }
-  const { error } = await supabaseAdmin
-    .from('task_completions')
-    .update(payload)
-    .eq('id', completion_id)
+  const { error } = await updateTaskCompletion(completion_id, payload)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
