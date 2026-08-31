@@ -91,18 +91,17 @@ export function ReviewBoardSummary({
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="shrink-0 border-b border-slate-100 px-4 py-3">
+      <div className="shrink-0 border-b border-slate-100 px-3 py-2">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Review Filters</div>
-            <p className="mt-0.5 text-xs text-slate-500">Controls all four panels below.</p>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {rangeOptions.map(option => (
               <Button
                 key={option.value}
                 variant={dateFilter.mode === option.value ? 'default' : 'outline'}
-                className={cn('h-9 min-w-20 px-3 text-xs font-semibold', dateFilter.mode === option.value && 'bg-slate-900 text-white')}
+                className={cn('h-8 min-w-20 px-2.5 text-xs font-semibold', dateFilter.mode === option.value && 'bg-slate-900 text-white')}
                 onClick={() => onRangeChange(option.value)}
               >
                 {option.label}
@@ -116,21 +115,21 @@ export function ReviewBoardSummary({
               type="date"
               value={dateFilter.startDate}
               onChange={event => onCustomDateChange('startDate', event.target.value)}
-              className="h-9 text-xs"
+              className="h-8 text-xs"
             />
             <Input
               type="date"
               value={dateFilter.endDate}
               onChange={event => onCustomDateChange('endDate', event.target.value)}
-              className="h-9 text-xs"
+              className="h-8 text-xs"
             />
           </div>
         )}
       </div>
 
-      <div className="min-h-0 flex-1 px-4 py-4">
-        <div className="grid h-full grid-cols-1 gap-3 lg:grid-cols-2 lg:grid-rows-2">
-          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
+      <div className="min-h-0 flex-1 px-3 py-3">
+        <div className="grid h-full grid-cols-1 gap-2 lg:grid-cols-2 lg:grid-rows-2">
+          <section className="flex min-h-[14rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-2.5 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('recentReviews')}
@@ -140,23 +139,22 @@ export function ReviewBoardSummary({
               <div className="min-w-0">
                 <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.recentReviews.number}</div>
                 <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.recentReviews.title}</div>
-                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.recentReviews.description}</p>
               </div>
               {collapsedSections.recentReviews ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.recentReviews && (
-              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+              <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-scroll pr-1">
                 {sortedRecentReviews.length === 0 ? (
-                  <div className="rounded-lg bg-white px-3 py-3 text-sm text-slate-500">No reviews in this range yet.</div>
+                  <div className="rounded-lg bg-white px-2.5 py-2 text-sm text-slate-500">No reviews in this range yet.</div>
                 ) : (
                   sortedRecentReviews.map(review => {
                     const employeeNames = getReviewEmployeeNames(review)
 
                     return (
-                      <div key={review.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <div key={review.id} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="truncate font-bold text-slate-900">{review.author_name}</div>
+                            <div className="truncate text-xs font-bold text-slate-900">{review.author_name}</div>
                             <div className="mt-0.5 text-[11px] font-semibold text-slate-500">
                               {review.review_date} · {review.rating} star{review.rating === 1 ? '' : 's'}
                             </div>
@@ -168,9 +166,9 @@ export function ReviewBoardSummary({
                             {review.points > 0 ? '+' : ''}{review.points} pts
                           </span>
                         </div>
-                        <p className="mt-1 line-clamp-2 text-xs leading-4 text-slate-600">{review.review_text}</p>
+                        <p className="mt-0.5 line-clamp-1 text-xs leading-4 text-slate-600">{review.review_text}</p>
                         {employeeNames.length > 0 && (
-                          <div className="mt-1 truncate text-[11px] font-semibold text-amber-700">
+                          <div className="mt-0.5 truncate text-[11px] font-semibold text-amber-700">
                             {employeeNames.join(', ')}
                           </div>
                         )}
@@ -182,7 +180,7 @@ export function ReviewBoardSummary({
             )}
           </section>
 
-          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
+          <section className="flex min-h-[14rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-2.5 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('leaderboard')}
@@ -192,14 +190,13 @@ export function ReviewBoardSummary({
               <div className="min-w-0">
                 <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.leaderboard.number}</div>
                 <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.leaderboard.title}</div>
-                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.leaderboard.description}</p>
               </div>
               {collapsedSections.leaderboard ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.leaderboard && (
-              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+              <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
                 {reviewLeaderboard.length === 0 ? (
-                  <div className="rounded-lg bg-white px-3 py-3 text-sm text-slate-500">No attributed reviews in this range yet.</div>
+                  <div className="rounded-lg bg-white px-2.5 py-2 text-sm text-slate-500">No attributed reviews in this range yet.</div>
                 ) : (
                   reviewLeaderboard.map((item, index) => (
                     <button
@@ -207,7 +204,7 @@ export function ReviewBoardSummary({
                       type="button"
                       onClick={() => onSelectEmployee(item.employeeId)}
                       className={cn(
-                        'w-full rounded-lg border px-3 py-2 text-left transition-colors',
+                        'w-full rounded-md border px-2.5 py-1.5 text-left transition-colors',
                         selectedEmployeeId === item.employeeId
                           ? 'border-amber-300 bg-amber-50'
                           : 'border-slate-200 bg-white hover:bg-slate-50'
@@ -236,7 +233,7 @@ export function ReviewBoardSummary({
             )}
           </section>
 
-          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
+          <section className="flex min-h-[14rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-2.5 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('categories')}
@@ -246,14 +243,13 @@ export function ReviewBoardSummary({
               <div className="min-w-0">
                 <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.categories.number}</div>
                 <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.categories.title}</div>
-                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.categories.description}</p>
               </div>
               {collapsedSections.categories ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.categories && (
-              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+              <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
                 {categorySummary.map(item => (
-                  <div key={item.category} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm">
+                  <div key={item.category} className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-sm">
                     <span className="font-medium text-slate-700">{item.label}</span>
                     <span className="text-sm font-bold text-slate-950">{item.count}</span>
                   </div>
@@ -262,7 +258,7 @@ export function ReviewBoardSummary({
             )}
           </section>
 
-          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
+          <section className="flex min-h-[14rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-2.5 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('rewards')}
@@ -272,17 +268,16 @@ export function ReviewBoardSummary({
               <div className="min-w-0">
                 <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.rewards.number}</div>
                 <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.rewards.title}</div>
-                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.rewards.description}</p>
               </div>
               {collapsedSections.rewards ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.rewards && (
-              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+              <div className="mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
                 {rewards.length === 0 ? (
-                  <div className="rounded-lg bg-white px-3 py-3 text-sm text-slate-500">No rewards created yet.</div>
+                  <div className="rounded-lg bg-white px-2.5 py-2 text-sm text-slate-500">No rewards created yet.</div>
                 ) : (
                   rewards.map(item => (
-                    <div key={item.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <div key={item.id} className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm">
                       <div className="flex items-center justify-between gap-3">
                         <span className="font-bold text-slate-900">{item.name}</span>
                         <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">{item.points_cost} pts</span>
