@@ -61,8 +61,8 @@ export function ReviewBoardClient() {
   const [pendingManagerEmployeeId, setPendingManagerEmployeeId] = useState<string | null>(null)
   const [pendingAssignReview, setPendingAssignReview] = useState<GoogleReview | null>(null)
   const [collapsedSections, setCollapsedSections] = useState({
-    categories: true,
-    mentions: true,
+    categories: false,
+    mentions: false,
     leaderboard: false,
     rewards: false,
   })
