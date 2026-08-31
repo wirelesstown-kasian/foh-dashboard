@@ -22,7 +22,6 @@ function LoginForm() {
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [loginReady, setLoginReady] = useState(true)
 
   useEffect(() => {
     let mounted = true
@@ -35,7 +34,6 @@ function LoginForm() {
         : {}
 
       if (!mounted) return
-      setLoginReady(data.login_ready !== false)
       if (!data.authenticated) return
       router.replace(nextPath || (data.can_manage_admin ? '/admin' : '/schedule'))
     })()
@@ -82,51 +80,43 @@ function LoginForm() {
           </p>
         </div>
 
-        {loginReady ? (
-          <div className="space-y-4">
-            <div>
-              <Label>Email</Label>
-              <div className="relative mt-1">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="manager@newvillagepub.com"
-                  className="pl-9"
-                />
-              </div>
-            </div>
-            <div>
-              <Label>Password</Label>
+        <div className="space-y-4">
+          <div>
+            <Label>Email</Label>
+            <div className="relative mt-1">
+              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="At least 8 characters"
-                className="mt-1"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="manager@newvillagepub.com"
+                className="pl-9"
               />
             </div>
-            {error && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-                {error}
-              </div>
-            )}
-            <Button
-              className="w-full"
-              disabled={saving || !email.trim() || !password.trim()}
-              onClick={handleSubmit}
-            >
-              {saving ? 'Signing In…' : 'Sign In'}
-            </Button>
           </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              Create the first app login in <span className="font-medium">Staffing</span> before using this page.
+          <div>
+            <Label>Password</Label>
+            <Input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="At least 8 characters"
+              className="mt-1"
+            />
+          </div>
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+              {error}
             </div>
-          </div>
-        )}
+          )}
+          <Button
+            className="w-full"
+            disabled={saving || !email.trim() || !password.trim()}
+            onClick={handleSubmit}
+          >
+            {saving ? 'Signing In…' : 'Sign In'}
+          </Button>
+        </div>
       </div>
     </div>
   )
