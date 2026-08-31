@@ -461,7 +461,7 @@ export function ReviewBoardClient() {
           </div>
         ) : (
           <div className="space-y-5">
-            <div className="min-h-[calc(100vh-12rem)]">
+            <div className="min-h-[34rem] lg:h-[calc(100vh-14rem)] lg:min-h-0">
               <ReviewBoardSummary
                 dateFilter={dateFilter}
                 onRangeChange={handleRangeChange}
