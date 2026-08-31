@@ -62,7 +62,7 @@ export function ReviewBoardClient() {
   const [pendingAssignReview, setPendingAssignReview] = useState<GoogleReview | null>(null)
   const [collapsedSections, setCollapsedSections] = useState({
     categories: false,
-    mentions: false,
+    recentReviews: false,
     leaderboard: false,
     rewards: false,
   })
@@ -467,7 +467,7 @@ export function ReviewBoardClient() {
                 onRangeChange={handleRangeChange}
                 onCustomDateChange={handleCustomDateChange}
                 categorySummary={summary.categorySummary}
-                staffMentionSummary={summary.staffMentionSummary}
+                recentReviews={visibleReviews}
                 reviewLeaderboard={summary.reviewLeaderboard}
                 rewards={rewards}
                 selectedEmployeeId={activeEmployeeFilter?.source === 'manager' ? activeEmployeeFilter.employeeId : null}

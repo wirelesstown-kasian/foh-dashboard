@@ -8,9 +8,8 @@ import {
   ReviewCategorySummaryItem,
   ReviewDateRangeFilter,
   ReviewLeaderboardEntry,
-  StaffMentionSummaryItem,
 } from '@/lib/reviewScoring'
-import { RewardCatalogItem } from '@/lib/types'
+import { GoogleReview, RewardCatalogItem } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 interface ReviewBoardSummaryProps {
@@ -18,18 +17,18 @@ interface ReviewBoardSummaryProps {
   onRangeChange: (range: ReviewBoardRange) => void
   onCustomDateChange: (field: 'startDate' | 'endDate', value: string) => void
   categorySummary: ReviewCategorySummaryItem[]
-  staffMentionSummary: StaffMentionSummaryItem[]
+  recentReviews: GoogleReview[]
   reviewLeaderboard: ReviewLeaderboardEntry[]
   rewards: RewardCatalogItem[]
   selectedEmployeeId: string | null
   onSelectEmployee: (employeeId: string) => void
   collapsedSections: {
     categories: boolean
-    mentions: boolean
+    recentReviews: boolean
     leaderboard: boolean
     rewards: boolean
   }
-  onToggleSection: (section: 'categories' | 'mentions' | 'leaderboard' | 'rewards') => void
+  onToggleSection: (section: 'categories' | 'recentReviews' | 'leaderboard' | 'rewards') => void
 }
 
 const rangeOptions: Array<{ value: ReviewBoardRange; label: string }> = [
@@ -41,34 +40,44 @@ const rangeOptions: Array<{ value: ReviewBoardRange; label: string }> = [
 ]
 
 const sectionDetails = {
-  leaderboard: {
+  recentReviews: {
     number: '01',
+    title: 'Recent Reviews',
+    description: 'Newest filtered reviews in a scrollable list.',
+  },
+  leaderboard: {
+    number: '02',
     title: 'Ranking Board',
     description: 'Staff ranking, review points, and combined score.',
   },
-  rewards: {
-    number: '02',
-    title: 'Rewards List',
-    description: 'Point costs for redeemable staff rewards.',
-  },
-  mentions: {
-    number: '03',
-    title: 'Staff Mentions',
-    description: 'Direct employee mentions found in reviews.',
-  },
   categories: {
-    number: '04',
+    number: '03',
     title: 'Content Summary',
     description: 'Review themes by service, food, wait time, and more.',
   },
+  rewards: {
+    number: '04',
+    title: 'Rewards List',
+    description: 'Point costs for redeemable staff rewards.',
+  },
 } as const
+
+const getReviewEmployeeNames = (review: GoogleReview) => {
+  const matchedEmployees = (review.matched_employees ?? []).length > 0
+    ? review.matched_employees ?? []
+    : review.matched_employee
+      ? [review.matched_employee]
+      : []
+
+  return matchedEmployees.map(employee => employee.name)
+}
 
 export function ReviewBoardSummary({
   dateFilter,
   onRangeChange,
   onCustomDateChange,
   categorySummary,
-  staffMentionSummary,
+  recentReviews,
   reviewLeaderboard,
   rewards,
   selectedEmployeeId,
@@ -76,48 +85,104 @@ export function ReviewBoardSummary({
   collapsedSections,
   onToggleSection,
 }: ReviewBoardSummaryProps) {
+  const sortedRecentReviews = [...recentReviews]
+    .sort((left, right) => right.review_date.localeCompare(left.review_date))
+    .slice(0, 25)
+
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
-      <div className="shrink-0 border-b border-slate-100 px-5 py-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="shrink-0 border-b border-slate-100 px-4 py-3">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Review Filters</div>
-            <p className="mt-1 text-sm text-slate-500">Controls all four review panels below.</p>
+            <p className="mt-0.5 text-xs text-slate-500">Controls all four panels below.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-          {rangeOptions.map(option => (
-            <Button
-              key={option.value}
-              variant={dateFilter.mode === option.value ? 'default' : 'outline'}
-              className={cn('h-11 min-w-24 text-sm font-semibold', dateFilter.mode === option.value && 'bg-slate-900 text-white')}
-              onClick={() => onRangeChange(option.value)}
-            >
-              {option.label}
-            </Button>
-          ))}
+          <div className="flex flex-wrap gap-1.5">
+            {rangeOptions.map(option => (
+              <Button
+                key={option.value}
+                variant={dateFilter.mode === option.value ? 'default' : 'outline'}
+                className={cn('h-9 min-w-20 px-3 text-xs font-semibold', dateFilter.mode === option.value && 'bg-slate-900 text-white')}
+                onClick={() => onRangeChange(option.value)}
+              >
+                {option.label}
+              </Button>
+            ))}
           </div>
         </div>
         {dateFilter.mode === 'custom' && (
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <Input
               type="date"
               value={dateFilter.startDate}
               onChange={event => onCustomDateChange('startDate', event.target.value)}
-              className="h-11 text-sm"
+              className="h-9 text-xs"
             />
             <Input
               type="date"
               value={dateFilter.endDate}
               onChange={event => onCustomDateChange('endDate', event.target.value)}
-              className="h-11 text-sm"
+              className="h-9 text-xs"
             />
           </div>
         )}
       </div>
 
-      <div className="min-h-0 flex-1 px-5 py-5">
-        <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-2">
-          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
+      <div className="min-h-0 flex-1 px-4 py-4">
+        <div className="grid h-full grid-cols-1 gap-3 lg:grid-cols-2 lg:grid-rows-2">
+          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
+            <button
+              type="button"
+              onClick={() => onToggleSection('recentReviews')}
+              aria-expanded={!collapsedSections.recentReviews}
+              className="flex w-full items-start justify-between gap-3 text-left"
+            >
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.recentReviews.number}</div>
+                <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.recentReviews.title}</div>
+                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.recentReviews.description}</p>
+              </div>
+              {collapsedSections.recentReviews ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
+            </button>
+            {!collapsedSections.recentReviews && (
+              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+                {sortedRecentReviews.length === 0 ? (
+                  <div className="rounded-lg bg-white px-3 py-3 text-sm text-slate-500">No reviews in this range yet.</div>
+                ) : (
+                  sortedRecentReviews.map(review => {
+                    const employeeNames = getReviewEmployeeNames(review)
+
+                    return (
+                      <div key={review.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate font-bold text-slate-900">{review.author_name}</div>
+                            <div className="mt-0.5 text-[11px] font-semibold text-slate-500">
+                              {review.review_date} · {review.rating} star{review.rating === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                          <span className={cn(
+                            'shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold',
+                            review.points > 0 ? 'text-emerald-600' : review.points < 0 ? 'text-red-600' : 'text-slate-500'
+                          )}>
+                            {review.points > 0 ? '+' : ''}{review.points} pts
+                          </span>
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-xs leading-4 text-slate-600">{review.review_text}</p>
+                        {employeeNames.length > 0 && (
+                          <div className="mt-1 truncate text-[11px] font-semibold text-amber-700">
+                            {employeeNames.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('leaderboard')}
@@ -125,16 +190,16 @@ export function ReviewBoardSummary({
               className="flex w-full items-start justify-between gap-3 text-left"
             >
               <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.leaderboard.number}</div>
-                <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.leaderboard.title}</div>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.leaderboard.description}</p>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.leaderboard.number}</div>
+                <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.leaderboard.title}</div>
+                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.leaderboard.description}</p>
               </div>
               {collapsedSections.leaderboard ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.leaderboard && (
-              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
                 {reviewLeaderboard.length === 0 ? (
-                  <div className="rounded-lg bg-white px-4 py-4 text-sm text-slate-500">No attributed reviews in this range yet.</div>
+                  <div className="rounded-lg bg-white px-3 py-3 text-sm text-slate-500">No attributed reviews in this range yet.</div>
                 ) : (
                   reviewLeaderboard.map((item, index) => (
                     <button
@@ -142,7 +207,7 @@ export function ReviewBoardSummary({
                       type="button"
                       onClick={() => onSelectEmployee(item.employeeId)}
                       className={cn(
-                        'w-full rounded-lg border px-4 py-3 text-left transition-colors',
+                        'w-full rounded-lg border px-3 py-2 text-left transition-colors',
                         selectedEmployeeId === item.employeeId
                           ? 'border-amber-300 bg-amber-50'
                           : 'border-slate-200 bg-white hover:bg-slate-50'
@@ -150,18 +215,18 @@ export function ReviewBoardSummary({
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">#{index + 1}</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">#{index + 1}</div>
                           <div className="truncate text-sm font-bold text-slate-900">{item.employeeName}</div>
-                          <div className="mt-1 text-xs text-slate-500">{item.reviewCount} reviews</div>
+                          <div className="mt-0.5 text-xs text-slate-500">{item.reviewCount} reviews</div>
                         </div>
                         <div className="text-right">
                           <div className={cn(
-                            'text-lg font-bold',
+                            'text-base font-bold',
                             item.reviewPoints > 0 ? 'text-emerald-600' : item.reviewPoints < 0 ? 'text-red-600' : 'text-slate-950'
                           )}>
                             {item.reviewPoints > 0 ? '+' : ''}{item.reviewPoints}
                           </div>
-                          <div className="text-xs text-slate-500">Perf {item.performanceScore} • Combined {item.combinedScore}</div>
+                          <div className="text-[11px] text-slate-500">Perf {item.performanceScore} · Combined {item.combinedScore}</div>
                         </div>
                       </div>
                     </button>
@@ -171,80 +236,7 @@ export function ReviewBoardSummary({
             )}
           </section>
 
-          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
-            <button
-              type="button"
-              onClick={() => onToggleSection('rewards')}
-              aria-expanded={!collapsedSections.rewards}
-              className="flex w-full items-start justify-between gap-3 text-left"
-            >
-              <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.rewards.number}</div>
-                <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.rewards.title}</div>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.rewards.description}</p>
-              </div>
-              {collapsedSections.rewards ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
-            </button>
-            {!collapsedSections.rewards && (
-              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {rewards.length === 0 ? (
-                  <div className="rounded-lg bg-white px-4 py-4 text-sm text-slate-500">No rewards created yet.</div>
-                ) : (
-                  rewards.map(item => (
-                    <div key={item.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-bold text-slate-900">{item.name}</span>
-                        <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">{item.points_cost} pts</span>
-                      </div>
-                      {item.description && <p className="mt-1 text-xs text-slate-500">{item.description}</p>}
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
-            <button
-              type="button"
-              onClick={() => onToggleSection('mentions')}
-              aria-expanded={!collapsedSections.mentions}
-              className="flex w-full items-start justify-between gap-3 text-left"
-            >
-              <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.mentions.number}</div>
-                <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.mentions.title}</div>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.mentions.description}</p>
-              </div>
-              {collapsedSections.mentions ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
-            </button>
-            {!collapsedSections.mentions && (
-              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {staffMentionSummary.length === 0 ? (
-                  <div className="rounded-lg bg-white px-4 py-4 text-sm text-slate-500">No direct staff mentions in this range.</div>
-                ) : (
-                  staffMentionSummary.map(item => (
-                    <button
-                      key={item.employeeId}
-                      type="button"
-                      onClick={() => onSelectEmployee(item.employeeId)}
-                      className={cn(
-                        'flex min-h-11 w-full items-center justify-between rounded-lg border px-4 py-3 text-left text-sm transition-colors',
-                        selectedEmployeeId === item.employeeId
-                          ? 'border-amber-300 bg-amber-50'
-                          : 'border-slate-200 bg-white hover:bg-slate-50'
-                      )}
-                    >
-                      <span className="font-medium text-slate-700">{item.employeeName}</span>
-                      <span className="font-bold text-slate-950">{item.mentionCount}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="flex min-h-[22rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-4 lg:min-h-0">
+          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
             <button
               type="button"
               onClick={() => onToggleSection('categories')}
@@ -252,20 +244,53 @@ export function ReviewBoardSummary({
               className="flex w-full items-start justify-between gap-3 text-left"
             >
               <div className="min-w-0">
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.categories.number}</div>
-                <div className="mt-1 text-sm font-bold text-slate-900">{sectionDetails.categories.title}</div>
-                <p className="mt-1 text-xs leading-5 text-slate-500">{sectionDetails.categories.description}</p>
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.categories.number}</div>
+                <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.categories.title}</div>
+                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.categories.description}</p>
               </div>
               {collapsedSections.categories ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.categories && (
-              <div className="mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
                 {categorySummary.map(item => (
-                  <div key={item.category} className="flex items-center justify-between rounded-lg bg-white px-4 py-3 text-sm">
+                  <div key={item.category} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm">
                     <span className="font-medium text-slate-700">{item.label}</span>
-                    <span className="text-base font-bold text-slate-950">{item.count}</span>
+                    <span className="text-sm font-bold text-slate-950">{item.count}</span>
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+
+          <section className="flex min-h-[18rem] flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-50/60 p-3 lg:min-h-0">
+            <button
+              type="button"
+              onClick={() => onToggleSection('rewards')}
+              aria-expanded={!collapsedSections.rewards}
+              className="flex w-full items-start justify-between gap-3 text-left"
+            >
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-600">{sectionDetails.rewards.number}</div>
+                <div className="mt-0.5 text-sm font-bold text-slate-900">{sectionDetails.rewards.title}</div>
+                <p className="mt-0.5 text-xs leading-4 text-slate-500">{sectionDetails.rewards.description}</p>
+              </div>
+              {collapsedSections.rewards ? <ChevronDown className="mt-1 h-4 w-4 text-slate-500" /> : <ChevronUp className="mt-1 h-4 w-4 text-slate-500" />}
+            </button>
+            {!collapsedSections.rewards && (
+              <div className="mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
+                {rewards.length === 0 ? (
+                  <div className="rounded-lg bg-white px-3 py-3 text-sm text-slate-500">No rewards created yet.</div>
+                ) : (
+                  rewards.map(item => (
+                    <div key={item.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-bold text-slate-900">{item.name}</span>
+                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">{item.points_cost} pts</span>
+                      </div>
+                      {item.description && <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{item.description}</p>}
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </section>
