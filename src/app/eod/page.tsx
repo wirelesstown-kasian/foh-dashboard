@@ -287,9 +287,9 @@ export default function EodPage() {
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
       )),
-      fetch('/api/app-session', { cache: 'no-store' }).then(async res => (
-        (await res.json().catch(() => ({}))) as { can_manage_admin?: boolean }
-      )),
+      fetch('/api/app-session', { cache: 'no-store' })
+        .then(async res => ((await res.json().catch(() => ({}))) as { can_manage_admin?: boolean }))
+        .catch(() => ({} as { can_manage_admin?: boolean })),
       fetch('/api/org-settings', { cache: 'no-store' }).then(async res => (
         res.ok ? (await res.json().catch(() => ({}))) as { eod_send_timing?: string } : {}
       )),

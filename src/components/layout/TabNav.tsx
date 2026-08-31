@@ -16,7 +16,6 @@ import {
   MessageSquareQuote,
   ShieldCheck,
   Lock,
-  UserRound,
   LogOut,
 } from 'lucide-react'
 
@@ -33,8 +32,6 @@ const adminPaths = ['/admin', '/task-admin', '/staffing', '/schedule-planning', 
 export function TabNav() {
   const pathname = usePathname()
   const router = useRouter()
-  const [appUserName, setAppUserName] = useState<string | null>(null)
-  const [loginReady, setLoginReady] = useState(false)
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [adminNeedsSetup, setAdminNeedsSetup] = useState(false)
   const [showPinModal, setShowPinModal] = useState(false)
@@ -97,28 +94,8 @@ export function TabNav() {
     }
   }, [])
 
-  useEffect(() => {
-    let mounted = true
-
-    void (async () => {
-      const res = await fetch('/api/app-session', { cache: 'no-store' })
-      const data = res.ok
-        ? await res.json() as { authenticated?: boolean; login_ready?: boolean; employee?: { name?: string } }
-        : {}
-
-      if (!mounted) return
-      setAppUserName(data.authenticated ? data.employee?.name ?? 'Signed In' : null)
-      setLoginReady(data.login_ready === true)
-    })()
-
-    return () => {
-      mounted = false
-    }
-  }, [pathname])
-
   const handleLogout = async () => {
     await fetch('/api/app-session', { method: 'DELETE' })
-    setAppUserName(null)
     setAdminUnlocked(false)
     router.push('/')
     router.refresh()
@@ -197,51 +174,17 @@ export function TabNav() {
 
           <div className="ml-auto flex items-center gap-1 shrink-0">
             <GlobalTimeClock />
-            {appUserName ? (
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-                      aria-label={`Signed in as ${appUserName}`}
-                      title={appUserName}
-                    />
-                  }
-                >
-                  <UserRound className="h-4 w-4 text-amber-400" />
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-48 bg-white text-slate-950">
-                  <div className="border-b pb-2 text-xs font-semibold text-slate-500">{appUserName}</div>
-                  <button
-                    onClick={handleAdminClick}
-                    className={cn(
-                      'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-violet-50',
-                      isOnAdminPage ? 'text-violet-700' : 'text-slate-700'
-                    )}
-                  >
-                    <ShieldCheck className="h-4 w-4" />
-                    {adminNeedsSetup ? 'Setup Admin' : 'Admin Board'}
-                    {adminUnlocked && <Lock className="ml-auto h-3.5 w-3.5 text-emerald-600" />}
-                  </button>
-                  <button
-                    onClick={handleLogout}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </button>
-                </PopoverContent>
-              </Popover>
-            ) : loginReady ? (
-              <Link
-                href="/login"
-                className="flex h-9 w-9 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-                aria-label="Login"
-                title="Login"
-              >
-                <UserRound className="h-4 w-4" />
-              </Link>
-            ) : null}
+            <button
+              onClick={handleAdminClick}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-gray-700 hover:text-white',
+                isOnAdminPage && 'bg-gray-800 text-amber-400'
+              )}
+              aria-label="Admin Board"
+              title="Admin Board"
+            >
+              <ShieldCheck className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
@@ -311,55 +254,41 @@ export function TabNav() {
 
           <div className="ml-auto flex items-center gap-2">
             <GlobalTimeClock />
-            {appUserName ? (
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-700 bg-gray-800 text-gray-200 transition-colors hover:bg-gray-700 hover:text-white"
-                      aria-label={`Signed in as ${appUserName}`}
-                      title={appUserName}
-                    />
-                  }
-                >
-                  <UserRound className="h-4 w-4 text-amber-400" />
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-52 bg-white text-slate-950">
-                  <div className="border-b pb-2 text-sm font-semibold text-slate-700">{appUserName}</div>
+            <Popover>
+              <PopoverTrigger
+                render={
                   <button
-                    onClick={handleAdminClick}
                     className={cn(
-                      'mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-violet-50',
-                      isOnAdminPage ? 'text-violet-700' : 'text-slate-700'
+                      'flex h-9 items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-700 hover:text-white',
+                      isOnAdminPage && 'border-amber-500/60 text-amber-300'
                     )}
-                  >
-                    <ShieldCheck className="h-4 w-4" />
-                    {adminNeedsSetup ? 'Setup Admin' : 'Admin Board'}
-                    {adminUnlocked && <Lock className="ml-auto h-3.5 w-3.5 text-emerald-600" />}
-                  </button>
-                  <button
-                    onClick={handleLogout}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </button>
-                </PopoverContent>
-              </Popover>
-            ) : loginReady ? (
-              <Link
-                href="/login"
-                className="flex h-9 w-9 items-center justify-center rounded-md text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-                aria-label="Login"
-                title="Login"
+                  />
+                }
               >
-                <UserRound className="h-4 w-4" />
-              </Link>
-            ) : (
-              <div className="hidden rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-400 md:block">
-                Enable app login in Staffing
-              </div>
-            )}
+                <ShieldCheck className="h-4 w-4" />
+                Admin
+                {adminUnlocked && <Lock className="h-3.5 w-3.5 text-emerald-400" />}
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-52 bg-white text-slate-950">
+                <button
+                  onClick={handleAdminClick}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-violet-50',
+                    isOnAdminPage ? 'text-violet-700' : 'text-slate-700'
+                  )}
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  {adminNeedsSetup ? 'Setup Admin' : 'Admin Board'}
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Clear Session
+                </button>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       </nav>
