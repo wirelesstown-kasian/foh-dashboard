@@ -9,16 +9,8 @@ export async function GET() {
   const cookieStore = await cookies()
   const session = parseAppSessionValue(cookieStore.get(APP_SESSION_COOKIE)?.value)
 
-  const { count } = await supabaseAdmin
-    .from('employees')
-    .select('id', { count: 'exact', head: true })
-    .eq('is_active', true)
-    .eq('login_enabled', true)
-
-  const loginReady = (count ?? 0) > 0
-
   if (!session) {
-    return NextResponse.json({ authenticated: false, login_ready: loginReady })
+    return NextResponse.json({ authenticated: false, login_ready: true })
   }
 
   cookieStore.set(APP_SESSION_COOKIE, createAppSessionValue({
@@ -36,7 +28,7 @@ export async function GET() {
 
   return NextResponse.json({
     authenticated: true,
-    login_ready: loginReady,
+    login_ready: true,
     employee: {
       id: session.employeeId,
       name: session.name,
