@@ -214,7 +214,7 @@ export function getClockWorkDepartment(
     const fallbackDepartment = employeeDepartments.length > 1
       ? getPreferredAmbiguousWorkDepartment(employeeDepartments)
       : employeeDepartments[0]
-    return fallbackDepartment ?? relatedEmployee.primary_department ?? 'staff'
+    return fallbackDepartment ?? (relatedEmployee.primary_department ? normalizeScheduleDepartment(relatedEmployee.primary_department) : 'staff')
   }
 
   return 'staff'

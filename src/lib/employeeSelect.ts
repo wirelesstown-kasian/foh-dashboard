@@ -132,7 +132,7 @@ export function getEmployeeScheduleDepartments(employee: { role?: unknown; prima
   const roleDepartment = getScheduleDepartmentFromRole(employee.role)
   if (roleDepartment) return [roleDepartment]
 
-  const primaryDepartment = employee.primary_department ?? 'foh'
+  const primaryDepartment = normalizeScheduleDepartment(employee.primary_department ?? 'foh')
   if (primaryDepartment === 'boh') return ['cook']
   if (primaryDepartment === 'hybrid') return ['manager']
   if (primaryDepartment === 'foh') return ['server']

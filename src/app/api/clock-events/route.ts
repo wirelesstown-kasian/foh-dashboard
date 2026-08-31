@@ -377,26 +377,31 @@ export async function GET(req: NextRequest) {
   if (configResponse) return configResponse
 
   const includePhotos = req.nextUrl.searchParams.get('include_photos') === '1'
+  const minimal = req.nextUrl.searchParams.get('minimal') === '1' && !includePhotos
+  const openOnly = req.nextUrl.searchParams.get('open_only') === '1'
   const sessionDate = req.nextUrl.searchParams.get('session_date')
   const startDate = req.nextUrl.searchParams.get('start_date')
   const endDate = req.nextUrl.searchParams.get('end_date')
 
   let query = supabaseAdmin
     .from('shift_clocks')
-    .select('*, employee:employees!shift_clocks_employee_id_fkey(*)')
+    .select(minimal
+      ? 'id,session_date,employee_id,clock_in_at,clock_out_at,clock_in_photo_path,clock_out_photo_path,auto_clock_out,approval_status,approved_hours,manager_approved_by,manager_approved_at,manager_note,created_at,updated_at'
+      : '*, employee:employees!shift_clocks_employee_id_fkey(*)')
     .order('session_date', { ascending: false })
     .order('clock_in_at', { ascending: false })
 
   if (sessionDate) query = query.eq('session_date', sessionDate)
   if (startDate) query = query.gte('session_date', startDate)
   if (endDate) query = query.lte('session_date', endDate)
+  if (openOnly) query = query.is('clock_out_at', null)
 
   const { data, error } = await query
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const records = (data ?? []) as ShiftClock[]
+  const records = (data ?? []) as unknown as ShiftClock[]
   if (includePhotos) {
     if (!(await requireAdmin())) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -410,8 +415,6 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const configResponse = getAdminConfigResponse()
   if (configResponse) return configResponse
-
-  await processOverdueClockRecords()
 
   const payload = await req.json() as {
     action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break' | 'start_unpaid_break' | 'end_unpaid_break' | 'toggle_unpaid_break' | 'lookup_status'

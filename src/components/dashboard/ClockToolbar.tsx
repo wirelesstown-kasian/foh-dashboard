@@ -90,7 +90,7 @@ function getWorkDepartmentOptions(
   return uniqueStrings([
     ...getScheduledDepartments(employee.id, schedules),
     ...getEmployeeScheduleDepartments(employee),
-    employee.primary_department,
+    typeof employee.primary_department === 'string' ? normalizeScheduleDepartment(employee.primary_department) : employee.primary_department,
   ])
 }
 
