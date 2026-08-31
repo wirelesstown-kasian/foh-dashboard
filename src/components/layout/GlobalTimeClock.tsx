@@ -23,7 +23,7 @@ export function GlobalTimeClock() {
     const [scheduleRes, clockPayload] = await Promise.all([
       supabase
         .from('schedules')
-        .select('*, employee:employees(id, name, phone, email, role, primary_department, schedule_departments, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, birth_date, is_active, created_at)')
+        .select('id, employee_id, date, start_time, end_time, department, created_at')
         .eq('date', today)
         .order('department')
         .order('start_time'),

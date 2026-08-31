@@ -46,6 +46,12 @@ const LEGACY_SCHEDULE_DEPARTMENT_MAP: Record<string, string> = {
   foh: 'server',
   boh: 'cook',
   hybrid: 'manager',
+  kitchen_staff: 'cook',
+}
+
+export function normalizeScheduleDepartment(department: string) {
+  const normalized = department.trim()
+  return LEGACY_SCHEDULE_DEPARTMENT_MAP[normalized] ?? normalized
 }
 
 function normalizeStoredScheduleDepartments(scheduleDepartments: unknown) {
@@ -54,8 +60,7 @@ function normalizeStoredScheduleDepartments(scheduleDepartments: unknown) {
   return Array.from(new Set(
     scheduleDepartments
       .filter((department): department is string => typeof department === 'string' && department.trim().length > 0)
-      .map(department => department.trim())
-      .map(department => LEGACY_SCHEDULE_DEPARTMENT_MAP[department] ?? department)
+      .map(normalizeScheduleDepartment)
   ))
 }
 

@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Employee, ShiftClock, Schedule } from '@/lib/types'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
-import { getClockWorkDepartment, isClockOnMealBreak, isClockOnUnpaidBreak } from '@/lib/clockUtils'
-import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
+import { isClockOnMealBreak, isClockOnUnpaidBreak } from '@/lib/clockUtils'
+import { getEmployeeScheduleDepartments, normalizeScheduleDepartment } from '@/lib/employeeSelect'
 import { cn } from '@/lib/utils'
 import { ArrowLeft, Bell, Camera, CheckCircle2, Clock3, Coffee, LogIn, LogOut, Sparkles, Utensils } from 'lucide-react'
 
@@ -51,15 +51,6 @@ type ClockInConfirmation = {
   workDepartment: string
   clockInAt: string
 }
-type AvailableStaff = {
-  id: string
-  name: string
-  label: string
-  clockedIn: boolean
-  unscheduledClockIn: boolean
-  onBreak: boolean
-}
-
 const getAnnouncementLines = (value: string) => value.split('\n').map(line => line.trim()).filter(Boolean)
 
 function formatStatusTime(value: string | null | undefined) {
@@ -77,47 +68,6 @@ function formatStatusDateTime(value: string | null | undefined) {
   })
 }
 
-function TodayStaffPanel({ staff }: { staff: AvailableStaff[] }) {
-  const showScrollCue = staff.length > 4
-
-  return (
-    <div className="rounded-lg border bg-white p-3 shadow-sm">
-      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Today&apos;s Staff</div>
-      <div className="relative mt-2">
-        <div className={cn('max-h-56 space-y-1.5 overflow-auto pr-1', showScrollCue && 'pb-9')}>
-          {staff.length > 0 ? staff.map(item => (
-            <div key={item.id} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2.5 py-1.5 text-sm">
-              <div className="min-w-0">
-                <div className="truncate font-semibold text-slate-900">{item.name}</div>
-                <div className="text-xs text-slate-500">{item.unscheduledClockIn ? `Clocked in - ${item.label}` : item.label}</div>
-              </div>
-              <span
-                className={cn(
-                  'shrink-0 rounded-full px-2 py-0.5 text-xs font-bold',
-                  item.clockedIn
-                    ? item.onBreak
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-emerald-100 text-emerald-700'
-                    : 'bg-slate-200 text-slate-500'
-                )}
-              >
-                {item.clockedIn ? item.onBreak ? 'Break' : 'Here' : 'Scheduled'}
-              </span>
-            </div>
-          )) : (
-            <div className="rounded-md bg-slate-50 px-2.5 py-2 text-sm text-slate-500">No scheduled or clocked-in staff found.</div>
-          )}
-        </div>
-        {showScrollCue && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 rounded-b-md bg-gradient-to-t from-white via-white/95 to-transparent px-2 pb-1.5 pt-5 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Scroll for more ↓
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function uniqueStrings(values: Array<string | null | undefined>) {
   return Array.from(new Set(values
     .map(value => typeof value === 'string' ? value.trim() : '')
@@ -129,7 +79,7 @@ function getScheduledDepartments(employeeId: string, schedules: Schedule[]) {
     schedules
       .filter(schedule => schedule.employee_id === employeeId)
       .sort((left, right) => left.start_time.localeCompare(right.start_time))
-      .map(schedule => schedule.department)
+      .map(schedule => typeof schedule.department === 'string' ? normalizeScheduleDepartment(schedule.department) : schedule.department)
   )
 }
 
@@ -141,7 +91,6 @@ function getWorkDepartmentOptions(
     ...getScheduledDepartments(employee.id, schedules),
     ...getEmployeeScheduleDepartments(employee),
     employee.primary_department,
-    employee.role,
   ])
 }
 
@@ -182,52 +131,11 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
   )
   const openClockCount = openClockRecords.length
   const activeBreakCount = openClockRecords.filter(record => isClockOnMealBreak(record) || isClockOnUnpaidBreak(record)).length
-  const availableStaff = useMemo<AvailableStaff[]>(() => {
-    const staffById = new Map<string, AvailableStaff>()
-    const clockedInIds = new Set(openClockRecords.map(record => record.employee_id))
-
-    for (const schedule of schedules) {
-      if (!schedule.employee) continue
-      staffById.set(schedule.employee_id, {
-        id: schedule.employee_id,
-        name: schedule.employee.name,
-        label: schedule.department ? String(schedule.department) : schedule.employee.primary_department ?? schedule.employee.role ?? 'Scheduled',
-        clockedIn: clockedInIds.has(schedule.employee_id),
-        unscheduledClockIn: false,
-        onBreak: false,
-      })
-    }
-
-    for (const record of openClockRecords) {
-      const employee = record.employee as Employee | Employee[] | undefined
-      const resolvedEmployee = Array.isArray(employee) ? employee[0] : employee
-      const existing = staffById.get(record.employee_id)
-      const onBreak = isClockOnMealBreak(record) || isClockOnUnpaidBreak(record)
-      const workDepartment = getClockWorkDepartment(record, resolvedEmployee, schedules)
-      if (existing) {
-        staffById.set(record.employee_id, { ...existing, label: workDepartment, clockedIn: true, onBreak })
-      } else {
-        staffById.set(record.employee_id, {
-          id: record.employee_id,
-          name: resolvedEmployee?.name ?? 'Clocked-in staff',
-          label: workDepartment,
-          clockedIn: true,
-          unscheduledClockIn: true,
-          onBreak,
-        })
-      }
-    }
-
-    return [...staffById.values()].sort((a, b) => {
-      if (a.clockedIn !== b.clockedIn) return a.clockedIn ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
-  }, [openClockRecords, schedules])
-
   useEffect(() => {
     let mounted = true
 
     const loadAnnouncement = async () => {
+      if (!panelOpen) return
       const res = await fetch('/api/announcements', { cache: 'no-store' })
       const data = (await res.json().catch(() => ({}))) as { boardText?: string }
       if (!mounted) return
@@ -242,7 +150,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       window.removeEventListener('app-settings-updated', loadAnnouncement)
       window.removeEventListener('announcements-updated', loadAnnouncement)
     }
-  }, [])
+  }, [panelOpen])
 
   const resetPanel = () => {
     setPanelOpen(false)
@@ -818,7 +726,6 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Back to PIN
                       </Button>
-                      <TodayStaffPanel staff={availableStaff} />
                     </>
                   )}
                 </div>

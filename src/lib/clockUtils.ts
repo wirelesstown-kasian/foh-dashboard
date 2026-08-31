@@ -1,5 +1,5 @@
 import { BUSINESS_DAY_CUTOFF_HOUR } from '@/lib/dateUtils'
-import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
+import { getEmployeeScheduleDepartments, normalizeScheduleDepartment } from '@/lib/employeeSelect'
 import { Employee, Schedule, ShiftClock } from '@/lib/types'
 
 export const CLOCK_PHOTO_BUCKET = 'clock-photos'
@@ -176,7 +176,7 @@ export function getClockWorkDepartmentFromNote(note: string | null | undefined) 
 
 export function setClockWorkDepartmentManagerNote(note: string | null | undefined, department: string | null | undefined) {
   const baseNote = (note ?? '').replace(WORK_DEPARTMENT_TOKEN_PATTERN, '').trim()
-  const normalizedDepartment = typeof department === 'string' ? department.trim() : ''
+  const normalizedDepartment = typeof department === 'string' && department.trim() ? normalizeScheduleDepartment(department) : ''
   return [baseNote, normalizedDepartment ? `[work_department=${normalizedDepartment}]` : ''].filter(Boolean).join(' ')
 }
 
@@ -194,15 +194,15 @@ export function getClockWorkDepartment(
   schedules: Array<Pick<Schedule, 'employee_id' | 'date' | 'department'>> = []
 ) {
   const directDepartment = (record as ShiftClock & { work_department?: unknown }).work_department
-  if (typeof directDepartment === 'string' && directDepartment.trim()) return directDepartment.trim()
+  if (typeof directDepartment === 'string' && directDepartment.trim()) return normalizeScheduleDepartment(directDepartment)
 
   const noteDepartment = getClockWorkDepartmentFromNote(record.manager_note)
-  if (noteDepartment) return noteDepartment
+  if (noteDepartment) return normalizeScheduleDepartment(noteDepartment)
 
   const scheduledDepartments = Array.from(new Set(
     schedules
       .filter(schedule => schedule.employee_id === record.employee_id && schedule.date === record.session_date && typeof schedule.department === 'string' && schedule.department.trim())
-      .map(schedule => String(schedule.department).trim())
+      .map(schedule => normalizeScheduleDepartment(String(schedule.department)))
   ))
   if (scheduledDepartments.length === 1) return scheduledDepartments[0]
   const preferredScheduledDepartment = getPreferredAmbiguousWorkDepartment(scheduledDepartments)
@@ -214,7 +214,7 @@ export function getClockWorkDepartment(
     const fallbackDepartment = employeeDepartments.length > 1
       ? getPreferredAmbiguousWorkDepartment(employeeDepartments)
       : employeeDepartments[0]
-    return fallbackDepartment ?? relatedEmployee.primary_department ?? relatedEmployee.role ?? 'staff'
+    return fallbackDepartment ?? relatedEmployee.primary_department ?? 'staff'
   }
 
   return 'staff'

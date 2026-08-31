@@ -18,6 +18,7 @@ import {
   setMealBreakManagerNote,
   setUnpaidBreakManagerNote,
 } from '@/lib/clockUtils'
+import { normalizeScheduleDepartment } from '@/lib/employeeSelect'
 import { ShiftClock } from '@/lib/types'
 
 export const runtime = 'nodejs'
@@ -314,6 +315,9 @@ async function createManualClockRecord(payload: {
   }
 
   const nowIso = new Date().toISOString()
+  const normalizedWorkDepartment = typeof work_department === 'string' && work_department.trim()
+    ? normalizeScheduleDepartment(work_department)
+    : null
   const { data, error } = await supabaseAdmin
     .from('shift_clocks')
     .insert({
@@ -326,7 +330,7 @@ async function createManualClockRecord(payload: {
       auto_clock_out: false,
       approval_status: 'adjusted',
       approved_hours: calculateClockHours(clock_in_at, clock_out_at),
-      manager_note: setClockWorkDepartmentManagerNote(manager_note?.trim() || 'Manual hours added by manager.', work_department),
+      manager_note: setClockWorkDepartmentManagerNote(manager_note?.trim() || 'Manual hours added by manager.', normalizedWorkDepartment),
       manager_approved_by: null,
       manager_approved_at: nowIso,
       updated_at: nowIso,
@@ -463,7 +467,7 @@ export async function POST(req: NextRequest) {
   const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.${ext}`
   const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
   const selectedWorkDepartment = typeof work_department === 'string' && work_department.trim()
-    ? work_department.trim()
+    ? normalizeScheduleDepartment(work_department)
     : null
 
   if (action === 'start_break' || action === 'end_break' || action === 'toggle_break' || action === 'start_unpaid_break' || action === 'end_unpaid_break' || action === 'toggle_unpaid_break') {
@@ -769,7 +773,9 @@ export async function PATCH(req: NextRequest) {
       setMealBreakManagerNote(manager_note?.trim() || null, nextMealBreak),
       nextUnpaidBreak
     ),
-    work_department ?? getClockWorkDepartment(existing as ShiftClock)
+    typeof work_department === 'string' && work_department.trim()
+      ? normalizeScheduleDepartment(work_department)
+      : getClockWorkDepartment(existing as ShiftClock)
   ) || null
   const update = {
     session_date: nextSessionDate,
