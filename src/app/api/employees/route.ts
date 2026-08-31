@@ -29,6 +29,15 @@ import {
 
 const EMPLOYEE_ADMIN_SELECT = `${EMPLOYEE_PUBLIC_SELECT}, pin_code`
 const EMPLOYEE_ADMIN_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD = `${EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD}, pin_code`
+const EMPLOYEE_SELECT_FALLBACKS = [
+  EMPLOYEE_ADMIN_SELECT,
+  EMPLOYEE_PUBLIC_SELECT,
+  EMPLOYEE_ADMIN_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD,
+  EMPLOYEE_PUBLIC_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD,
+  EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE,
+  EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS,
+  EMPLOYEE_PUBLIC_SELECT_FALLBACK,
+]
 
 async function requireAdmin() {
   const cookieStore = await cookies()
@@ -263,82 +272,19 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const result = await supabaseAdmin
-    .from('employees')
-    .select(EMPLOYEE_ADMIN_SELECT)
-    .eq('is_active', true)
-    .order('name')
-  let data = result.data as unknown[] | null
-  let error = result.error
+  let data: unknown[] | null = null
+  let error: { message: string } | null = null
 
-  if (error && isMissingPinCodeColumn(error)) {
-    const fallbackResult = await supabaseAdmin
+  for (const select of EMPLOYEE_SELECT_FALLBACKS) {
+    const result = await supabaseAdmin
       .from('employees')
-      .select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS)
+      .select(select)
       .eq('is_active', true)
       .order('name')
-    data = fallbackResult.data as unknown[] | null
-    error = fallbackResult.error
-  }
 
-  if (error && isMissingMealBreakThresholdColumn(error)) {
-    const fallbackResult = await supabaseAdmin
-      .from('employees')
-      .select(EMPLOYEE_ADMIN_SELECT_WITHOUT_MEAL_BREAK_THRESHOLD)
-      .eq('is_active', true)
-      .order('name')
-    data = fallbackResult.data as unknown[] | null
-    error = fallbackResult.error
-  }
-
-  if (error && isMissingTipEligibleColumn(error)) {
-    const fallbackResult = await supabaseAdmin
-      .from('employees')
-      .select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_TIP_ELIGIBLE)
-      .eq('is_active', true)
-      .order('name')
-    data = fallbackResult.data as unknown[] | null
-    error = fallbackResult.error
-  }
-
-  if (error && isMissingScheduleDepartmentsColumn(error)) {
-    const fallbackResult = await supabaseAdmin
-      .from('employees')
-      .select(EMPLOYEE_PUBLIC_SELECT_WITHOUT_SCHEDULE_DEPARTMENTS)
-      .eq('is_active', true)
-      .order('name')
-    data = fallbackResult.data as unknown[] | null
-    error = fallbackResult.error
-  }
-
-  if (error && isMissingTipPoolRateColumn(error)) {
-    const fallbackResult = await supabaseAdmin
-      .from('employees')
-      .select(EMPLOYEE_PUBLIC_SELECT_FALLBACK)
-      .eq('is_active', true)
-      .order('name')
-    data = fallbackResult.data as unknown[] | null
-    error = fallbackResult.error
-  }
-
-  if (error && isMissingPaymentMethodColumn(error)) {
-    const fallbackResult = await supabaseAdmin
-      .from('employees')
-      .select(EMPLOYEE_PUBLIC_SELECT_FALLBACK)
-      .eq('is_active', true)
-      .order('name')
-    data = fallbackResult.data as unknown[] | null
-    error = fallbackResult.error
-  }
-
-  if (error && isMissingAddressColumn(error)) {
-    const fallbackResult = await supabaseAdmin
-      .from('employees')
-      .select(EMPLOYEE_PUBLIC_SELECT_FALLBACK)
-      .eq('is_active', true)
-      .order('name')
-    data = fallbackResult.data as unknown[] | null
-    error = fallbackResult.error
+    data = result.data as unknown[] | null
+    error = result.error
+    if (!error) break
   }
 
   if (error) {
