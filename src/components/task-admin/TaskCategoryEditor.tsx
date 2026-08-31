@@ -79,6 +79,7 @@ export function TaskCategoryEditor() {
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [missingDaysColumn, setMissingDaysColumn] = useState(false)
+  const [missingPointsColumn, setMissingPointsColumn] = useState(false)
 
   // Category dialog
   const [catDialog, setCatDialog] = useState(false)
@@ -89,7 +90,7 @@ export function TaskCategoryEditor() {
   const [taskDialog, setTaskDialog] = useState(false)
   const [taskEdit, setTaskEdit] = useState<Task | null>(null)
   const [taskCatId, setTaskCatId] = useState<string>('')
-  const [taskForm, setTaskForm] = useState({ title: '', deadline_time: '', days_of_week: null as number[] | null })
+  const [taskForm, setTaskForm] = useState({ title: '', deadline_time: '', days_of_week: null as number[] | null, points: '0' })
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
@@ -105,6 +106,7 @@ export function TaskCategoryEditor() {
     setTasks(loadedTasks)
     const firstTask = loadedTasks[0]
     setMissingDaysColumn(!!firstTask && !Object.prototype.hasOwnProperty.call(firstTask, 'days_of_week'))
+    setMissingPointsColumn(!!firstTask && !Object.prototype.hasOwnProperty.call(firstTask, 'points'))
     setLoading(false)
   }, [])
 
@@ -183,7 +185,7 @@ export function TaskCategoryEditor() {
   const openAddTask = (categoryId: string) => {
     setTaskEdit(null)
     setTaskCatId(categoryId)
-    setTaskForm({ title: '', deadline_time: '', days_of_week: null })
+    setTaskForm({ title: '', deadline_time: '', days_of_week: null, points: '0' })
     setTaskDialog(true)
   }
 
@@ -194,6 +196,7 @@ export function TaskCategoryEditor() {
       title: task.title,
       deadline_time: task.deadline_time?.slice(0, 5) ?? '',
       days_of_week: normalizeDays(task.days_of_week),
+      points: String(task.points ?? 0),
     })
     setTaskDialog(true)
   }
@@ -202,13 +205,21 @@ export function TaskCategoryEditor() {
     if (!taskForm.title.trim()) return
     setSaving(true)
     setErrorMessage(null)
+    const pointValue = Math.max(0, Math.round(Number(taskForm.points) || 0))
     const payload = {
       title: taskForm.title.trim(),
       deadline_time: taskForm.deadline_time ? taskForm.deadline_time + ':00' : null,
       days_of_week: normalizeDays(taskForm.days_of_week),
+      points: pointValue,
     }
     if (taskEdit) {
-      const result = await supabase.from('tasks').update(payload).eq('id', taskEdit.id)
+      let result = await supabase.from('tasks').update(payload).eq('id', taskEdit.id)
+      if (result.error && result.error.message.toLowerCase().includes('points')) {
+        const fallbackPayload = { ...payload } as Partial<typeof payload>
+        delete fallbackPayload.points
+        result = await supabase.from('tasks').update(fallbackPayload).eq('id', taskEdit.id)
+        setMissingPointsColumn(true)
+      }
       if (result.error) {
         setErrorMessage(result.error.message)
         setSaving(false)
@@ -217,7 +228,13 @@ export function TaskCategoryEditor() {
     } else {
       const catTasks = tasks.filter(t => t.category_id === taskCatId)
       const maxOrder = Math.max(0, ...catTasks.map(t => t.display_order))
-      const result = await supabase.from('tasks').insert({ ...payload, category_id: taskCatId, display_order: maxOrder + 1 })
+      let result = await supabase.from('tasks').insert({ ...payload, category_id: taskCatId, display_order: maxOrder + 1 })
+      if (result.error && result.error.message.toLowerCase().includes('points')) {
+        const fallbackPayload = { ...payload } as Partial<typeof payload>
+        delete fallbackPayload.points
+        result = await supabase.from('tasks').insert({ ...fallbackPayload, category_id: taskCatId, display_order: maxOrder + 1 })
+        setMissingPointsColumn(true)
+      }
       if (result.error) {
         setErrorMessage(result.error.message)
         setSaving(false)
@@ -281,6 +298,11 @@ export function TaskCategoryEditor() {
           `days_of_week` column is missing in the live `tasks` table, so day-specific tasks cannot be saved or shown in the weekly chart yet. Run [002_add_email_and_task_days.sql](/Users/jamesshin/foh-dashboard/supabase/migrations/002_add_email_and_task_days.sql) in Supabase SQL Editor first.
         </div>
       )}
+      {missingPointsColumn && (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          `points` column is missing in the live `tasks` table, so task reward points cannot be saved yet. Run [034_add_rewards_points.sql](/Users/jamesshin/foh-dashboard/supabase/migrations/034_add_rewards_points.sql) in Supabase SQL Editor first.
+        </div>
+      )}
       {errorMessage && (
         <div className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           {errorMessage}
@@ -338,6 +360,9 @@ export function TaskCategoryEditor() {
                               {DAY_NAMES.filter((_, i) => normalizeDays(task.days_of_week)?.includes(i)).join(', ')}
                             </span>
                           )}
+                          <span className="ml-2 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                            {task.points ?? 0} pts
+                          </span>
                         </div>
                         <Button size="sm" variant="ghost" onClick={() => openEditTask(task)}><Pencil className="w-3 h-3" /></Button>
                         <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteTask(task)}><Trash2 className="w-3 h-3" /></Button>
@@ -390,6 +415,7 @@ export function TaskCategoryEditor() {
                         {task.deadline_time && (
                           <span className="text-muted-foreground">by {task.deadline_time.slice(0, 5)}</span>
                         )}
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">{task.points ?? 0} pts</span>
                       </div>
                       {category && (
                         <p className="mt-1 text-xs text-muted-foreground">{category.name}</p>
@@ -433,6 +459,7 @@ export function TaskCategoryEditor() {
                                   {task.deadline_time && (
                                     <span className="text-muted-foreground">by {task.deadline_time.slice(0, 5)}</span>
                                   )}
+                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">{task.points ?? 0} pts</span>
                                 </div>
                                 {category && (
                                   <p className="mt-1 text-xs text-muted-foreground">{category.name}</p>
@@ -499,6 +526,17 @@ export function TaskCategoryEditor() {
             <div>
               <Label>Deadline Time (optional)</Label>
               <Input type="time" value={taskForm.deadline_time} onChange={e => setTaskForm(f => ({ ...f, deadline_time: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Reward Points</Label>
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={taskForm.points}
+                onChange={e => setTaskForm(f => ({ ...f, points: e.target.value }))}
+                placeholder="0"
+              />
             </div>
             <div>
               <Label>Active Days <span className="text-muted-foreground font-normal">(leave blank = every day)</span></Label>

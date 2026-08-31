@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Bell, ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText, HandCoins } from 'lucide-react'
+import { Bell, ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText, HandCoins, Gift } from 'lucide-react'
 
 const adminGroups = [
   {
@@ -24,6 +24,7 @@ const adminGroups = [
       { label: 'Task Admin', href: '/task-admin', icon: ClipboardList },
       { label: 'Task Performance', href: '/reporting/task-performance', icon: BarChart3 },
       { label: 'Task Details', href: '/reporting/task-detail', icon: ListChecks },
+      { label: 'Rewards Reporting', href: '/reporting/rewards', icon: Gift },
     ],
   },
   {

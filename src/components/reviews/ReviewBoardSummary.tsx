@@ -10,6 +10,7 @@ import {
   ReviewLeaderboardEntry,
   StaffMentionSummaryItem,
 } from '@/lib/reviewScoring'
+import { RewardCatalogItem } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 interface ReviewBoardSummaryProps {
@@ -19,14 +20,16 @@ interface ReviewBoardSummaryProps {
   categorySummary: ReviewCategorySummaryItem[]
   staffMentionSummary: StaffMentionSummaryItem[]
   reviewLeaderboard: ReviewLeaderboardEntry[]
+  rewards: RewardCatalogItem[]
   selectedEmployeeId: string | null
   onSelectEmployee: (employeeId: string) => void
   collapsedSections: {
     categories: boolean
     mentions: boolean
     leaderboard: boolean
+    rewards: boolean
   }
-  onToggleSection: (section: 'categories' | 'mentions' | 'leaderboard') => void
+  onToggleSection: (section: 'categories' | 'mentions' | 'leaderboard' | 'rewards') => void
 }
 
 const rangeOptions: Array<{ value: ReviewBoardRange; label: string }> = [
@@ -44,6 +47,7 @@ export function ReviewBoardSummary({
   categorySummary,
   staffMentionSummary,
   reviewLeaderboard,
+  rewards,
   selectedEmployeeId,
   onSelectEmployee,
   collapsedSections,
@@ -52,7 +56,7 @@ export function ReviewBoardSummary({
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-5 py-5">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Summary Panel</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Review Filters</div>
         <div className="mt-3 flex flex-wrap gap-2">
           {rangeOptions.map(option => (
             <Button
@@ -91,7 +95,7 @@ export function ReviewBoardSummary({
               onClick={() => onToggleSection('leaderboard')}
               className="flex w-full items-center justify-between text-left"
             >
-              <div className="text-sm font-bold text-slate-900">Review Score Leaderboard</div>
+              <div className="text-sm font-bold text-slate-900">Ranking Board</div>
               {collapsedSections.leaderboard ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronUp className="h-4 w-4 text-slate-500" />}
             </button>
             {!collapsedSections.leaderboard && (
@@ -128,6 +132,34 @@ export function ReviewBoardSummary({
                         </div>
                       </div>
                     </button>
+                  ))
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <button
+              type="button"
+              onClick={() => onToggleSection('rewards')}
+              className="flex w-full items-center justify-between text-left"
+            >
+              <div className="text-sm font-bold text-slate-900">Rewards List</div>
+              {collapsedSections.rewards ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronUp className="h-4 w-4 text-slate-500" />}
+            </button>
+            {!collapsedSections.rewards && (
+              <div className="space-y-2">
+                {rewards.length === 0 ? (
+                  <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-500">No rewards created yet.</div>
+                ) : (
+                  rewards.map(item => (
+                    <div key={item.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-bold text-slate-900">{item.name}</span>
+                        <span className="shrink-0 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">{item.points_cost} pts</span>
+                      </div>
+                      {item.description && <p className="mt-1 text-xs text-slate-500">{item.description}</p>}
+                    </div>
                   ))
                 )}
               </div>

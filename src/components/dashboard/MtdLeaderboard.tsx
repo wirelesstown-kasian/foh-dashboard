@@ -1,14 +1,16 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { addMonths, endOfMonth, format, isSameMonth, startOfMonth, subMonths } from 'date-fns'
-import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEmployees, useEodReports, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { buildPerformanceReportHtml, buildPerformanceRows } from '@/lib/performanceReporting'
 import { PerformanceReportDialog } from '@/components/reporting/PerformanceReportDialog'
 import { formatCurrency } from '@/lib/reporting'
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { buildEmployeeRewardPointRows } from '@/lib/rewards'
+import { GoogleReview, RewardRedemption } from '@/lib/types'
 
 interface MtdLeaderboardProps {
   today?: string
@@ -17,6 +19,7 @@ interface MtdLeaderboardProps {
 export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
   const employees = useEmployees()
   const { completions } = useTaskCompletions()
+  const tasks = useTasks()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
   const { roleDefinitions } = useAppSettings()
@@ -24,6 +27,8 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
   const [monthRef, setMonthRef] = useState(() => startOfMonth(new Date()))
+  const [reviews, setReviews] = useState<GoogleReview[]>([])
+  const [redemptions, setRedemptions] = useState<RewardRedemption[]>([])
 
   const effectiveToday = today ?? format(new Date(), 'yyyy-MM-dd')
   const todayDate = new Date(`${effectiveToday}T12:00:00`)
@@ -47,6 +52,33 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
     }),
     [clockRecords, completions, eodReports, filteredEmployees, monthStart, rangeEnd]
   )
+  useEffect(() => {
+    let mounted = true
+    void (async () => {
+      const [reviewRes, rewardRes] = await Promise.all([
+        fetch('/api/reviews', { cache: 'no-store' }),
+        fetch('/api/rewards', { cache: 'no-store' }),
+      ])
+      const reviewPayload = (await reviewRes.json().catch(() => ({}))) as { reviews?: GoogleReview[] }
+      const rewardPayload = (await rewardRes.json().catch(() => ({}))) as { redemptions?: RewardRedemption[] }
+      if (!mounted) return
+      setReviews(reviewPayload.reviews ?? [])
+      setRedemptions(rewardPayload.redemptions ?? [])
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
+  const rewardPointsByEmployeeId = useMemo(() => {
+    const rows = buildEmployeeRewardPointRows({
+      employees: filteredEmployees,
+      tasks,
+      completions: completions.filter(completion => completion.session_date >= monthStart && completion.session_date <= rangeEnd),
+      reviews: reviews.filter(review => review.review_date >= monthStart && review.review_date <= rangeEnd),
+      redemptions: redemptions.filter(redemption => redemption.redeemed_at >= monthStart && redemption.redeemed_at <= rangeEnd),
+    })
+    return new Map(rows.map(row => [row.employee.id, row.totalPoints]))
+  }, [completions, filteredEmployees, monthStart, rangeEnd, redemptions, reviews, tasks])
 
   const detailTarget = perfRows.find(row => row.emp.id === detailEmployeeId) ?? null
 
@@ -127,17 +159,18 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
         <div className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
           <span className="font-semibold text-slate-600">Score</span> = Completion 40% + Tasks/Hr 35% + Tips/Hr 25% — relative to team (0–100).
         </div>
-        <div className="mt-2 grid grid-cols-[32px_minmax(0,1fr)_72px] md:grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] gap-2 md:gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+        <div className="mt-2 grid grid-cols-[32px_minmax(0,1fr)_72px_72px] md:grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px_90px] gap-2 md:gap-3 px-3 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
           <span>#</span>
           <span>Name</span>
           <span className="text-right">Score</span>
+          <span className="text-right">Points</span>
           <span className="hidden text-right md:block">Tasks/Hr</span>
           <span className="hidden text-right md:block">Hours</span>
           <span className="hidden text-right md:block">Tips/Hr</span>
         </div>
         <div className="mt-3 space-y-2">
           {perfRows.map((row, index) => (
-            <div key={row.emp.id} className="grid grid-cols-[32px_minmax(0,1fr)_72px] md:grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px] items-center gap-2 md:gap-3 rounded-xl border px-3 py-3 text-base">
+            <div key={row.emp.id} className="grid grid-cols-[32px_minmax(0,1fr)_72px_72px] md:grid-cols-[40px_minmax(0,1fr)_100px_90px_80px_90px_90px] items-center gap-2 md:gap-3 rounded-xl border px-3 py-3 text-base">
               <div className="text-center text-lg font-bold text-amber-600">{index + 1}</div>
               <Button
                 variant="ghost"
@@ -156,6 +189,7 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
                   </div>
                 )}
               </div>
+              <div className="text-right text-base font-bold text-amber-700">{rewardPointsByEmployeeId.get(row.emp.id) ?? 0}</div>
               <div className="hidden text-right text-sm text-muted-foreground md:block">{row.monthly ? row.monthly.taskRate.toFixed(1) : '—'}/hr</div>
               <div className="hidden text-right text-sm text-muted-foreground md:block">{row.monthly?.hours.toFixed(1) ?? '—'}h</div>
               <div className="hidden text-right text-sm text-muted-foreground md:block">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</div>

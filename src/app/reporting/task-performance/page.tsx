@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useClockRecords, useEmployees, useEodReports, useTaskCompletions } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEmployees, useEodReports, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -13,10 +13,12 @@ import { Trophy } from 'lucide-react'
 import { format } from 'date-fns'
 import { PerformanceReportDialog } from '@/components/reporting/PerformanceReportDialog'
 import { buildPerformanceReportHtml, buildPerformanceRows } from '@/lib/performanceReporting'
+import { getCompletionPoints } from '@/lib/rewards'
 
 export default function TaskPerformancePage() {
   const employees = useEmployees({ includeArchived: true })
   const { completions } = useTaskCompletions()
+  const tasks = useTasks()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
   const { roleDefinitions } = useAppSettings()
@@ -48,6 +50,14 @@ export default function TaskPerformancePage() {
     }),
     [clockRecords, completions, eodReports, filteredEmployees, startDate, endDate, monthStart, monthEnd]
   )
+  const taskById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks])
+  const taskPointsByEmployeeId = useMemo(() => {
+    const totals = new Map<string, number>()
+    for (const completion of filteredCompletions) {
+      totals.set(completion.employee_id, (totals.get(completion.employee_id) ?? 0) + getCompletionPoints(completion, taskById.get(completion.task_id)))
+    }
+    return totals
+  }, [filteredCompletions, taskById])
   const detailTarget = perfRows.find(row => row.emp.id === detailEmployeeId) ?? null
 
   const buildReportHtml = (employeeId: string) =>
@@ -139,6 +149,7 @@ export default function TaskPerformancePage() {
               <TableHead>Name</TableHead>
               <TableHead>Role</TableHead>
               <TableHead className="text-right">Tasks This Period</TableHead>
+              <TableHead className="text-right">Task Points</TableHead>
               <TableHead className="text-right">Score</TableHead>
               <TableHead className="text-right">Completion Rate</TableHead>
               <TableHead className="text-right">Tips/Hr</TableHead>
@@ -159,6 +170,7 @@ export default function TaskPerformancePage() {
                 </TableCell>
                 <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
                 <TableCell className="text-right font-semibold">{row.done}</TableCell>
+                <TableCell className="text-right font-semibold text-amber-700">{taskPointsByEmployeeId.get(row.emp.id) ?? 0}</TableCell>
                 <TableCell className="text-right font-semibold text-amber-700">{row.monthly?.score ?? '—'}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{row.monthly ? (row.monthly.taskCompletionRate * 100).toFixed(1) + '%' : '—'}</TableCell>
                 <TableCell className="text-right">{row.monthly ? formatCurrency(row.monthly.tipRate) : '—'}</TableCell>
@@ -167,7 +179,7 @@ export default function TaskPerformancePage() {
             ))}
             {perfRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">No task data for this range</TableCell>
+                <TableCell colSpan={9} className="py-6 text-center text-muted-foreground">No task data for this range</TableCell>
               </TableRow>
             )}
           </TableBody>

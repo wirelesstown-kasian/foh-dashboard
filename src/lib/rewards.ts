@@ -1,0 +1,94 @@
+import { Employee, GoogleReview, RewardRedemption, Task, TaskCompletion } from '@/lib/types'
+
+export function getTaskPointValue(task?: Pick<Task, 'points'> | null) {
+  const value = Number(task?.points ?? 0)
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+export function getCompletionPoints(completion: TaskCompletion, task?: Pick<Task, 'points'> | null) {
+  if (completion.status === 'incomplete') return 0
+  const awarded = Number(completion.points_awarded)
+  if (Number.isFinite(awarded)) return Math.round(awarded)
+  return getTaskPointValue(task ?? completion.task)
+}
+
+export function getReviewEmployeeIds(review: Pick<GoogleReview, 'matched_employee_id' | 'matched_employee_ids'>) {
+  const ids = Array.isArray(review.matched_employee_ids) && review.matched_employee_ids.length > 0
+    ? review.matched_employee_ids
+    : review.matched_employee_id
+      ? [review.matched_employee_id]
+      : []
+  return Array.from(new Set(ids.filter(Boolean)))
+}
+
+export type EmployeeRewardPointRow = {
+  employee: Employee
+  taskPoints: number
+  reviewPoints: number
+  redeemedPoints: number
+  totalPoints: number
+  completedTasks: number
+  reviews: number
+}
+
+export function buildEmployeeRewardPointRows({
+  employees,
+  tasks,
+  completions,
+  reviews,
+  redemptions,
+}: {
+  employees: Employee[]
+  tasks: Task[]
+  completions: TaskCompletion[]
+  reviews: GoogleReview[]
+  redemptions: RewardRedemption[]
+}) {
+  const taskById = new Map(tasks.map(task => [task.id, task]))
+  const rows = new Map<string, EmployeeRewardPointRow>()
+
+  for (const employee of employees) {
+    rows.set(employee.id, {
+      employee,
+      taskPoints: 0,
+      reviewPoints: 0,
+      redeemedPoints: 0,
+      totalPoints: 0,
+      completedTasks: 0,
+      reviews: 0,
+    })
+  }
+
+  for (const completion of completions) {
+    const row = rows.get(completion.employee_id)
+    if (!row || completion.status === 'incomplete') continue
+    const points = getCompletionPoints(completion, taskById.get(completion.task_id))
+    row.taskPoints += points
+    row.completedTasks += 1
+  }
+
+  for (const review of reviews) {
+    const employeeIds = getReviewEmployeeIds(review)
+    if (employeeIds.length === 0) continue
+    const perEmployeePoints = Math.round(Number(review.points ?? 0) / employeeIds.length)
+    for (const employeeId of employeeIds) {
+      const row = rows.get(employeeId)
+      if (!row) continue
+      row.reviewPoints += perEmployeePoints
+      row.reviews += 1
+    }
+  }
+
+  for (const redemption of redemptions) {
+    const row = rows.get(redemption.employee_id)
+    if (!row) continue
+    row.redeemedPoints += Number(redemption.points_delta ?? 0)
+  }
+
+  return Array.from(rows.values())
+    .map(row => ({
+      ...row,
+      totalPoints: row.taskPoints + row.reviewPoints + row.redeemedPoints,
+    }))
+    .sort((left, right) => right.totalPoints - left.totalPoints || left.employee.name.localeCompare(right.employee.name))
+}
