@@ -460,8 +460,8 @@ export function ReviewBoardClient() {
             Loading Review...
           </div>
         ) : (
-          <div className="grid gap-5 lg:grid-cols-[minmax(300px,30%)_minmax(0,70%)] lg:items-start">
-            <div className="lg:sticky lg:top-4 lg:h-[calc(100vh-8rem)]">
+          <div className="space-y-5">
+            <div className="min-h-[calc(100vh-12rem)]">
               <ReviewBoardSummary
                 dateFilter={dateFilter}
                 onRangeChange={handleRangeChange}
@@ -479,7 +479,7 @@ export function ReviewBoardClient() {
               />
             </div>
 
-            <div className="min-h-0 lg:h-[calc(100vh-8rem)] lg:overflow-y-auto lg:pr-1">
+            <div className="min-h-0">
               <div className="mb-4 rounded-[28px] border border-slate-200 bg-white px-5 py-4 shadow-sm">
                 <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                   <div>
