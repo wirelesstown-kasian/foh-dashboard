@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { addMonths, endOfMonth, format, isSameMonth, startOfMonth, subMonths } from 'date-fns'
-import { useClockRecords, useEmployees, useEodReports, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { buildPerformanceReportHtml, buildPerformanceRows } from '@/lib/performanceReporting'
 import { PerformanceReportDialog } from '@/components/reporting/PerformanceReportDialog'
@@ -10,25 +9,40 @@ import { formatCurrency } from '@/lib/reporting'
 import { Button } from '@/components/ui/button'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { buildEmployeeRewardPointRows } from '@/lib/rewards'
-import { GoogleReview, RewardRedemption } from '@/lib/types'
+import { Employee, EodReport, GoogleReview, RewardRedemption, ShiftClock, Task, TaskCompletion, TipDistribution } from '@/lib/types'
 
 interface MtdLeaderboardProps {
   today?: string
 }
 
+type LeaderboardPayload = {
+  employees?: Employee[]
+  tasks?: Task[]
+  completions?: TaskCompletion[]
+  eodReports?: (EodReport & { tip_distributions?: (TipDistribution & { employee?: Employee })[] })[]
+  clockRecords?: ShiftClock[]
+  reviews?: GoogleReview[]
+  redemptions?: RewardRedemption[]
+  error?: string
+}
+
 export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
-  const employees = useEmployees()
-  const { completions } = useTaskCompletions()
-  const tasks = useTasks()
-  const { eodReports } = useEodReports()
-  const { clockRecords } = useClockRecords()
   const { roleDefinitions } = useAppSettings()
 
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
   const [monthRef, setMonthRef] = useState(() => startOfMonth(new Date()))
-  const [reviews, setReviews] = useState<GoogleReview[]>([])
-  const [redemptions, setRedemptions] = useState<RewardRedemption[]>([])
+  const [data, setData] = useState<Required<Omit<LeaderboardPayload, 'error'>>>({
+    employees: [],
+    tasks: [],
+    completions: [],
+    eodReports: [],
+    clockRecords: [],
+    reviews: [],
+    redemptions: [],
+  })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const effectiveToday = today ?? format(new Date(), 'yyyy-MM-dd')
   const todayDate = new Date(`${effectiveToday}T12:00:00`)
@@ -37,48 +51,88 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
   const rangeEndDate = viewingCurrentMonth ? todayDate : endOfMonth(monthRef)
   const monthStart = format(rangeStartDate, 'yyyy-MM-dd')
   const rangeEnd = format(rangeEndDate, 'yyyy-MM-dd')
-  const filteredEmployees = useMemo(() => employees, [employees])
+
+  useEffect(() => {
+    let mounted = true
+    setLoading(true)
+    setError(null)
+
+    void (async () => {
+      if (!mounted) return
+      try {
+        const params = new URLSearchParams({ start_date: monthStart, end_date: rangeEnd })
+        const res = await fetch(`/api/leaderboard?${params.toString()}`, { cache: 'no-store' })
+        const payload = (await res.json().catch(() => ({}))) as LeaderboardPayload
+        if (!mounted) return
+        if (!res.ok) {
+          setError(payload.error ?? 'Failed to load leaderboard data')
+          setData({
+            employees: [],
+            tasks: [],
+            completions: [],
+            eodReports: [],
+            clockRecords: [],
+            reviews: [],
+            redemptions: [],
+          })
+        } else {
+          setData({
+            employees: payload.employees ?? [],
+            tasks: payload.tasks ?? [],
+            completions: payload.completions ?? [],
+            eodReports: payload.eodReports ?? [],
+            clockRecords: payload.clockRecords ?? [],
+            reviews: payload.reviews ?? [],
+            redemptions: payload.redemptions ?? [],
+          })
+        }
+      } catch (fetchError) {
+        if (!mounted) return
+        setError(fetchError instanceof Error ? fetchError.message : 'Failed to load leaderboard data')
+        setData({
+          employees: [],
+          tasks: [],
+          completions: [],
+          eodReports: [],
+          clockRecords: [],
+          reviews: [],
+          redemptions: [],
+        })
+      }
+      setLoading(false)
+    })()
+
+    return () => {
+      mounted = false
+    }
+  }, [monthStart, rangeEnd])
+
+  const filteredEmployees = useMemo(() => data.employees, [data.employees])
 
   const { filteredCompletions, employeeMonthStats, perfRows, totalTasks } = useMemo(
     () => buildPerformanceRows({
       employees: filteredEmployees,
-      completions,
-      eodReports,
-      clockRecords,
+      completions: data.completions,
+      eodReports: data.eodReports,
+      clockRecords: data.clockRecords,
       startDate: monthStart,
       endDate: rangeEnd,
       monthStart,
       monthEnd: rangeEnd,
     }),
-    [clockRecords, completions, eodReports, filteredEmployees, monthStart, rangeEnd]
+    [data.clockRecords, data.completions, data.eodReports, filteredEmployees, monthStart, rangeEnd]
   )
-  useEffect(() => {
-    let mounted = true
-    void (async () => {
-      const [reviewRes, rewardRes] = await Promise.all([
-        fetch('/api/reviews', { cache: 'no-store' }),
-        fetch('/api/rewards', { cache: 'no-store' }),
-      ])
-      const reviewPayload = (await reviewRes.json().catch(() => ({}))) as { reviews?: GoogleReview[] }
-      const rewardPayload = (await rewardRes.json().catch(() => ({}))) as { redemptions?: RewardRedemption[] }
-      if (!mounted) return
-      setReviews(reviewPayload.reviews ?? [])
-      setRedemptions(rewardPayload.redemptions ?? [])
-    })()
-    return () => {
-      mounted = false
-    }
-  }, [])
+
   const rewardPointsByEmployeeId = useMemo(() => {
     const rows = buildEmployeeRewardPointRows({
       employees: filteredEmployees,
-      tasks,
-      completions: completions.filter(completion => completion.session_date >= monthStart && completion.session_date <= rangeEnd),
-      reviews: reviews.filter(review => review.review_date >= monthStart && review.review_date <= rangeEnd),
-      redemptions: redemptions.filter(redemption => redemption.redeemed_at >= monthStart && redemption.redeemed_at <= rangeEnd),
+      tasks: data.tasks,
+      completions: data.completions,
+      reviews: data.reviews,
+      redemptions: data.redemptions,
     })
     return new Map(rows.map(row => [row.employee.id, row.totalPoints]))
-  }, [completions, filteredEmployees, monthStart, rangeEnd, redemptions, reviews, tasks])
+  }, [data.completions, data.redemptions, data.reviews, data.tasks, filteredEmployees])
 
   const detailTarget = perfRows.find(row => row.emp.id === detailEmployeeId) ?? null
 
@@ -113,6 +167,24 @@ export function MtdLeaderboard({ today }: MtdLeaderboardProps) {
     } finally {
       setEmailingEmployeeId(null)
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border bg-white p-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">MTD Leaderboard</div>
+        <p className="mt-2 text-sm text-muted-foreground">Loading leaderboard...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-red-700">MTD Leaderboard</div>
+        <p className="mt-2 text-sm text-red-700">{error}</p>
+      </div>
+    )
   }
 
   if (perfRows.length === 0) {

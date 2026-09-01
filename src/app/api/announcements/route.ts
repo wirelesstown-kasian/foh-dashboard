@@ -30,6 +30,24 @@ function formatEventDetail(event: AnnouncementEvent) {
   ]
 }
 
+function buildBirthdayCalendarEvents(employees: Array<{ id: string; name: string; birth_date?: string | null }>): AnnouncementEvent[] {
+  return employees
+    .filter(employee => employee.birth_date && /^\d{4}-\d{2}-\d{2}$/.test(employee.birth_date))
+    .map(employee => ({
+      id: `birthday-${employee.id}`,
+      title: `Happy birthday, ${employee.name}!`,
+      date: employee.birth_date as string,
+      time: '',
+      day_start_time: '',
+      day_end_time: '',
+      place: '',
+      duration: 'until_close',
+      recurrence: 'annually',
+      recurrence_end_date: '',
+      is_active: true,
+    }))
+}
+
 async function sendAnnouncementEventEmail(event: AnnouncementEvent, settings: Awaited<ReturnType<typeof getAppSettings>>, origin: string) {
   if (!settings.announcement_event_emails_enabled) return
   const resendKey = process.env.RESEND_API_KEY
@@ -82,6 +100,7 @@ export async function GET() {
     return NextResponse.json({
       announcement: settings.time_clock_announcement,
       events: settings.announcement_events,
+      birthdayEvents: buildBirthdayCalendarEvents(employees ?? []),
       items,
       boardText: formatAnnouncementBoardText(items),
     })

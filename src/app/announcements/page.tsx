@@ -13,6 +13,7 @@ import type { AnnouncementDuration, AnnouncementEvent, AnnouncementRecurrence } 
 type AnnouncementPayload = {
   announcement?: string
   events?: AnnouncementEvent[]
+  birthdayEvents?: AnnouncementEvent[]
   boardText?: string
   error?: string
 }
@@ -85,6 +86,10 @@ function getCalendarEvents(events: AnnouncementEvent[], dateKey: string) {
   return events.filter(event => eventOccursOnDate(event, dateKey))
 }
 
+function isBirthdayCalendarEvent(event: AnnouncementEvent) {
+  return event.id.startsWith('birthday-')
+}
+
 function getNextOccurrenceKey(event: AnnouncementEvent, fromDateKey: string) {
   if (!event.is_active || !event.date) return null
   if ((event.recurrence ?? 'none') === 'none') return event.date >= fromDateKey ? event.date : null
@@ -134,6 +139,7 @@ const getAnnouncementLines = (value: string) => value.split('\n').map(line => li
 export default function AnnouncementsPage() {
   const [announcement, setAnnouncement] = useState('')
   const [events, setEvents] = useState<AnnouncementEvent[]>([])
+  const [birthdayEvents, setBirthdayEvents] = useState<AnnouncementEvent[]>([])
   const [preview, setPreview] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -159,6 +165,7 @@ export default function AnnouncementsPage() {
       } else {
         setAnnouncement(data.announcement ?? '')
         setEvents(data.events ?? [])
+        setBirthdayEvents(data.birthdayEvents ?? [])
         setPreview(data.boardText ?? '')
       }
       setLoading(false)
@@ -219,8 +226,9 @@ export default function AnnouncementsPage() {
   const selectCalendarDate = (dateKey: string, matchingEvents: AnnouncementEvent[]) => {
     setSelectedDateKey(dateKey)
     setCalendarMonth(new Date(`${dateKey}T12:00:00`))
-    if (matchingEvents.length > 0) {
-      setSelectedEventId(matchingEvents[0].id)
+    const firstSavedEvent = matchingEvents.find(event => !isBirthdayCalendarEvent(event))
+    if (firstSavedEvent) {
+      setSelectedEventId(firstSavedEvent.id)
       return
     }
     resetDraftEvent(dateKey)
@@ -245,6 +253,7 @@ export default function AnnouncementsPage() {
       setEvents(data.events ?? [])
       const previewRes = await fetch('/api/announcements', { cache: 'no-store' })
       const previewData = (await previewRes.json().catch(() => ({}))) as AnnouncementPayload
+      setBirthdayEvents(previewData.birthdayEvents ?? [])
       setPreview(previewData.boardText ?? '')
       window.dispatchEvent(new Event('announcements-updated'))
       setMessage('Announcement board saved')
@@ -254,6 +263,7 @@ export default function AnnouncementsPage() {
   }
 
   const calendarDays = useMemo(() => getMonthDays(calendarMonth), [calendarMonth])
+  const calendarEvents = useMemo(() => [...events, ...birthdayEvents], [events, birthdayEvents])
   const calendarTitle = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   const previewLines = getAnnouncementLines(preview || announcement)
   const todayKey = formatDateKey(new Date())
@@ -264,7 +274,7 @@ export default function AnnouncementsPage() {
       .sort((left, right) => left.sortKey.localeCompare(right.sortKey))[0]?.event ?? null
   }, [events, todayKey])
   const selectedExistingEvent = events.find(event => event.id === selectedEventId) ?? null
-  const selectedCalendarEvents = getCalendarEvents(events, selectedDateKey)
+  const selectedCalendarEvents = getCalendarEvents(calendarEvents, selectedDateKey)
   const creatorEvent = selectedExistingEvent ?? draftEvent
   const isEditingExistingEvent = selectedExistingEvent !== null
 
@@ -333,7 +343,7 @@ export default function AnnouncementsPage() {
               <div className="mt-1 grid grid-cols-7 gap-1">
                 {calendarDays.map(date => {
                   const dateKey = formatDateKey(date)
-                  const matchingEvents = getCalendarEvents(events, dateKey)
+                  const matchingEvents = getCalendarEvents(calendarEvents, dateKey)
                   const dayEvents = matchingEvents.slice(0, 2)
                   const inMonth = date.getMonth() === calendarMonth.getMonth()
                   const isSelectedDate = dateKey === selectedDateKey
@@ -356,7 +366,9 @@ export default function AnnouncementsPage() {
                           <span
                             key={`${dateKey}-${event.id}`}
                             className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] font-semibold ${
-                              selectedExistingEvent?.id === event.id
+                              isBirthdayCalendarEvent(event)
+                                ? 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                                : selectedExistingEvent?.id === event.id
                                 ? 'bg-blue-700 text-white'
                                 : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
                             }`}
@@ -383,11 +395,15 @@ export default function AnnouncementsPage() {
                         key={event.id}
                         type="button"
                         className={`rounded-md border px-3 py-2 text-left text-sm ${
-                          selectedExistingEvent?.id === event.id
+                          isBirthdayCalendarEvent(event)
+                            ? 'cursor-default border-amber-200 bg-amber-50 text-amber-950'
+                            : selectedExistingEvent?.id === event.id
                             ? 'border-blue-300 bg-blue-50 text-blue-950'
                             : 'bg-white hover:border-blue-200 hover:bg-blue-50/40'
                         }`}
-                        onClick={() => setSelectedEventId(event.id)}
+                        onClick={() => {
+                          if (!isBirthdayCalendarEvent(event)) setSelectedEventId(event.id)
+                        }}
                       >
                         <div className="font-semibold">{event.title}</div>
                         <div className="mt-0.5 text-xs text-muted-foreground">{getEventDetailLine(event)}</div>
