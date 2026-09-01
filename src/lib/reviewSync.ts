@@ -209,7 +209,8 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
     .from('google_reviews')
     .select('id', { count: 'exact' })
     .neq('attribution_status', 'manual')
-    .is('last_analyzed_at', null)
+    .is('matched_employee_id', null)
+    .or('matched_employee_ids.is.null,matched_employee_ids.eq.{}')
     .order('review_date', { ascending: false })
     .limit(1000)
 
@@ -219,6 +220,8 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
       .from('google_reviews')
       .select('id', { count: 'exact' })
       .neq('attribution_status', 'manual')
+      .is('matched_employee_id', null)
+      .or('matched_employee_ids.is.null,matched_employee_ids.eq.{}')
       .order('review_date', { ascending: false })
       .limit(1000)
   }
