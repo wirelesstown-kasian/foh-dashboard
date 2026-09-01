@@ -16,7 +16,7 @@ import {
   ReviewDateRangeFilter,
 } from '@/lib/reviewScoring'
 import { Employee, GoogleReview, RewardCatalogItem } from '@/lib/types'
-import { ShieldCheck, Sparkles, UserRound } from 'lucide-react'
+import { ShieldCheck, UserRound } from 'lucide-react'
 
 interface ReviewBoardResponse {
   employees: Employee[]
@@ -40,7 +40,6 @@ interface ActiveEmployeeFilter {
 export function ReviewBoardClient() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
-  const [analyzingSaved, setAnalyzingSaved] = useState(false)
   const [assigning, setAssigning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
@@ -128,6 +127,11 @@ export function ReviewBoardClient() {
     employees,
     performanceScores: new Map(Object.entries(performanceScores)),
   })
+  const accumulatedSummary = buildReviewBoardSummary({
+    reviews,
+    employees,
+    performanceScores: new Map(Object.entries(performanceScores)),
+  })
 
   const activeFilterLabel = activeEmployeeFilter
     ? activeEmployeeFilter.source === 'my'
@@ -194,53 +198,6 @@ export function ReviewBoardClient() {
       setError(syncError instanceof Error ? syncError.message : 'Failed to sync Google reviews')
     } finally {
       setSyncing(false)
-    }
-  }
-
-  const handleAnalyzeSavedReviews = async () => {
-    setAnalyzingSaved(true)
-    setError(null)
-    setSyncMessage(null)
-
-    try {
-      const res = await fetch('/api/reviews/analyze-saved', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 100 }),
-      })
-      const payload = (await res.json().catch(() => ({}))) as {
-        error?: string
-        pending_found?: number
-        processed?: number
-        direct_matched?: number
-        ai_analyzed?: number
-        analyzed?: number
-        analysis_errors?: string[]
-        analysis_error_samples?: string[]
-      }
-      if (!res.ok) {
-        throw new Error(payload.error ?? 'Failed to analyze saved reviews')
-      }
-
-      const parts = [
-        `${payload.pending_found ?? 0} saved pending`,
-        `${payload.processed ?? 0} processed`,
-        `${payload.direct_matched ?? 0} direct matched`,
-        `${payload.ai_analyzed ?? 0} AI analyzed`,
-        `${payload.analyzed ?? 0} analyzed`,
-      ]
-      if ((payload.analysis_errors?.length ?? 0) > 0) {
-        parts.push(`${payload.analysis_errors!.length} analysis issue${payload.analysis_errors!.length === 1 ? '' : 's'}`)
-      }
-      if ((payload.analysis_error_samples?.length ?? 0) > 0) {
-        parts.push(payload.analysis_error_samples!.join(' / '))
-      }
-      setSyncMessage(parts.join(' • '))
-      await loadBoard()
-    } catch (analyzeError) {
-      setError(analyzeError instanceof Error ? analyzeError.message : 'Failed to analyze saved reviews')
-    } finally {
-      setAnalyzingSaved(false)
     }
   }
 
@@ -406,19 +363,9 @@ export function ReviewBoardClient() {
               variant="outline"
               className="h-11 min-w-32 text-sm font-semibold"
               onClick={handleGoogleSync}
-              disabled={syncing || analyzingSaved}
+              disabled={syncing}
             >
               {syncing ? 'Syncing...' : 'Sync Google Reviews'}
-            </Button>
-
-            <Button
-              variant="outline"
-              className="h-11 min-w-32 text-sm font-semibold"
-              onClick={handleAnalyzeSavedReviews}
-              disabled={syncing || analyzingSaved || !managerUnlocked}
-            >
-              <Sparkles className="h-4 w-4" />
-              {analyzingSaved ? 'Analyzing...' : 'Analyze Saved Reviews'}
             </Button>
 
             <Button
@@ -468,7 +415,7 @@ export function ReviewBoardClient() {
                 onCustomDateChange={handleCustomDateChange}
                 categorySummary={summary.categorySummary}
                 recentReviews={visibleReviews}
-                reviewLeaderboard={summary.reviewLeaderboard}
+                reviewLeaderboard={accumulatedSummary.reviewLeaderboard}
                 rewards={rewards}
                 selectedEmployeeId={activeEmployeeFilter?.source === 'manager' ? activeEmployeeFilter.employeeId : null}
                 onSelectEmployee={requestManagerEmployeeFilter}

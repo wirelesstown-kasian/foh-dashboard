@@ -44,10 +44,12 @@ export function buildEmployeeRewardPointRows({
   reviews: GoogleReview[]
   redemptions: RewardRedemption[]
 }) {
+  const activeEmployees = employees.filter(employee => employee.is_active)
+  const activeEmployeeIds = new Set(activeEmployees.map(employee => employee.id))
   const taskById = new Map(tasks.map(task => [task.id, task]))
   const rows = new Map<string, EmployeeRewardPointRow>()
 
-  for (const employee of employees) {
+  for (const employee of activeEmployees) {
     rows.set(employee.id, {
       employee,
       taskPoints: 0,
@@ -68,13 +70,13 @@ export function buildEmployeeRewardPointRows({
   }
 
   for (const review of reviews) {
-    const employeeIds = getReviewEmployeeIds(review)
+    const employeeIds = getReviewEmployeeIds(review).filter(employeeId => activeEmployeeIds.has(employeeId))
     if (employeeIds.length === 0) continue
-    const perEmployeePoints = Math.round(Number(review.points ?? 0) / employeeIds.length)
+    const points = Math.round(Number(review.points ?? 0))
     for (const employeeId of employeeIds) {
       const row = rows.get(employeeId)
       if (!row) continue
-      row.reviewPoints += perEmployeePoints
+      row.reviewPoints += points
       row.reviews += 1
     }
   }

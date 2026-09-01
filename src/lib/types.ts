@@ -254,6 +254,8 @@ export interface GoogleReview {
   points: number
   assigned_method: string | null
   assigned_by_employee_id: string | null
+  last_analyzed_at?: string | null
+  analysis_error?: string | null
   created_at: string
   updated_at: string
   matched_employee?: Employee | null

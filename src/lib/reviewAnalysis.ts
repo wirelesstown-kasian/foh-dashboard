@@ -122,10 +122,18 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+function normalizeMatchText(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
 function getEmployeeNameParts(name: string) {
-  return name
-    .split(/\s+/)
-    .map(part => part.trim())
+  return normalizeMatchText(name)
+    .split(' ')
     .filter(part => part.length >= 2)
 }
 
@@ -139,6 +147,13 @@ function uniqueCategories(categories: ReviewAnalysisCategory[]) {
   return Array.from(new Set(categories))
 }
 
+function findNormalizedAliasIndex(reviewText: string, alias: string) {
+  const normalizedReview = ` ${normalizeMatchText(reviewText)} `
+  const normalizedAlias = normalizeMatchText(alias)
+  if (!normalizedAlias) return -1
+  return normalizedReview.indexOf(` ${normalizedAlias} `)
+}
+
 function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): OpenAiAnalysisResult | null {
   const mentions: DirectMention[] = []
   const mentionedEmployeeIds = new Set<string>()
@@ -148,11 +163,12 @@ function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): O
     if (!fullName) continue
     const fullNamePattern = new RegExp(`\\b${escapeRegExp(fullName)}\\b`, 'i')
     const fullNameMatch = reviewText.match(fullNamePattern)
-    if (fullNameMatch?.index != null) {
+    const normalizedIndex = findNormalizedAliasIndex(reviewText, fullName)
+    if (fullNameMatch?.index != null || normalizedIndex >= 0) {
       mentions.push({
         employee,
         mention: employee.name,
-        index: fullNameMatch.index,
+        index: fullNameMatch?.index ?? normalizedIndex,
         confidence: 98,
       })
       mentionedEmployeeIds.add(employee.id)
@@ -172,11 +188,12 @@ function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): O
     if (!firstName || firstName.length < 3 || firstNameCounts.get(firstName.toLowerCase()) !== 1) continue
     const firstNamePattern = new RegExp(`\\b${escapeRegExp(firstName)}\\b`, 'i')
     const firstNameMatch = reviewText.match(firstNamePattern)
-    if (firstNameMatch?.index != null) {
+    const normalizedIndex = findNormalizedAliasIndex(reviewText, firstName)
+    if (firstNameMatch?.index != null || normalizedIndex >= 0) {
       mentions.push({
         employee,
         mention: firstName,
-        index: firstNameMatch.index,
+        index: firstNameMatch?.index ?? normalizedIndex,
         confidence: 94,
       })
       mentionedEmployeeIds.add(employee.id)
@@ -256,6 +273,11 @@ function getAssignedMethod(result: OpenAiAnalysisResult) {
   return 'openai_unassigned'
 }
 
+function isMissingAnalysisTrackingColumn(error: { message?: string; code?: string; details?: string | null; hint?: string | null }) {
+  const text = `${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''}`.toLowerCase()
+  return error.code === 'PGRST204' || text.includes('last_analyzed_at') || text.includes('analysis_error')
+}
+
 function normalizeMatchedEmployeeIds(analysis: OpenAiAnalysisResult, roster: RosterEmployee[]) {
   const rosterIds = new Set(roster.map(employee => employee.id))
   const ids = [
@@ -329,12 +351,36 @@ async function saveReviewAnalysis(
       staff_mentions: analysis.staff_mentions,
       attribution_status: attributionStatus,
       assigned_method: assignedMethod,
+      last_analyzed_at: new Date().toISOString(),
+      analysis_error: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', reviewId)
 
   if (updateError) {
-    throw new Error(updateError.message)
+    if (!isMissingAnalysisTrackingColumn(updateError)) {
+      throw new Error(updateError.message)
+    }
+
+    const fallbackUpdate = await supabaseAdmin
+      .from('google_reviews')
+      .update({
+        matched_employee_id: assignedEmployeeIds[0] ?? null,
+        matched_employee_ids: assignedEmployeeIds,
+        confidence: analysis.confidence,
+        reason: analysis.reason,
+        sentiment: analysis.sentiment,
+        categories,
+        staff_mentions: analysis.staff_mentions,
+        attribution_status: attributionStatus,
+        assigned_method: assignedMethod,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', reviewId)
+
+    if (fallbackUpdate.error) {
+      throw new Error(fallbackUpdate.error.message)
+    }
   }
 
   return {
@@ -389,6 +435,7 @@ async function analyzeWithOpenAI(review: GoogleReviewRow, roster: RosterEmployee
             'You analyze restaurant reviews and attribute them to the most likely front-of-house employee.',
             'Use only the review text, star rating, and the provided staff roster.',
             'If multiple staff members are clearly mentioned, return every matching employee_id in matched_employee_ids and put the first/primary one in matched_employee_id.',
+            'Direct name mentions should be credited to all clearly mentioned matching employees; do not choose only one when several staff names appear.',
             'If there is no reliable match, return matched_employee_id as null and matched_employee_ids as an empty array.',
             'Confidence >= 90 means very strong direct evidence such as a clear name mention.',
             'Confidence 70-89 means plausible but still needs manager confirmation.',
