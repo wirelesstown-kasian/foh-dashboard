@@ -4,8 +4,26 @@ import { isReviewBoardSetupMissingError } from '@/lib/reviewBoard'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 const ANALYSIS_CONCURRENCY = 4
+const REVIEW_ANALYSIS_STATE_KEY = 'review_analysis_state'
+const AUTO_ANALYSIS_INTERVAL_DAYS = 3
+const ANALYSIS_LOCK_MINUTES = 30
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 type AnalysisRunner = (reviewId: string) => Promise<ReviewAnalysisResult | null>
+type SyncedReviewRow = {
+  id: string
+  google_review_id: string
+  matched_employee_id: string | null
+  matched_employee_ids?: string[] | null
+  attribution_status: string
+  assigned_method?: string | null
+}
+type ReviewAnalysisState = {
+  status?: 'idle' | 'in_progress' | 'error'
+  lastStartedAt?: string
+  lastCompletedAt?: string
+  lastError?: string
+}
 
 async function analyzeReviewsInBatches(reviews: Array<{ id: string }>, runner: AnalysisRunner = analyzeStoredReview) {
   const results: PromiseSettledResult<ReviewAnalysisResult | null>[] = []
@@ -40,15 +58,74 @@ function normalizeSetupError(error: { message?: string }) {
   return { message: error.message ?? 'Review sync failed', status: 500 }
 }
 
+function isMissingAnalysisTrackingColumn(error: { message?: string; code?: string; details?: string | null; hint?: string | null } | null | undefined) {
+  const text = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`.toLowerCase()
+  return error?.code === 'PGRST204' || text.includes('last_analyzed_at') || text.includes('analysis_error')
+}
+
+function parseStateValue(value: unknown): ReviewAnalysisState {
+  return value && typeof value === 'object' ? value as ReviewAnalysisState : {}
+}
+
+async function readReviewAnalysisState(): Promise<ReviewAnalysisState> {
+  const { data, error } = await supabaseAdmin
+    .from('app_settings')
+    .select('value')
+    .eq('key', REVIEW_ANALYSIS_STATE_KEY)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  return parseStateValue(data?.value)
+}
+
+async function saveReviewAnalysisState(state: ReviewAnalysisState) {
+  const { error } = await supabaseAdmin
+    .from('app_settings')
+    .upsert({
+      key: REVIEW_ANALYSIS_STATE_KEY,
+      value: state,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'key' })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+}
+
+function minutesSince(value?: string) {
+  if (!value) return Number.POSITIVE_INFINITY
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return Number.POSITIVE_INFINITY
+  return (Date.now() - timestamp) / 60000
+}
+
+function daysSince(value?: string) {
+  if (!value) return Number.POSITIVE_INFINITY
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) return Number.POSITIVE_INFINITY
+  return (Date.now() - timestamp) / MS_PER_DAY
+}
+
 export async function syncGoogleReviews() {
   const usingBusinessProfile = hasBusinessProfileCredentials()
   const googleRows = usingBusinessProfile
     ? (await fetchAllBusinessProfileReviews()).rows
     : mapGooglePlaceReviewsToRows(await fetchGooglePlaceReviews())
 
-  const existingResult = await supabaseAdmin
+  let reviewAnalysisTrackingEnabled = true
+  let existingResult = await supabaseAdmin
     .from('google_reviews')
-    .select('google_review_id, matched_employee_id, matched_employee_ids, confidence, reason, attribution_status, assigned_method, assigned_by_employee_id, categories, staff_mentions')
+    .select('google_review_id, matched_employee_id, matched_employee_ids, confidence, reason, attribution_status, assigned_method, assigned_by_employee_id, categories, staff_mentions, last_analyzed_at, analysis_error')
+
+  if (existingResult.error && isMissingAnalysisTrackingColumn(existingResult.error)) {
+    reviewAnalysisTrackingEnabled = false
+    existingResult = await supabaseAdmin
+      .from('google_reviews')
+      .select('google_review_id, matched_employee_id, matched_employee_ids, confidence, reason, attribution_status, assigned_method, assigned_by_employee_id, categories, staff_mentions')
+  }
 
   if (existingResult.error) {
     throw Object.assign(new Error(normalizeSetupError(existingResult.error).message), {
@@ -80,13 +157,21 @@ export async function syncGoogleReviews() {
       assigned_by_employee_id: existing.assigned_by_employee_id ?? null,
       categories: Array.isArray(existing.categories) ? existing.categories : row.categories,
       staff_mentions: Array.isArray(existing.staff_mentions) ? existing.staff_mentions : row.staff_mentions,
+      ...(reviewAnalysisTrackingEnabled
+        ? {
+            last_analyzed_at: typeof existing.last_analyzed_at === 'string' ? existing.last_analyzed_at : null,
+            analysis_error: typeof existing.analysis_error === 'string' ? existing.analysis_error : null,
+          }
+        : {}),
     }
   })
 
   const { error, data } = await supabaseAdmin
     .from('google_reviews')
     .upsert(rowsToUpsert, { onConflict: 'google_review_id' })
-    .select('id, google_review_id, matched_employee_id, matched_employee_ids, attribution_status, assigned_method')
+    .select(reviewAnalysisTrackingEnabled
+      ? 'id, google_review_id, matched_employee_id, matched_employee_ids, attribution_status, assigned_method, last_analyzed_at'
+      : 'id, google_review_id, matched_employee_id, matched_employee_ids, attribution_status, assigned_method')
 
   if (error) {
     throw Object.assign(new Error(normalizeSetupError(error).message), {
@@ -94,7 +179,8 @@ export async function syncGoogleReviews() {
     })
   }
 
-  const analysisCandidates = (data ?? []).filter(review =>
+  const syncedRows = (data ?? []) as unknown as SyncedReviewRow[]
+  const analysisCandidates = syncedRows.filter(review =>
     newGoogleReviewIds.has(review.google_review_id) &&
     review.attribution_status !== 'manual' &&
     review.matched_employee_id == null &&
@@ -106,7 +192,7 @@ export async function syncGoogleReviews() {
 
   return {
     success: true,
-    synced: data?.length ?? rowsToUpsert.length,
+    synced: syncedRows.length || rowsToUpsert.length,
     reviews_found: googleRows.length,
     new_reviews: newGoogleReviewIds.size,
     analyzed,
@@ -118,12 +204,24 @@ export async function syncGoogleReviews() {
 
 export async function analyzeSavedGoogleReviews(limit = 75) {
   const safeLimit = Math.max(1, Math.min(limit, 250))
-  const directCandidatesResult = await supabaseAdmin
+  let reviewAnalysisTrackingEnabled = true
+  let directCandidatesResult = await supabaseAdmin
     .from('google_reviews')
     .select('id', { count: 'exact' })
     .neq('attribution_status', 'manual')
+    .is('last_analyzed_at', null)
     .order('review_date', { ascending: false })
     .limit(1000)
+
+  if (directCandidatesResult.error && isMissingAnalysisTrackingColumn(directCandidatesResult.error)) {
+    reviewAnalysisTrackingEnabled = false
+    directCandidatesResult = await supabaseAdmin
+      .from('google_reviews')
+      .select('id', { count: 'exact' })
+      .neq('attribution_status', 'manual')
+      .order('review_date', { ascending: false })
+      .limit(1000)
+  }
 
   if (directCandidatesResult.error) {
     throw Object.assign(new Error(normalizeSetupError(directCandidatesResult.error).message), {
@@ -135,13 +233,19 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
   const directResults = await analyzeReviewsInBatches(directCandidates, analyzeStoredReviewDirectMention)
   const directSummary = buildAnalysisSummary(directResults)
 
-  const openAiCandidatesResult = await supabaseAdmin
+  let openAiCandidatesQuery = supabaseAdmin
     .from('google_reviews')
     .select('id', { count: 'exact' })
     .neq('attribution_status', 'manual')
     .is('matched_employee_id', null)
     .eq('matched_employee_ids', '{}')
     .or('assigned_method.is.null,assigned_method.in.(business_profile_sync,google_places_sync,manager_clear)')
+
+  if (reviewAnalysisTrackingEnabled) {
+    openAiCandidatesQuery = openAiCandidatesQuery.is('last_analyzed_at', null)
+  }
+
+  const openAiCandidatesResult = await openAiCandidatesQuery
     .order('review_date', { ascending: false })
     .limit(safeLimit)
 
@@ -169,5 +273,62 @@ export async function analyzeSavedGoogleReviews(limit = 75) {
     analyzed: directSummary.analyzed + openAiSummary.analyzed,
     analysis_errors: analysisErrors,
     analysis_error_samples: analysisErrorSamples,
+  }
+}
+
+export async function analyzeSavedGoogleReviewsIfDue(limit = 100) {
+  const state = await readReviewAnalysisState()
+
+  if (state.status === 'in_progress' && minutesSince(state.lastStartedAt) < ANALYSIS_LOCK_MINUTES) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'analysis_already_in_progress',
+      last_started_at: state.lastStartedAt ?? null,
+      last_completed_at: state.lastCompletedAt ?? null,
+    }
+  }
+
+  if (daysSince(state.lastCompletedAt) < AUTO_ANALYSIS_INTERVAL_DAYS) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'analysis_recently_completed',
+      last_started_at: state.lastStartedAt ?? null,
+      last_completed_at: state.lastCompletedAt ?? null,
+    }
+  }
+
+  const startedAt = new Date().toISOString()
+  await saveReviewAnalysisState({
+    ...state,
+    status: 'in_progress',
+    lastStartedAt: startedAt,
+    lastError: undefined,
+  })
+
+  try {
+    const result = await analyzeSavedGoogleReviews(limit)
+    const completedAt = new Date().toISOString()
+    await saveReviewAnalysisState({
+      status: 'idle',
+      lastStartedAt: startedAt,
+      lastCompletedAt: completedAt,
+    })
+    return {
+      ...result,
+      skipped: false,
+      last_started_at: startedAt,
+      last_completed_at: completedAt,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Review analysis failed'
+    await saveReviewAnalysisState({
+      status: 'error',
+      lastStartedAt: startedAt,
+      lastCompletedAt: state.lastCompletedAt,
+      lastError: message,
+    })
+    throw error
   }
 }

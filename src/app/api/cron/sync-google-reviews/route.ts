@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { syncGoogleReviews } from '@/lib/reviewSync'
+import { analyzeSavedGoogleReviewsIfDue, syncGoogleReviews } from '@/lib/reviewSync'
 
 export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
@@ -9,8 +9,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await syncGoogleReviews()
-    return NextResponse.json(result)
+    const syncResult = await syncGoogleReviews()
+    const savedAnalysisResult = await analyzeSavedGoogleReviewsIfDue()
+    return NextResponse.json({
+      ...syncResult,
+      saved_analysis: savedAnalysisResult,
+    })
   } catch (error) {
     const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number'
       ? error.status

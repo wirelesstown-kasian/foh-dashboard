@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { buildPerformanceRows } from '@/lib/performanceReporting'
 import { Employee, EodReport, GoogleReview, ShiftClock, TaskCompletion, TipDistribution } from '@/lib/types'
-import { getReviewBoardEmployees, getReviewBoardViewer, isReviewBoardSetupMissingError, normalizeReviewRow, requireViewerSession } from '@/lib/reviewBoard'
+import { getReviewBoardEmployees, getReviewBoardViewer, isReviewBoardSetupMissingError, normalizeReviewRow } from '@/lib/reviewBoard'
 import { withTipPoolHourlyRate } from '@/lib/employeeSelect'
 
 type ReviewRouteResponse = {

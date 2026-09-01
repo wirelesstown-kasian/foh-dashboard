@@ -38,6 +38,10 @@ export default function RewardsReportingPage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
+  const activeEmployees = useMemo(
+    () => employees.filter(employee => employee.is_active),
+    [employees]
+  )
 
   useEffect(() => {
     let mounted = true
@@ -98,19 +102,19 @@ export default function RewardsReportingPage() {
   )
   const rewardRows = useMemo(
     () => buildEmployeeRewardPointRows({
-      employees,
+      employees: activeEmployees,
       tasks,
       completions: filteredCompletions,
       reviews: filteredReviews,
       redemptions: filteredRedemptions,
     }),
-    [employees, filteredCompletions, filteredRedemptions, filteredReviews, tasks]
+    [activeEmployees, filteredCompletions, filteredRedemptions, filteredReviews, tasks]
   )
   const visibleRows = selectedEmployeeId === 'all'
     ? rewardRows
     : rewardRows.filter(row => row.employee.id === selectedEmployeeId)
   const taskById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks])
-  const employeeById = useMemo(() => new Map(employees.map(employee => [employee.id, employee])), [employees])
+  const employeeById = useMemo(() => new Map(activeEmployees.map(employee => [employee.id, employee])), [activeEmployees])
   const selectedEmployee = selectedEmployeeId === 'all' ? null : employeeById.get(selectedEmployeeId) ?? null
 
   const selectedTaskDetails = selectedEmployee
@@ -211,7 +215,7 @@ export default function RewardsReportingPage() {
               <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Employees</SelectItem>
-                {employees.map(employee => <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>)}
+                {activeEmployees.map(employee => <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>)}
               </SelectContent>
             </Select>
           }
@@ -324,7 +328,7 @@ export default function RewardsReportingPage() {
                 <Select value={redemptionForm.employee_id} onValueChange={(value: string | null) => value && setRedemptionForm(form => ({ ...form, employee_id: value }))}>
                   <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
                   <SelectContent>
-                    {employees.map(employee => <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>)}
+                    {activeEmployees.map(employee => <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

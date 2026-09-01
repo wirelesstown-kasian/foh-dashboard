@@ -96,6 +96,17 @@ export async function POST(req: NextRequest) {
     if (typeof body.employee_id !== 'string' || !body.employee_id) {
       return NextResponse.json({ error: 'Employee is required' }, { status: 400 })
     }
+    const employeeResult = await supabaseAdmin
+      .from('employees')
+      .select('id, is_active')
+      .eq('id', body.employee_id)
+      .maybeSingle()
+    if (employeeResult.error) {
+      return NextResponse.json({ error: employeeResult.error.message }, { status: 500 })
+    }
+    if (!employeeResult.data?.is_active) {
+      return NextResponse.json({ error: 'Rewards can only be redeemed or deducted for active employees.' }, { status: 400 })
+    }
     const pointsDelta = normalizePoints(body.points_delta)
     if (pointsDelta === 0) return NextResponse.json({ error: 'Points change is required' }, { status: 400 })
     const memo = typeof body.memo === 'string' ? body.memo.trim() : ''

@@ -503,19 +503,20 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
                   </div>
                   <input
                     type="password"
-                    inputMode="numeric"
-                    autoFocus
+                    inputMode="none"
+                    readOnly
+                    autoComplete="off"
                     maxLength={4}
                     value={pin}
-                    onChange={event => handlePinInput(event.target.value)}
+                    onPointerDown={event => event.preventDefault()}
+                    onFocus={event => event.currentTarget.blur()}
+                    onChange={event => event.preventDefault()}
                     onKeyDown={event => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        void lookupClockStatus()
-                      }
+                      event.preventDefault()
                     }}
                     className="mb-6 h-20 w-full rounded-lg border border-white/20 bg-white px-4 text-center font-mono text-4xl tracking-[0.6em] text-slate-950 shadow-sm"
                     placeholder="••••"
+                    aria-label="PIN display"
                   />
                   <div className="grid grid-cols-3 gap-3">
                     {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(value => (
