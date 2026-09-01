@@ -16,6 +16,7 @@ type RosterEmployee = {
   name: string
   role: string
   primary_department?: string
+  schedule_departments?: string[]
   email?: string | null
   is_active: boolean
 }
@@ -299,7 +300,7 @@ async function getReviewAnalysisInput(reviewId: string): Promise<ReviewAnalysisI
       .single(),
     supabaseAdmin
       .from('employees')
-      .select('id, name, role, primary_department, email, is_active')
+      .select('id, name, role, primary_department, schedule_departments, email, is_active')
       .eq('is_active', true)
       .neq('primary_department', 'boh')
       .order('name'),

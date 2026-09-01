@@ -19,10 +19,16 @@ function isReviewSystemAccount(employee: ReviewEmployee) {
   )
 }
 
+function isServiceFacingEmployee(employee: ReviewEmployee) {
+  return ['foh', 'server', 'manager', 'busser', 'runner', 'food_runner'].some(department =>
+    employeeMatchesScheduleDepartment(employee as Employee, department)
+  )
+}
+
 export function isReviewAssignableEmployee(employee: ReviewEmployee) {
   return (
     employee.is_active &&
-    employeeMatchesScheduleDepartment(employee as Employee, 'foh') &&
+    isServiceFacingEmployee(employee) &&
     !isReviewSystemAccount(employee)
   )
 }
