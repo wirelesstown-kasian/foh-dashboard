@@ -40,8 +40,9 @@ function normalizeStringArray(value: unknown) {
 }
 
 export function normalizeReviewRow(row: ReviewRow, employees: Employee[]): GoogleReview {
-  const matchedEmployeeIds = normalizeStringArray(row.matched_employee_ids)
-  if (row.matched_employee_id && !matchedEmployeeIds.includes(row.matched_employee_id)) {
+  const assignmentCleared = row.attribution_status === 'unassigned' || row.assigned_method === 'manager_clear' || row.assigned_method === 'clear_assignment'
+  const matchedEmployeeIds = assignmentCleared ? [] : normalizeStringArray(row.matched_employee_ids)
+  if (!assignmentCleared && row.matched_employee_id && !matchedEmployeeIds.includes(row.matched_employee_id)) {
     matchedEmployeeIds.unshift(row.matched_employee_id)
   }
   const matchedEmployees = matchedEmployeeIds
@@ -58,6 +59,7 @@ export function normalizeReviewRow(row: ReviewRow, employees: Employee[]): Googl
     categories: normalizeCategories(row.categories),
     staff_mentions: normalizeStringArray(row.staff_mentions),
     matched_employee_ids: matchedEmployeeIds,
+    matched_employee_id: assignmentCleared ? null : row.matched_employee_id,
     matched_employee: matchedEmployee,
     matched_employees: matchedEmployees,
     assigned_by_employee: assignedByEmployee,

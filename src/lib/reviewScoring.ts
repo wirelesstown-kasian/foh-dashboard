@@ -144,7 +144,61 @@ function normalizeReviewCategory(value: string): ReviewCategory | null {
 }
 
 function normalizeText(value: string) {
-  return value.trim().toLowerCase()
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+const UNSAFE_FIRST_NAME_ALIASES = new Set([
+  'all',
+  'admin',
+  'everyone',
+  'everybody',
+  'food',
+  'host',
+  'new',
+  'server',
+  'service',
+  'staff',
+  'team',
+  'village',
+])
+
+function phraseExistsInText(text: string, phrase: string) {
+  const normalizedText = ` ${normalizeText(text)} `
+  const normalizedPhrase = normalizeText(phrase)
+  return !!normalizedPhrase && normalizedText.includes(` ${normalizedPhrase} `)
+}
+
+function getFirstNameCounts(employees: Employee[]) {
+  const counts = new Map<string, number>()
+  for (const employee of employees) {
+    const firstName = normalizeText(employee.name).split(/\s+/).filter(Boolean)[0]
+    if (!firstName || firstName.length < 3 || UNSAFE_FIRST_NAME_ALIASES.has(firstName)) continue
+    counts.set(firstName, (counts.get(firstName) ?? 0) + 1)
+  }
+  return counts
+}
+
+function isEmployeeNamedInText(text: string, employee: Employee, firstNameCounts: Map<string, number>) {
+  if (phraseExistsInText(text, employee.name)) return true
+
+  const firstName = normalizeText(employee.name).split(/\s+/).filter(Boolean)[0]
+  return !!firstName &&
+    firstName.length >= 3 &&
+    !UNSAFE_FIRST_NAME_ALIASES.has(firstName) &&
+    firstNameCounts.get(firstName) === 1 &&
+    phraseExistsInText(text, firstName)
+}
+
+export function getReviewNamedEmployeeIds(review: GoogleReview, employees: Employee[]) {
+  const firstNameCounts = getFirstNameCounts(employees)
+  return employees
+    .filter(employee => isEmployeeNamedInText(review.review_text, employee, firstNameCounts))
+    .map(employee => employee.id)
 }
 
 function matchMentionToEmployee(mention: string, employees: Employee[]) {
@@ -172,6 +226,7 @@ export function buildReviewBoardSummary({
   const categoryCounts = new Map<ReviewCategory, number>()
   const mentionCounts = new Map<string, number>()
   const leaderboard = new Map<string, { employee: Employee; reviewCount: number; reviewPoints: number; ratingTotal: number }>()
+  const firstNameCounts = getFirstNameCounts(employees)
 
   for (const employee of employees) {
     const employeeTaskPoints = taskPoints.get(employee.id) ?? 0
@@ -199,6 +254,10 @@ export function buildReviewBoardSummary({
       mentionCounts.set(employee.id, (mentionCounts.get(employee.id) ?? 0) + 1)
     }
 
+    if (review.attribution_status === 'unassigned' || review.assigned_method === 'manager_clear' || review.assigned_method === 'clear_assignment') {
+      continue
+    }
+
     const matchedEmployeeIds = review.matched_employee_ids ?? []
     const assignedEmployeeIds = matchedEmployeeIds.length > 0
       ? matchedEmployeeIds
@@ -209,6 +268,7 @@ export function buildReviewBoardSummary({
     for (const employeeId of Array.from(new Set(assignedEmployeeIds))) {
       const employee = employees.find(item => item.id === employeeId)
       if (!employee) continue
+      if (!isEmployeeNamedInText(review.review_text, employee, firstNameCounts)) continue
 
       const existing = leaderboard.get(employee.id) ?? {
         employee,

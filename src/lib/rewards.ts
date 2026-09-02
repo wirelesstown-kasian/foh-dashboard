@@ -1,4 +1,5 @@
 import { Employee, GoogleReview, RewardRedemption, Task, TaskCompletion } from '@/lib/types'
+import { getReviewNamedEmployeeIds } from '@/lib/reviewScoring'
 
 export function getTaskPointValue(task?: Pick<Task, 'points'> | null) {
   const value = Number(task?.points ?? 0)
@@ -12,7 +13,11 @@ export function getCompletionPoints(completion: TaskCompletion, task?: Pick<Task
   return getTaskPointValue(task ?? completion.task)
 }
 
-export function getReviewEmployeeIds(review: Pick<GoogleReview, 'matched_employee_id' | 'matched_employee_ids'>) {
+export function getReviewEmployeeIds(review: Pick<GoogleReview, 'matched_employee_id' | 'matched_employee_ids' | 'attribution_status' | 'assigned_method'>) {
+  if (review.attribution_status === 'unassigned' || review.assigned_method === 'manager_clear' || review.assigned_method === 'clear_assignment') {
+    return []
+  }
+
   const ids = Array.isArray(review.matched_employee_ids) && review.matched_employee_ids.length > 0
     ? review.matched_employee_ids
     : review.matched_employee_id
@@ -70,7 +75,8 @@ export function buildEmployeeRewardPointRows({
   }
 
   for (const review of reviews) {
-    const employeeIds = getReviewEmployeeIds(review).filter(employeeId => activeEmployeeIds.has(employeeId))
+    const namedEmployeeIds = new Set(getReviewNamedEmployeeIds(review, activeEmployees))
+    const employeeIds = getReviewEmployeeIds(review).filter(employeeId => activeEmployeeIds.has(employeeId) && namedEmployeeIds.has(employeeId))
     if (employeeIds.length === 0) continue
     const points = Math.round(Number(review.points ?? 0))
     for (const employeeId of employeeIds) {
