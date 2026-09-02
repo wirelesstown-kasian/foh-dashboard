@@ -14,14 +14,17 @@ import {
   resolveReviewDateRange,
   ReviewBoardRange,
   ReviewDateRangeFilter,
+  ReviewLeaderboardEntry,
 } from '@/lib/reviewScoring'
-import { Employee, GoogleReview, RewardCatalogItem } from '@/lib/types'
-import { ShieldCheck, UserRound } from 'lucide-react'
+import { Employee, GoogleReview, RewardCatalogItem, RewardRedemption, TaskCompletion } from '@/lib/types'
+import { ShieldCheck, UserRound, X } from 'lucide-react'
 
 interface ReviewBoardResponse {
   employees: Employee[]
   reviews: GoogleReview[]
   taskPoints: Record<string, number>
+  taskCompletions: TaskCompletion[]
+  redemptions: RewardRedemption[]
   manager_unlocked: boolean
   viewer: {
     employee_id: string
@@ -34,7 +37,24 @@ interface ReviewBoardResponse {
 interface ActiveEmployeeFilter {
   employeeId: string
   employeeName: string
-  source: 'my' | 'manager'
+  source: 'my'
+}
+
+function getReviewEmployeeIds(review: GoogleReview) {
+  const ids = (review.matched_employee_ids ?? []).length > 0
+    ? review.matched_employee_ids ?? []
+    : review.matched_employee_id
+      ? [review.matched_employee_id]
+      : []
+  return Array.from(new Set(ids.filter(Boolean)))
+}
+
+function sortByLatestDate<T>(items: T[], getDate: (item: T) => string | null | undefined) {
+  return [...items].sort((left, right) => (getDate(right) ?? '').localeCompare(getDate(left) ?? ''))
+}
+
+function formatSignedPoints(points: number) {
+  return `${points > 0 ? '+' : ''}${points} pts`
 }
 
 export function ReviewBoardClient() {
@@ -51,11 +71,14 @@ export function ReviewBoardClient() {
   const [reviews, setReviews] = useState<GoogleReview[]>([])
   const [rewards, setRewards] = useState<RewardCatalogItem[]>([])
   const [taskPoints, setTaskPoints] = useState<Record<string, number>>({})
+  const [taskCompletions, setTaskCompletions] = useState<TaskCompletion[]>([])
+  const [redemptions, setRedemptions] = useState<RewardRedemption[]>([])
   const [managerUnlocked, setManagerUnlocked] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
   const [showMyReviewsPin, setShowMyReviewsPin] = useState(false)
   const [showManagerPin, setShowManagerPin] = useState(false)
   const [activeEmployeeFilter, setActiveEmployeeFilter] = useState<ActiveEmployeeFilter | null>(null)
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [assignmentTarget, setAssignmentTarget] = useState<GoogleReview | null>(null)
   const [pendingAssignReview, setPendingAssignReview] = useState<GoogleReview | null>(null)
   const [collapsedSections, setCollapsedSections] = useState({
@@ -84,6 +107,8 @@ export function ReviewBoardClient() {
       setReviews(payload.reviews ?? [])
       setRewards(rewardsPayload.rewards ?? [])
       setTaskPoints(payload.taskPoints ?? {})
+      setTaskCompletions(payload.taskCompletions ?? [])
+      setRedemptions(payload.redemptions ?? [])
       setManagerUnlocked(payload.manager_unlocked === true)
       setSetupRequired(payload.setup_required === true)
     } catch (loadError) {
@@ -131,11 +156,42 @@ export function ReviewBoardClient() {
     employees,
     taskPoints: new Map(Object.entries(taskPoints)),
   })
+  const selectedEmployee = selectedEmployeeId
+    ? employees.find(employee => employee.id === selectedEmployeeId) ?? null
+    : null
+  const selectedLeaderboardEntry: ReviewLeaderboardEntry | null = selectedEmployeeId
+    ? accumulatedSummary.reviewLeaderboard.find(item => item.employeeId === selectedEmployeeId) ?? null
+    : null
+  const selectedTaskCompletions = selectedEmployeeId
+    ? sortByLatestDate(
+      taskCompletions.filter(completion => completion.employee_id === selectedEmployeeId && completion.status !== 'incomplete'),
+      completion => completion.completed_at || completion.session_date
+    ).slice(0, 12)
+    : []
+  const selectedReviews = selectedEmployeeId
+    ? sortByLatestDate(
+      reviews.filter(review => getReviewEmployeeIds(review).includes(selectedEmployeeId)),
+      review => review.review_date
+    ).slice(0, 12)
+    : []
+  const selectedRedemptions = selectedEmployeeId
+    ? sortByLatestDate(
+      redemptions.filter(redemption => redemption.employee_id === selectedEmployeeId),
+      redemption => redemption.redeemed_at || redemption.created_at
+    ).slice(0, 12)
+    : []
+  const selectedTaskPoints = selectedLeaderboardEntry?.taskPoints ?? (selectedEmployeeId ? taskPoints[selectedEmployeeId] ?? 0 : 0)
+  const selectedReviewPoints = selectedLeaderboardEntry?.reviewPoints ?? selectedReviews.reduce((sum, review) => sum + Math.round(Number(review.points ?? 0)), 0)
+  const selectedEarnedPoints = selectedTaskPoints + selectedReviewPoints
+  const selectedRedemptionTotal = selectedRedemptions.reduce((sum, redemption) => sum + Math.round(Number(redemption.points_delta ?? 0)), 0)
+  const selectedSpentPoints = Math.abs(selectedRedemptions.reduce((sum, redemption) => {
+    const points = Math.round(Number(redemption.points_delta ?? 0))
+    return points < 0 ? sum + points : sum
+  }, 0))
+  const selectedBalancePoints = selectedEarnedPoints + selectedRedemptionTotal
 
   const activeFilterLabel = activeEmployeeFilter
-    ? activeEmployeeFilter.source === 'my'
-      ? `My Reviews • ${activeEmployeeFilter.employeeName}`
-      : `Staff History • ${activeEmployeeFilter.employeeName}`
+    ? `My Reviews • ${activeEmployeeFilter.employeeName}`
     : `All Reviews • ${activeRangeLabel}`
 
   const handleRangeChange = (mode: ReviewBoardRange) => {
@@ -249,20 +305,11 @@ export function ReviewBoardClient() {
     }
   }
 
-  const requestManagerEmployeeFilter = (employeeId: string) => {
+  const openEmployeeActionPanel = (employeeId: string) => {
     const employee = employees.find(item => item.id === employeeId)
     if (!employee) return
 
-    if (activeEmployeeFilter?.employeeId === employeeId) {
-      setActiveEmployeeFilter(null)
-      return
-    }
-
-    setActiveEmployeeFilter({
-      employeeId: employee.id,
-      employeeName: employee.name,
-      source: 'manager',
-    })
+    setSelectedEmployeeId(current => current === employee.id ? null : employee.id)
   }
 
   const requestAssign = (review: GoogleReview) => {
@@ -394,8 +441,8 @@ export function ReviewBoardClient() {
                 recentReviews={visibleReviews}
                 reviewLeaderboard={accumulatedSummary.reviewLeaderboard}
                 rewards={rewards}
-                selectedEmployeeId={activeEmployeeFilter?.source === 'manager' ? activeEmployeeFilter.employeeId : null}
-                onSelectEmployee={requestManagerEmployeeFilter}
+                selectedEmployeeId={selectedEmployeeId}
+                onSelectEmployee={openEmployeeActionPanel}
                 collapsedSections={collapsedSections}
                 onToggleSection={section =>
                   setCollapsedSections(current => ({ ...current, [section]: !current[section] }))
@@ -427,7 +474,7 @@ export function ReviewBoardClient() {
               <ReviewFeed
                 reviews={visibleReviews}
                 onAssign={requestAssign}
-                onSelectEmployee={requestManagerEmployeeFilter}
+                onSelectEmployee={openEmployeeActionPanel}
                 filterLabel={activeFilterLabel}
               />
             </div>
@@ -469,6 +516,102 @@ export function ReviewBoardClient() {
           onClose={() => setAssignmentTarget(null)}
           onSubmit={handleAssignSubmit}
         />
+      )}
+
+      {selectedEmployee && (
+        <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-2xl">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-4 py-4">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-600">Point Details</div>
+              <div className="mt-1 truncate text-xl font-black text-slate-950">{selectedEmployee.name}</div>
+              <div className="mt-1 text-xs text-slate-500">Task points, review points, and reward spending</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedEmployeeId(null)}
+              className="rounded-full border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+              aria-label="Close point details"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid shrink-0 grid-cols-3 gap-2 border-b border-slate-100 px-4 py-3">
+            <div className="rounded-lg bg-emerald-50 px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-700">Earned</div>
+              <div className="mt-1 text-lg font-black text-emerald-700">{selectedEarnedPoints}</div>
+            </div>
+            <div className="rounded-lg bg-rose-50 px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-rose-700">Spent</div>
+              <div className="mt-1 text-lg font-black text-rose-700">{selectedSpentPoints}</div>
+            </div>
+            <div className="rounded-lg bg-slate-100 px-3 py-2">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-600">Balance</div>
+              <div className="mt-1 text-lg font-black text-slate-950">{selectedBalancePoints}</div>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-black text-slate-950">Earned Points</h2>
+                <span className="text-xs font-semibold text-slate-500">Task {selectedTaskPoints} + Review {selectedReviewPoints}</span>
+              </div>
+              <div className="space-y-1.5">
+                {selectedTaskCompletions.slice(0, 6).map(completion => (
+                  <div key={completion.id} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900">{completion.task?.title ?? 'Completed task'}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">{completion.session_date}</div>
+                      </div>
+                      <span className="shrink-0 font-bold text-emerald-700">{formatSignedPoints(Math.round(Number(completion.points_awarded ?? completion.task?.points ?? 0)))}</span>
+                    </div>
+                  </div>
+                ))}
+                {selectedReviews.slice(0, 6).map(review => (
+                  <div key={review.id} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900">{review.author_name}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">{review.review_date} · {review.rating} star{review.rating === 1 ? '' : 's'}</div>
+                        <p className="mt-1 line-clamp-2 text-xs text-slate-600">{review.review_text}</p>
+                      </div>
+                      <span className="shrink-0 font-bold text-emerald-700">{formatSignedPoints(Math.round(Number(review.points ?? 0)))}</span>
+                    </div>
+                  </div>
+                ))}
+                {selectedTaskCompletions.length === 0 && selectedReviews.length === 0 && (
+                  <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-500">No earned point detail yet.</div>
+                )}
+              </div>
+            </section>
+
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-black text-slate-950">Spent Points</h2>
+                <span className="text-xs font-semibold text-slate-500">{selectedRedemptions.length} item{selectedRedemptions.length === 1 ? '' : 's'}</span>
+              </div>
+              <div className="space-y-1.5">
+                {selectedRedemptions.map(redemption => (
+                  <div key={redemption.id} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900">{redemption.reward?.name ?? 'Manual point adjustment'}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">{redemption.redeemed_at}</div>
+                        {redemption.memo && <p className="mt-1 line-clamp-2 text-xs text-slate-600">{redemption.memo}</p>}
+                      </div>
+                      <span className="shrink-0 font-bold text-rose-700">{formatSignedPoints(Math.round(Number(redemption.points_delta ?? 0)))}</span>
+                    </div>
+                  </div>
+                ))}
+                {selectedRedemptions.length === 0 && (
+                  <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-500">No reward spending yet.</div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
       )}
     </>
   )
