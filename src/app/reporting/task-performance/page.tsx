@@ -6,14 +6,16 @@ import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { useClockRecords, useEmployees, useEodReports, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ReportPeriod, formatCurrency, getPercent, getReportRange } from '@/lib/reporting'
-import { getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getRoleLabel } from '@/lib/organization'
 import { Trophy } from 'lucide-react'
 import { format } from 'date-fns'
 import { PerformanceReportDialog } from '@/components/reporting/PerformanceReportDialog'
 import { buildPerformanceReportHtml, buildPerformanceRows } from '@/lib/performanceReporting'
 import { getCompletionPoints } from '@/lib/rewards'
+import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 
 export default function TaskPerformancePage() {
   const employees = useEmployees({ includeArchived: true })
@@ -21,12 +23,13 @@ export default function TaskPerformancePage() {
   const tasks = useTasks()
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
-  const { roleDefinitions } = useAppSettings()
+  const { roleDefinitions, departmentDefinitions } = useAppSettings()
 
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
+  const [department, setDepartment] = useState('server')
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
 
@@ -34,7 +37,24 @@ export default function TaskPerformancePage() {
     () => getReportRange(period, refDate, customStart, customEnd),
     [period, refDate, customStart, customEnd]
   )
-  const filteredEmployees = employees
+  const departmentOptions = useMemo(() => [
+    { key: 'all', label: 'All' },
+    ...(departmentDefinitions.length > 0
+      ? departmentDefinitions.filter(definition => definition.is_active).map(definition => ({ key: definition.key, label: definition.label }))
+      : [
+          { key: 'manager', label: 'Manager' },
+          { key: 'server', label: 'Server' },
+          { key: 'cook', label: 'Cook' },
+          { key: 'kitchen', label: 'Kitchen' },
+        ]),
+  ], [departmentDefinitions])
+  const filteredEmployees = useMemo(
+    () => department === 'all'
+      ? employees
+      : employees.filter(employee => getEmployeeScheduleDepartments(employee).includes(department)),
+    [department, employees]
+  )
+  const departmentLabel = department === 'all' ? 'All Staff' : getDepartmentLabel(department, departmentDefinitions)
   const monthStart = format(new Date(`${startDate}T12:00:00`), 'yyyy-MM-01')
   const monthEnd = format(new Date(new Date(`${endDate}T12:00:00`).getFullYear(), new Date(`${endDate}T12:00:00`).getMonth() + 1, 0), 'yyyy-MM-dd')
   const { filteredCompletions, employeeMonthStats, perfRows, totalTasks } = useMemo(
@@ -69,7 +89,7 @@ export default function TaskPerformancePage() {
       totalTasks,
       startDate,
       endDate,
-      departmentLabel: 'ALL STAFF',
+      departmentLabel,
     })
 
   const handleEmailReport = async (employeeId: string) => {
@@ -82,6 +102,7 @@ export default function TaskPerformancePage() {
           employee_id: employeeId,
           start_date: startDate,
           end_date: endDate,
+          department,
           report_html: buildReportHtml(employeeId),
         }),
       })
@@ -111,12 +132,24 @@ export default function TaskPerformancePage() {
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
           rightSlot={
-            <a
-              href="/reporting/task-detail"
-              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              Task Detail
-            </a>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={department} onValueChange={(value: string | null) => value && setDepartment(value)}>
+                <SelectTrigger className="h-9 w-40">
+                  <span>{departmentOptions.find(option => option.key === department)?.label ?? departmentLabel}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {departmentOptions.map(option => (
+                    <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <a
+                href="/reporting/task-detail"
+                className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                Task Detail
+              </a>
+            </div>
           }
         />
         <div className="mb-5 grid gap-4 md:grid-cols-4">
