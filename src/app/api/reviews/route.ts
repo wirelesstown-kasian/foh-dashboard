@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { Employee, GoogleReview, Task, TaskCompletion } from '@/lib/types'
+import { Employee, GoogleReview, RewardRedemption, Task, TaskCompletion } from '@/lib/types'
 import { getReviewBoardEmployees, getReviewBoardViewer, isReviewBoardSetupMissingError, normalizeReviewRow } from '@/lib/reviewBoard'
 import { withTipPoolHourlyRate } from '@/lib/employeeSelect'
 import { getCompletionPoints } from '@/lib/rewards'
@@ -9,6 +9,8 @@ type ReviewRouteResponse = {
   employees: Employee[]
   reviews: GoogleReview[]
   taskPoints: Record<string, number>
+  taskCompletions: TaskCompletion[]
+  redemptions: RewardRedemption[]
   manager_unlocked: boolean
   viewer: {
     employee_id: string
@@ -16,6 +18,11 @@ type ReviewRouteResponse = {
     role: string
   }
   setup_required?: boolean
+}
+
+function isMissingRewardsTable(error: { message?: string; code?: string } | null | undefined) {
+  const message = error?.message?.toLowerCase() ?? ''
+  return message.includes('reward_catalog') || message.includes('reward_redemptions') || error?.code === '42P01'
 }
 
 export async function GET() {
@@ -26,6 +33,7 @@ export async function GET() {
     reviewsResult,
     completionsResult,
     tasksResult,
+    redemptionsResult,
   ] = await Promise.all([
     supabaseAdmin
       .from('employees')
@@ -41,7 +49,12 @@ export async function GET() {
       .select('*, task:tasks(*)'),
     supabaseAdmin
       .from('tasks')
-      .select('*')
+      .select('*'),
+    supabaseAdmin
+      .from('reward_redemptions')
+      .select('*, reward:reward_catalog(*)')
+      .order('redeemed_at', { ascending: false })
+      .order('created_at', { ascending: false })
   ])
 
   if (employeesResult.error) {
@@ -54,6 +67,8 @@ export async function GET() {
         employees: getReviewBoardEmployees(withTipPoolHourlyRate(employeesResult.data ?? [])),
         reviews: [],
         taskPoints: {},
+        taskCompletions: [],
+        redemptions: [],
         manager_unlocked: managerUnlocked,
         viewer: {
           employee_id: session?.employeeId ?? '',
@@ -76,6 +91,10 @@ export async function GET() {
     }, { status: 500 })
   }
 
+  if (redemptionsResult.error && !isMissingRewardsTable(redemptionsResult.error)) {
+    return NextResponse.json({ error: redemptionsResult.error.message }, { status: 500 })
+  }
+
   const employees = getReviewBoardEmployees(withTipPoolHourlyRate(employeesResult.data ?? []))
   const reviews = (reviewsResult.data ?? []).map(row => normalizeReviewRow(row as GoogleReview, employees))
   const taskById = new Map(((tasksResult.data ?? []) as Task[]).map(task => [task.id, task]))
@@ -89,6 +108,8 @@ export async function GET() {
     employees,
     reviews,
     taskPoints,
+    taskCompletions: (completionsResult.data ?? []) as TaskCompletion[],
+    redemptions: redemptionsResult.error ? [] : ((redemptionsResult.data ?? []) as RewardRedemption[]),
     manager_unlocked: managerUnlocked,
     viewer: {
       employee_id: session?.employeeId ?? '',
