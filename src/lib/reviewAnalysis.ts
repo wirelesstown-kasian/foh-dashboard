@@ -60,6 +60,21 @@ type DirectMention = {
   confidence: number
 }
 
+const UNSAFE_FIRST_NAME_ALIASES = new Set([
+  'all',
+  'admin',
+  'everyone',
+  'everybody',
+  'food',
+  'host',
+  'new',
+  'server',
+  'service',
+  'staff',
+  'team',
+  'village',
+])
+
 const CATEGORY_PATTERNS: Array<[ReviewAnalysisCategory, RegExp[]]> = [
   ['food', [
     /\bfood\b/i,
@@ -155,51 +170,75 @@ function findNormalizedAliasIndex(reviewText: string, alias: string) {
   return normalizedReview.indexOf(` ${normalizedAlias} `)
 }
 
-function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): OpenAiAnalysisResult | null {
-  const mentions: DirectMention[] = []
-  const mentionedEmployeeIds = new Set<string>()
-
-  for (const employee of roster) {
-    const fullName = employee.name.trim()
-    if (!fullName) continue
-    const fullNamePattern = new RegExp(`\\b${escapeRegExp(fullName)}\\b`, 'i')
-    const fullNameMatch = reviewText.match(fullNamePattern)
-    const normalizedIndex = findNormalizedAliasIndex(reviewText, fullName)
-    if (fullNameMatch?.index != null || normalizedIndex >= 0) {
-      mentions.push({
-        employee,
-        mention: employee.name,
-        index: fullNameMatch?.index ?? normalizedIndex,
-        confidence: 98,
-      })
-      mentionedEmployeeIds.add(employee.id)
-    }
-  }
-
+function buildFirstNameCounts(roster: RosterEmployee[]) {
   const firstNameCounts = new Map<string, number>()
   for (const employee of roster) {
     const firstName = getEmployeeNameParts(employee.name)[0]?.toLowerCase()
-    if (!firstName || firstName.length < 3) continue
+    if (!firstName || firstName.length < 3 || UNSAFE_FIRST_NAME_ALIASES.has(firstName)) continue
     firstNameCounts.set(firstName, (firstNameCounts.get(firstName) ?? 0) + 1)
   }
+  return firstNameCounts
+}
 
-  for (const employee of roster) {
-    if (mentionedEmployeeIds.has(employee.id)) continue
-    const firstName = getEmployeeNameParts(employee.name)[0]
-    if (!firstName || firstName.length < 3 || firstNameCounts.get(firstName.toLowerCase()) !== 1) continue
-    const firstNamePattern = new RegExp(`\\b${escapeRegExp(firstName)}\\b`, 'i')
-    const firstNameMatch = reviewText.match(firstNamePattern)
-    const normalizedIndex = findNormalizedAliasIndex(reviewText, firstName)
-    if (firstNameMatch?.index != null || normalizedIndex >= 0) {
-      mentions.push({
-        employee,
-        mention: firstName,
-        index: firstNameMatch?.index ?? normalizedIndex,
-        confidence: 94,
-      })
-      mentionedEmployeeIds.add(employee.id)
+function findExplicitEmployeeMention(reviewText: string, employee: RosterEmployee, firstNameCounts: Map<string, number>) {
+  const fullName = employee.name.trim()
+  if (!fullName) return null
+
+  const fullNamePattern = new RegExp(`\\b${escapeRegExp(fullName)}\\b`, 'i')
+  const fullNameMatch = reviewText.match(fullNamePattern)
+  const normalizedFullNameIndex = findNormalizedAliasIndex(reviewText, fullName)
+  if (fullNameMatch?.index != null || normalizedFullNameIndex >= 0) {
+    return {
+      mention: employee.name,
+      index: fullNameMatch?.index ?? normalizedFullNameIndex,
+      confidence: 98,
     }
   }
+
+  const firstName = getEmployeeNameParts(employee.name)[0]
+  const normalizedFirstName = firstName?.toLowerCase()
+  if (
+    !firstName ||
+    !normalizedFirstName ||
+    firstName.length < 3 ||
+    UNSAFE_FIRST_NAME_ALIASES.has(normalizedFirstName) ||
+    firstNameCounts.get(normalizedFirstName) !== 1
+  ) {
+    return null
+  }
+
+  const firstNamePattern = new RegExp(`\\b${escapeRegExp(firstName)}\\b`, 'i')
+  const firstNameMatch = reviewText.match(firstNamePattern)
+  const normalizedFirstNameIndex = findNormalizedAliasIndex(reviewText, firstName)
+  if (firstNameMatch?.index != null || normalizedFirstNameIndex >= 0) {
+    return {
+      mention: firstName,
+      index: firstNameMatch?.index ?? normalizedFirstNameIndex,
+      confidence: 94,
+    }
+  }
+
+  return null
+}
+
+function findExplicitStaffMentions(reviewText: string, roster: RosterEmployee[]) {
+  const mentions: DirectMention[] = []
+  const firstNameCounts = buildFirstNameCounts(roster)
+
+  for (const employee of roster) {
+    const match = findExplicitEmployeeMention(reviewText, employee, firstNameCounts)
+    if (!match) continue
+    mentions.push({
+      employee,
+      ...match,
+    })
+  }
+
+  return mentions
+}
+
+function findDirectStaffMention(reviewText: string, roster: RosterEmployee[]): OpenAiAnalysisResult | null {
+  const mentions = findExplicitStaffMentions(reviewText, roster)
 
   if (mentions.length === 0) return null
 
@@ -279,16 +318,29 @@ function isMissingAnalysisTrackingColumn(error: { message?: string; code?: strin
   return error.code === 'PGRST204' || text.includes('last_analyzed_at') || text.includes('analysis_error')
 }
 
-function normalizeMatchedEmployeeIds(analysis: OpenAiAnalysisResult, roster: RosterEmployee[]) {
+function normalizeMatchedEmployeeIds(analysis: OpenAiAnalysisResult, roster: RosterEmployee[], reviewText: string) {
   const rosterIds = new Set(roster.map(employee => employee.id))
+  const explicitlyMentionedIds = new Set(findExplicitStaffMentions(reviewText, roster).map(mention => mention.employee.id))
   const ids = [
     ...(Array.isArray(analysis.matched_employee_ids) ? analysis.matched_employee_ids : []),
     analysis.matched_employee_id,
   ]
 
   return Array.from(new Set(
-    ids.filter((employeeId): employeeId is string => typeof employeeId === 'string' && rosterIds.has(employeeId))
+    ids.filter((employeeId): employeeId is string =>
+      typeof employeeId === 'string' &&
+      rosterIds.has(employeeId) &&
+      explicitlyMentionedIds.has(employeeId)
+    )
   ))
+}
+
+function normalizeStaffMentionsForAssignedEmployees(reviewText: string, roster: RosterEmployee[], employeeIds: string[]) {
+  const allowedIds = new Set(employeeIds)
+  return findExplicitStaffMentions(reviewText, roster)
+    .filter(mention => allowedIds.has(mention.employee.id))
+    .sort((left, right) => left.index - right.index)
+    .map(mention => mention.mention)
 }
 
 async function getReviewAnalysisInput(reviewId: string): Promise<ReviewAnalysisInput> {
@@ -329,12 +381,14 @@ async function saveReviewAnalysis(
   analysis: OpenAiAnalysisResult
 ): Promise<ReviewAnalysisResult> {
   const categories = uniqueCategories([...analysis.categories, ...detectReviewCategories(reviewText)])
-  const matchedEmployeeIds = normalizeMatchedEmployeeIds(analysis, roster)
+  const matchedEmployeeIds = normalizeMatchedEmployeeIds(analysis, roster, reviewText)
   const primaryEmployeeId = matchedEmployeeIds[0] ?? null
+  const staffMentions = normalizeStaffMentionsForAssignedEmployees(reviewText, roster, matchedEmployeeIds)
   const normalizedAnalysis = {
     ...analysis,
     matched_employee_id: primaryEmployeeId,
     matched_employee_ids: matchedEmployeeIds,
+    staff_mentions: staffMentions,
   }
   const attributionStatus = getAttributionStatus(normalizedAnalysis)
   const assignedMethod = getAssignedMethod(normalizedAnalysis)
@@ -349,7 +403,7 @@ async function saveReviewAnalysis(
       reason: analysis.reason,
       sentiment: analysis.sentiment,
       categories,
-      staff_mentions: analysis.staff_mentions,
+      staff_mentions: normalizedAnalysis.staff_mentions,
       attribution_status: attributionStatus,
       assigned_method: assignedMethod,
       last_analyzed_at: new Date().toISOString(),
@@ -372,7 +426,7 @@ async function saveReviewAnalysis(
         reason: analysis.reason,
         sentiment: analysis.sentiment,
         categories,
-        staff_mentions: analysis.staff_mentions,
+        staff_mentions: normalizedAnalysis.staff_mentions,
         attribution_status: attributionStatus,
         assigned_method: assignedMethod,
         updated_at: new Date().toISOString(),
@@ -399,7 +453,7 @@ async function saveReviewAnalysis(
     attribution_status: attributionStatus,
     sentiment: analysis.sentiment,
     categories,
-    staff_mentions: analysis.staff_mentions,
+    staff_mentions: normalizedAnalysis.staff_mentions,
     reason: analysis.reason,
   }
 }
@@ -437,9 +491,11 @@ async function analyzeWithOpenAI(review: GoogleReviewRow, roster: RosterEmployee
             'Use only the review text, star rating, and the provided staff roster.',
             'If multiple staff members are clearly mentioned, return every matching employee_id in matched_employee_ids and put the first/primary one in matched_employee_id.',
             'Direct name mentions should be credited to all clearly mentioned matching employees; do not choose only one when several staff names appear.',
+            'Do not credit broad phrases like everyone, everybody, staff, team, servers, or great service unless the review also names the employee.',
+            'Never infer a staff member from role, department, schedule, or general service praise.',
             'If there is no reliable match, return matched_employee_id as null and matched_employee_ids as an empty array.',
-            'Confidence >= 90 means very strong direct evidence such as a clear name mention.',
-            'Confidence 70-89 means plausible but still needs manager confirmation.',
+            'Confidence >= 90 requires a direct employee name mention.',
+            'Confidence 70-89 requires a direct employee name mention but may need manager confirmation.',
             'Below 70 should not auto-assign.',
             'Return JSON only.',
           ].join(' '),

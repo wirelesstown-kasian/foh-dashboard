@@ -11,6 +11,7 @@ import {
   buildReviewBoardSummary,
   createDefaultReviewDateRange,
   filterReviewsByRange,
+  getReviewNamedEmployeeIds,
   resolveReviewDateRange,
   ReviewBoardRange,
   ReviewDateRangeFilter,
@@ -41,6 +42,10 @@ interface ActiveEmployeeFilter {
 }
 
 function getReviewEmployeeIds(review: GoogleReview) {
+  if (review.attribution_status === 'unassigned' || review.assigned_method === 'manager_clear' || review.assigned_method === 'clear_assignment') {
+    return []
+  }
+
   const ids = (review.matched_employee_ids ?? []).length > 0
     ? review.matched_employee_ids ?? []
     : review.matched_employee_id
@@ -170,7 +175,10 @@ export function ReviewBoardClient() {
     : []
   const selectedReviews = selectedEmployeeId
     ? sortByLatestDate(
-      reviews.filter(review => getReviewEmployeeIds(review).includes(selectedEmployeeId)),
+      reviews.filter(review =>
+        getReviewEmployeeIds(review).includes(selectedEmployeeId) &&
+        getReviewNamedEmployeeIds(review, employees).includes(selectedEmployeeId)
+      ),
       review => review.review_date
     ).slice(0, 12)
     : []
