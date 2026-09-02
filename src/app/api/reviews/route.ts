@@ -1,15 +1,14 @@
-import { format, startOfMonth } from 'date-fns'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { buildPerformanceRows } from '@/lib/performanceReporting'
-import { Employee, EodReport, GoogleReview, ShiftClock, TaskCompletion, TipDistribution } from '@/lib/types'
+import { Employee, GoogleReview, Task, TaskCompletion } from '@/lib/types'
 import { getReviewBoardEmployees, getReviewBoardViewer, isReviewBoardSetupMissingError, normalizeReviewRow } from '@/lib/reviewBoard'
 import { withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { getCompletionPoints } from '@/lib/rewards'
 
 type ReviewRouteResponse = {
   employees: Employee[]
   reviews: GoogleReview[]
-  performanceScores: Record<string, number>
+  taskPoints: Record<string, number>
   manager_unlocked: boolean
   viewer: {
     employee_id: string
@@ -22,15 +21,11 @@ type ReviewRouteResponse = {
 export async function GET() {
   const { session, managerUnlocked } = await getReviewBoardViewer()
 
-  const today = format(new Date(), 'yyyy-MM-dd')
-  const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd')
-
   const [
     employeesResult,
     reviewsResult,
     completionsResult,
-    eodReportsResult,
-    clockRecordsResult,
+    tasksResult,
   ] = await Promise.all([
     supabaseAdmin
       .from('employees')
@@ -43,19 +38,10 @@ export async function GET() {
       .order('review_date', { ascending: false }),
     supabaseAdmin
       .from('task_completions')
-      .select('*')
-      .gte('session_date', monthStart)
-      .lte('session_date', today),
+      .select('*, task:tasks(*)'),
     supabaseAdmin
-      .from('eod_reports')
-      .select('*, tip_distributions(*, employee:employees(*))')
-      .gte('session_date', monthStart)
-      .lte('session_date', today),
-    supabaseAdmin
-      .from('shift_clocks')
+      .from('tasks')
       .select('*')
-      .gte('session_date', monthStart)
-      .lte('session_date', today),
   ])
 
   if (employeesResult.error) {
@@ -67,7 +53,7 @@ export async function GET() {
       const response: ReviewRouteResponse = {
         employees: getReviewBoardEmployees(withTipPoolHourlyRate(employeesResult.data ?? [])),
         reviews: [],
-        performanceScores: {},
+        taskPoints: {},
         manager_unlocked: managerUnlocked,
         viewer: {
           employee_id: session?.employeeId ?? '',
@@ -82,36 +68,27 @@ export async function GET() {
     return NextResponse.json({ error: reviewsResult.error.message }, { status: 500 })
   }
 
-  if (completionsResult.error || eodReportsResult.error || clockRecordsResult.error) {
+  if (completionsResult.error || tasksResult.error) {
     return NextResponse.json({
       error: completionsResult.error?.message
-        ?? eodReportsResult.error?.message
-        ?? clockRecordsResult.error?.message
+        ?? tasksResult.error?.message
         ?? 'Failed to load review board data',
     }, { status: 500 })
   }
 
   const employees = getReviewBoardEmployees(withTipPoolHourlyRate(employeesResult.data ?? []))
   const reviews = (reviewsResult.data ?? []).map(row => normalizeReviewRow(row as GoogleReview, employees))
-  const { perfRows } = buildPerformanceRows({
-    employees,
-    completions: (completionsResult.data ?? []) as TaskCompletion[],
-    eodReports: (eodReportsResult.data ?? []) as (EodReport & { tip_distributions?: (TipDistribution & { employee?: Employee })[] })[],
-    clockRecords: (clockRecordsResult.data ?? []) as ShiftClock[],
-    startDate: monthStart,
-    endDate: today,
-    monthStart,
-    monthEnd: today,
-  })
-
-  const performanceScores = Object.fromEntries(
-    perfRows.map(row => [row.emp.id, row.monthly?.score ?? 0])
-  )
+  const taskById = new Map(((tasksResult.data ?? []) as Task[]).map(task => [task.id, task]))
+  const taskPoints = ((completionsResult.data ?? []) as TaskCompletion[])
+    .reduce<Record<string, number>>((totals, completion) => {
+      totals[completion.employee_id] = (totals[completion.employee_id] ?? 0) + getCompletionPoints(completion, taskById.get(completion.task_id))
+      return totals
+    }, {})
 
   const response: ReviewRouteResponse = {
     employees,
     reviews,
-    performanceScores,
+    taskPoints,
     manager_unlocked: managerUnlocked,
     viewer: {
       employee_id: session?.employeeId ?? '',

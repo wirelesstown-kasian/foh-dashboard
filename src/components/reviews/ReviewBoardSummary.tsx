@@ -48,7 +48,7 @@ const sectionDetails = {
   leaderboard: {
     number: '02',
     title: 'Ranking Board',
-    description: 'Staff ranking, review points, and combined score.',
+    description: 'Staff ranking by task points plus review points.',
   },
   categories: {
     number: '03',
@@ -219,11 +219,11 @@ export function ReviewBoardSummary({
                         <div className="text-right">
                           <div className={cn(
                             'text-base font-bold',
-                            item.reviewPoints > 0 ? 'text-emerald-600' : item.reviewPoints < 0 ? 'text-red-600' : 'text-slate-950'
+                            item.totalPoints > 0 ? 'text-emerald-600' : item.totalPoints < 0 ? 'text-red-600' : 'text-slate-950'
                           )}>
-                            {item.reviewPoints > 0 ? '+' : ''}{item.reviewPoints}
+                            {item.totalPoints > 0 ? '+' : ''}{item.totalPoints}
                           </div>
-                          <div className="text-[11px] text-slate-500">Perf {item.performanceScore} · Combined {item.combinedScore}</div>
+                          <div className="text-[11px] text-slate-500">Task {item.taskPoints} + Review {item.reviewPoints}</div>
                         </div>
                       </div>
                     </button>

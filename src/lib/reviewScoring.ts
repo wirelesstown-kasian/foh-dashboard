@@ -14,9 +14,9 @@ export interface ReviewLeaderboardEntry {
   employeeName: string
   reviewCount: number
   reviewPoints: number
+  taskPoints: number
+  totalPoints: number
   averageRating: number
-  performanceScore: number
-  combinedScore: number
 }
 
 export interface ReviewCategorySummaryItem {
@@ -163,15 +163,26 @@ function matchMentionToEmployee(mention: string, employees: Employee[]) {
 export function buildReviewBoardSummary({
   reviews,
   employees,
-  performanceScores,
+  taskPoints,
 }: {
   reviews: GoogleReview[]
   employees: Employee[]
-  performanceScores: Map<string, number>
+  taskPoints: Map<string, number>
 }) {
   const categoryCounts = new Map<ReviewCategory, number>()
   const mentionCounts = new Map<string, number>()
   const leaderboard = new Map<string, { employee: Employee; reviewCount: number; reviewPoints: number; ratingTotal: number }>()
+
+  for (const employee of employees) {
+    const employeeTaskPoints = taskPoints.get(employee.id) ?? 0
+    if (employeeTaskPoints === 0) continue
+    leaderboard.set(employee.id, {
+      employee,
+      reviewCount: 0,
+      reviewPoints: 0,
+      ratingTotal: 0,
+    })
+  }
 
   for (const review of reviews) {
     for (const rawCategory of review.categories ?? []) {
@@ -230,20 +241,21 @@ export function buildReviewBoardSummary({
 
   const reviewLeaderboard: ReviewLeaderboardEntry[] = Array.from(leaderboard.values())
     .map(item => {
-      const performanceScore = performanceScores.get(item.employee.id) ?? 0
+      const employeeTaskPoints = taskPoints.get(item.employee.id) ?? 0
       return {
         employeeId: item.employee.id,
         employeeName: item.employee.name,
         reviewCount: item.reviewCount,
         reviewPoints: item.reviewPoints,
+        taskPoints: employeeTaskPoints,
+        totalPoints: employeeTaskPoints + item.reviewPoints,
         averageRating: item.reviewCount > 0 ? item.ratingTotal / item.reviewCount : 0,
-        performanceScore,
-        combinedScore: performanceScore + item.reviewPoints,
       }
     })
     .sort((left, right) =>
+      right.totalPoints - left.totalPoints ||
       right.reviewPoints - left.reviewPoints ||
-      right.combinedScore - left.combinedScore ||
+      right.taskPoints - left.taskPoints ||
       right.reviewCount - left.reviewCount ||
       left.employeeName.localeCompare(right.employeeName)
     )

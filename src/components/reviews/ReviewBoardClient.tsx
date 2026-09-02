@@ -21,7 +21,7 @@ import { ShieldCheck, UserRound } from 'lucide-react'
 interface ReviewBoardResponse {
   employees: Employee[]
   reviews: GoogleReview[]
-  performanceScores: Record<string, number>
+  taskPoints: Record<string, number>
   manager_unlocked: boolean
   viewer: {
     employee_id: string
@@ -50,7 +50,7 @@ export function ReviewBoardClient() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [reviews, setReviews] = useState<GoogleReview[]>([])
   const [rewards, setRewards] = useState<RewardCatalogItem[]>([])
-  const [performanceScores, setPerformanceScores] = useState<Record<string, number>>({})
+  const [taskPoints, setTaskPoints] = useState<Record<string, number>>({})
   const [managerUnlocked, setManagerUnlocked] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
   const [showMyReviewsPin, setShowMyReviewsPin] = useState(false)
@@ -83,7 +83,7 @@ export function ReviewBoardClient() {
       setEmployees(payload.employees ?? [])
       setReviews(payload.reviews ?? [])
       setRewards(rewardsPayload.rewards ?? [])
-      setPerformanceScores(payload.performanceScores ?? {})
+      setTaskPoints(payload.taskPoints ?? {})
       setManagerUnlocked(payload.manager_unlocked === true)
       setSetupRequired(payload.setup_required === true)
     } catch (loadError) {
@@ -124,12 +124,12 @@ export function ReviewBoardClient() {
   const summary = buildReviewBoardSummary({
     reviews: visibleReviews,
     employees,
-    performanceScores: new Map(Object.entries(performanceScores)),
+    taskPoints: new Map(Object.entries(taskPoints)),
   })
   const accumulatedSummary = buildReviewBoardSummary({
     reviews,
     employees,
-    performanceScores: new Map(Object.entries(performanceScores)),
+    taskPoints: new Map(Object.entries(taskPoints)),
   })
 
   const activeFilterLabel = activeEmployeeFilter
