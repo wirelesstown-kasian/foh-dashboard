@@ -61,12 +61,44 @@ function normalizeNumber(value: unknown) {
   return Number.isFinite(numberValue) ? numberValue : 0
 }
 
+function normalizeMoney(value: unknown) {
+  return Math.round(normalizeNumber(value) * 100) / 100
+}
+
 function isPaymentMethod(value: unknown): value is PaymentMethod {
   return value === 'cash' || value === 'check' || value === 'ach'
 }
 
 function dateRangesOverlap(leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) {
   return leftStart <= rightEnd && rightStart <= leftEnd
+}
+
+function calculatePayrollRow(row: NonNullable<PayrollRunPayload['rows']>[number]) {
+  const paymentMethod = row.payment_method as PaymentMethod
+  const grossPay = normalizeMoney(
+    normalizeNumber(row.base_wages) +
+    normalizeNumber(row.guarantee_top_up) +
+    normalizeNumber(row.tips) +
+    normalizeNumber(row.commission)
+  )
+  const deductions = normalizeMoney(row.deductions)
+  const netPay = normalizeMoney(Math.max(0, grossPay - deductions))
+  const payoutAmount = paymentMethod === 'cash' ? Math.floor(netPay) : netPay
+
+  return {
+    ...row,
+    payment_method: paymentMethod,
+    hours: normalizeMoney(row.hours),
+    tips: normalizeMoney(row.tips),
+    base_wages: normalizeMoney(row.base_wages),
+    guarantee_top_up: normalizeMoney(row.guarantee_top_up),
+    commission: normalizeMoney(row.commission),
+    deductions,
+    gross_pay: grossPay,
+    net_pay: netPay,
+    payout_amount: payoutAmount,
+    cash_rounding: normalizeMoney(netPay - payoutAmount),
+  }
 }
 
 export async function GET() {
@@ -121,6 +153,8 @@ export async function POST(req: NextRequest) {
     if (normalizeNumber(payload.adjustment?.amount) > 0 && !isPaymentMethod(payload.adjustment?.method)) {
       return NextResponse.json({ error: 'Select a payment method for the balance or credit adjustment.' }, { status: 400 })
     }
+    const calculatedRows = rows.map(calculatePayrollRow)
+    const calculatedTotals = getPayrollTotals(calculatedRows)
 
     const existingRunResult = await supabaseAdmin
       .from('payroll_runs')
@@ -138,7 +172,7 @@ export async function POST(req: NextRequest) {
         run.department === 'all' ||
         payload.department === 'all')
     )
-    const requestedEmployeeIds = new Set(rows.map(row => row.employee_id).filter(Boolean))
+    const requestedEmployeeIds = new Set(calculatedRows.map(row => row.employee_id).filter(Boolean))
     const duplicateEmployee = relatedExistingRuns
       .filter(run => run.start_date <= payload.start_date! && run.end_date >= payload.end_date!)
       .flatMap(run => run.payroll_run_items ?? [])
@@ -158,12 +192,12 @@ export async function POST(req: NextRequest) {
         end_date: payload.end_date,
         pay_date: payload.pay_date,
         memo: payload.memo?.trim() || null,
-        total_cash: normalizeNumber(payload.totals?.cash),
-        total_check: normalizeNumber(payload.totals?.check),
-        total_ach: normalizeNumber(payload.totals?.ach),
-        total_gross: normalizeNumber(payload.totals?.gross),
-        total_deductions: normalizeNumber(payload.totals?.deductions),
-        total_net: normalizeNumber(payload.totals?.net),
+        total_cash: calculatedTotals.cash,
+        total_check: calculatedTotals.check,
+        total_ach: calculatedTotals.ach,
+        total_gross: calculatedTotals.gross,
+        total_deductions: calculatedTotals.deductions,
+        total_net: calculatedTotals.net,
         updated_at: new Date().toISOString(),
       })
       .select('id')
@@ -174,23 +208,23 @@ export async function POST(req: NextRequest) {
     }
 
     const runId = runInsert.data.id as string
-    const itemInsert = await supabaseAdmin.from('payroll_run_items').insert(rows.map((row, index) => ({
+    const itemInsert = await supabaseAdmin.from('payroll_run_items').insert(calculatedRows.map((row, index) => ({
       run_id: runId,
       employee_id: row.employee_id || null,
       employee_name: row.employee_name || 'Unknown employee',
       role: row.role || null,
       department: row.department || payload.department,
-      payment_method: row.payment_method as PaymentMethod,
-      hours: normalizeNumber(row.hours),
-      tips: normalizeNumber(row.tips),
-      base_wages: normalizeNumber(row.base_wages),
-      guarantee_top_up: normalizeNumber(row.guarantee_top_up),
-      commission: normalizeNumber(row.commission),
-      deductions: normalizeNumber(row.deductions),
-      gross_pay: normalizeNumber(row.gross_pay),
-      net_pay: normalizeNumber(row.net_pay),
-      payout_amount: normalizeNumber(row.payout_amount),
-      cash_rounding: normalizeNumber(row.cash_rounding),
+      payment_method: row.payment_method,
+      hours: row.hours,
+      tips: row.tips,
+      base_wages: row.base_wages,
+      guarantee_top_up: row.guarantee_top_up,
+      commission: row.commission,
+      deductions: row.deductions,
+      gross_pay: row.gross_pay,
+      net_pay: row.net_pay,
+      payout_amount: row.payout_amount,
+      cash_rounding: row.cash_rounding,
       has_auto_clock_out: row.has_auto_clock_out === true,
       has_open_clock: row.has_open_clock === true,
       memo: row.memo?.trim() || null,
@@ -230,6 +264,7 @@ export async function PATCH(req: NextRequest) {
     if (normalizeNumber(payload.adjustment?.amount) > 0 && !isPaymentMethod(payload.adjustment?.method)) {
       return NextResponse.json({ error: 'Select a payment method for the balance or credit adjustment.' }, { status: 400 })
     }
+    const calculatedRows = rows.map(calculatePayrollRow)
 
     const { data: existingRun, error: existingRunError } = await supabaseAdmin
       .from('payroll_runs')
@@ -241,7 +276,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: existingRunError?.message ?? 'Payroll run not found' }, { status: 404 })
     }
 
-    const totals = getPayrollTotals(rows)
+    const totals = getPayrollTotals(calculatedRows)
     const updateRun = await supabaseAdmin
       .from('payroll_runs')
       .update({
@@ -258,7 +293,7 @@ export async function PATCH(req: NextRequest) {
 
     if (updateRun.error) return NextResponse.json({ error: updateRun.error.message }, { status: 500 })
 
-    for (const [index, row] of rows.entries()) {
+    for (const [index, row] of calculatedRows.entries()) {
       if (!row.id) return NextResponse.json({ error: `Missing payroll item id for ${row.employee_name || 'employee row'}` }, { status: 400 })
       const { data: updatedItem, error: updateItemError } = await supabaseAdmin
         .from('payroll_run_items')
@@ -267,17 +302,17 @@ export async function PATCH(req: NextRequest) {
           employee_name: row.employee_name || 'Unknown employee',
           role: row.role || null,
           department: row.department || existingRun.department,
-          payment_method: row.payment_method as PaymentMethod,
-          hours: normalizeNumber(row.hours),
-          tips: normalizeNumber(row.tips),
-          base_wages: normalizeNumber(row.base_wages),
-          guarantee_top_up: normalizeNumber(row.guarantee_top_up),
-          commission: normalizeNumber(row.commission),
-          deductions: normalizeNumber(row.deductions),
-          gross_pay: normalizeNumber(row.gross_pay),
-          net_pay: normalizeNumber(row.net_pay),
-          payout_amount: normalizeNumber(row.payout_amount),
-          cash_rounding: normalizeNumber(row.cash_rounding),
+          payment_method: row.payment_method,
+          hours: row.hours,
+          tips: row.tips,
+          base_wages: row.base_wages,
+          guarantee_top_up: row.guarantee_top_up,
+          commission: row.commission,
+          deductions: row.deductions,
+          gross_pay: row.gross_pay,
+          net_pay: row.net_pay,
+          payout_amount: row.payout_amount,
+          cash_rounding: row.cash_rounding,
           has_auto_clock_out: row.has_auto_clock_out === true,
           has_open_clock: row.has_open_clock === true,
           memo: row.memo?.trim() || null,
