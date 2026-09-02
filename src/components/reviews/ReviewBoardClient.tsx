@@ -57,7 +57,6 @@ export function ReviewBoardClient() {
   const [showManagerPin, setShowManagerPin] = useState(false)
   const [activeEmployeeFilter, setActiveEmployeeFilter] = useState<ActiveEmployeeFilter | null>(null)
   const [assignmentTarget, setAssignmentTarget] = useState<GoogleReview | null>(null)
-  const [pendingManagerEmployeeId, setPendingManagerEmployeeId] = useState<string | null>(null)
   const [pendingAssignReview, setPendingAssignReview] = useState<GoogleReview | null>(null)
   const [collapsedSections, setCollapsedSections] = useState({
     categories: false,
@@ -244,18 +243,6 @@ export function ReviewBoardClient() {
     setManagerUnlocked(true)
     setShowManagerPin(false)
 
-    if (pendingManagerEmployeeId) {
-      const employee = employees.find(item => item.id === pendingManagerEmployeeId)
-      if (employee) {
-        setActiveEmployeeFilter({
-          employeeId: employee.id,
-          employeeName: employee.name,
-          source: 'manager',
-        })
-      }
-      setPendingManagerEmployeeId(null)
-    }
-
     if (pendingAssignReview) {
       setAssignmentTarget(pendingAssignReview)
       setPendingAssignReview(null)
@@ -266,24 +253,16 @@ export function ReviewBoardClient() {
     const employee = employees.find(item => item.id === employeeId)
     if (!employee) return
 
-    if (activeEmployeeFilter?.source === 'manager' && activeEmployeeFilter.employeeId === employeeId) {
+    if (activeEmployeeFilter?.employeeId === employeeId) {
       setActiveEmployeeFilter(null)
       return
     }
 
-    if (managerUnlocked) {
-      setActiveEmployeeFilter({
-        employeeId: employee.id,
-        employeeName: employee.name,
-        source: 'manager',
-      })
-      return
-    }
-
-    setPendingManagerEmployeeId(employeeId)
-    setPendingAssignReview(null)
-    setManagerPinError(null)
-    setShowManagerPin(true)
+    setActiveEmployeeFilter({
+      employeeId: employee.id,
+      employeeName: employee.name,
+      source: 'manager',
+    })
   }
 
   const requestAssign = (review: GoogleReview) => {
@@ -293,7 +272,6 @@ export function ReviewBoardClient() {
     }
 
     setPendingAssignReview(review)
-    setPendingManagerEmployeeId(null)
     setManagerPinError(null)
     setShowManagerPin(true)
   }
@@ -373,7 +351,6 @@ export function ReviewBoardClient() {
               className="h-11 min-w-32 text-sm font-semibold"
               onClick={() => {
                 setManagerPinError(null)
-                setPendingManagerEmployeeId(null)
                 setPendingAssignReview(null)
                 setShowManagerPin(true)
               }}
@@ -473,12 +450,11 @@ export function ReviewBoardClient() {
       <PinModal
         open={showManagerPin}
         title="Manager PIN"
-        description="Manager PIN unlocks staff history filters and manual review assignment for this session."
+        description="Manager PIN unlocks manual review assignment for this session."
         onConfirm={unlockManagerSession}
         onClose={() => {
           setShowManagerPin(false)
           setManagerPinError(null)
-          setPendingManagerEmployeeId(null)
           setPendingAssignReview(null)
         }}
         error={managerPinError}
