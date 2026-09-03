@@ -261,6 +261,26 @@ async function getOpenClockRecord(employeeId: string, sessionDate: string) {
   return ((data ?? [])[0] ?? null) as ShiftClock | null
 }
 
+async function getLatestOpenClockRecord(employeeId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('shift_clocks')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .is('clock_out_at', null)
+    .order('session_date', { ascending: false })
+    .order('clock_in_at', { ascending: false })
+    .limit(1)
+
+  if (error) throw new Error(error.message)
+  return ((data ?? [])[0] ?? null) as ShiftClock | null
+}
+
+async function getClockRecordForEmployeeAction(employeeId: string, sessionDate: string, allowLatestOpenFallback: boolean) {
+  const sessionRecord = await getOpenClockRecord(employeeId, sessionDate)
+  if (sessionRecord || !allowLatestOpenFallback) return sessionRecord
+  return getLatestOpenClockRecord(employeeId)
+}
+
 async function getClockRecordById(id: string) {
   const { data, error } = await supabaseAdmin
     .from('shift_clocks')
@@ -445,18 +465,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
   }
 
-  if (action !== 'lookup_status') {
-    await processOverdueClockRecords()
-  }
-
   const employee = await verifyEmployeeByPin(pin)
   if (!employee) {
     return NextResponse.json({ error: 'Incorrect PIN' }, { status: 401 })
   }
 
+  if (action !== 'lookup_status' && action !== 'clock_out') {
+    await processOverdueClockRecords()
+  }
+
   let existingRecord: ShiftClock | null = null
   try {
-    existingRecord = await getOpenClockRecord(employee.id, session_date)
+    existingRecord = await getClockRecordForEmployeeAction(
+      employee.id,
+      session_date,
+      action === 'lookup_status' ||
+        action === 'clock_out' ||
+        action === 'start_break' ||
+        action === 'end_break' ||
+        action === 'toggle_break' ||
+        action === 'start_unpaid_break' ||
+        action === 'end_unpaid_break' ||
+        action === 'toggle_unpaid_break'
+    )
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load clock record' }, { status: 500 })
   }
@@ -467,7 +498,8 @@ export async function POST(req: NextRequest) {
 
   const nowIso = new Date().toISOString()
   const ext = photo_data_url ? getPhotoExtension(photo_data_url) : 'jpg'
-  const photoPath = `${session_date}/${employee.id}/${action}-${Date.now()}.${ext}`
+  const effectiveSessionDate = existingRecord?.session_date ?? session_date
+  const photoPath = `${effectiveSessionDate}/${employee.id}/${action}-${Date.now()}.${ext}`
   const allowPhotoSkip = action === 'clock_in' && skip_photo === true && employee.role === 'manager'
   const selectedWorkDepartment = typeof work_department === 'string' && work_department.trim()
     ? normalizeScheduleDepartment(work_department)
@@ -671,8 +703,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  await upsertClockTaskCompletion(task_id, employee.id, session_date)
-  return NextResponse.json({ success: true, employee, approved_hours: approvedHours })
+  await upsertClockTaskCompletion(task_id, employee.id, existingRecord.session_date)
+  return NextResponse.json({ success: true, employee, approved_hours: approvedHours, session_date: existingRecord.session_date })
 }
 
 export async function PATCH(req: NextRequest) {
