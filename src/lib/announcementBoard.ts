@@ -62,6 +62,10 @@ function isEventActive(event: AnnouncementEvent, today: string, now: Date) {
 
   if (recurrence !== 'none') return !!occurrenceDate
 
+  if (event.duration === 'custom') {
+    const startDate = event.announcement_start_date || event.date
+    return today >= startDate && today <= event.date
+  }
   if (event.duration === 'month') {
     return today >= dateKey(addDays(eventDate, -30)) && today <= event.date
   }

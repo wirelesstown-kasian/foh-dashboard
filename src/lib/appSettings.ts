@@ -42,7 +42,7 @@ export interface DepartmentDefinition {
   display_order: number
 }
 
-export type AnnouncementDuration = 'month' | '7days' | 'until_close'
+export type AnnouncementDuration = 'month' | '7days' | 'until_close' | 'custom'
 export type AnnouncementRecurrence = 'none' | 'daily' | 'weekly' | 'monthly' | 'annually'
 
 export interface AnnouncementEvent {
@@ -54,6 +54,7 @@ export interface AnnouncementEvent {
   day_end_time?: string
   place?: string
   duration: AnnouncementDuration
+  announcement_start_date?: string
   recurrence?: AnnouncementRecurrence
   recurrence_end_date?: string
   is_active: boolean
@@ -140,7 +141,7 @@ function normalizeOptionalHexColor(value: unknown) {
 }
 
 function normalizeAnnouncementDuration(value: unknown): AnnouncementDuration {
-  return value === 'month' || value === '7days' || value === 'until_close' ? value : '7days'
+  return value === 'month' || value === '7days' || value === 'until_close' || value === 'custom' ? value : '7days'
 }
 
 function normalizeAnnouncementRecurrence(value: unknown): AnnouncementRecurrence {
@@ -167,6 +168,9 @@ function normalizeAnnouncementEvents(value: unknown): AnnouncementEvent[] {
       if (typeof maybeEntry.day_start_time === 'string' && maybeEntry.day_start_time.trim()) normalizedEntry.day_start_time = maybeEntry.day_start_time.trim()
       if (typeof maybeEntry.day_end_time === 'string' && maybeEntry.day_end_time.trim()) normalizedEntry.day_end_time = maybeEntry.day_end_time.trim()
       if (typeof maybeEntry.place === 'string' && maybeEntry.place.trim()) normalizedEntry.place = maybeEntry.place.trim()
+      if (typeof maybeEntry.announcement_start_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(maybeEntry.announcement_start_date.trim())) {
+        normalizedEntry.announcement_start_date = maybeEntry.announcement_start_date.trim()
+      }
       normalizedEntry.recurrence = normalizeAnnouncementRecurrence(maybeEntry.recurrence)
       if (typeof maybeEntry.recurrence_end_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(maybeEntry.recurrence_end_date.trim())) {
         normalizedEntry.recurrence_end_date = maybeEntry.recurrence_end_date.trim()

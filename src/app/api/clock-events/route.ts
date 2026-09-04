@@ -370,6 +370,75 @@ async function createManualClockRecord(payload: {
   }
 }
 
+async function restoreDeletedClockRecord(payload: { record?: Partial<ShiftClock> }) {
+  if (!(await requireAdmin())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const record = payload.record
+  if (!record?.id || !record.employee_id || !record.session_date || !record.clock_in_at) {
+    return NextResponse.json({ error: 'Missing deleted clock record payload' }, { status: 400 })
+  }
+  if (!isValidSessionDate(record.session_date)) {
+    return NextResponse.json({ error: 'Invalid session_date format' }, { status: 400 })
+  }
+  if (record.clock_out_at && new Date(record.clock_out_at).getTime() <= new Date(record.clock_in_at).getTime()) {
+    return NextResponse.json({ error: 'Clock out must be after clock in' }, { status: 400 })
+  }
+
+  try {
+    if (record.clock_out_at && await hasOverlappingClockRecord({
+      employeeId: record.employee_id,
+      sessionDate: record.session_date,
+      clockInAt: record.clock_in_at,
+      clockOutAt: record.clock_out_at,
+    })) {
+      return NextResponse.json({ error: 'This employee already has clock hours that overlap the deleted record.' }, { status: 409 })
+    }
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to check overlapping clock records' }, { status: 500 })
+  }
+
+  const nowIso = new Date().toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('shift_clocks')
+    .insert({
+      id: record.id,
+      session_date: record.session_date,
+      employee_id: record.employee_id,
+      clock_in_at: record.clock_in_at,
+      clock_out_at: record.clock_out_at ?? null,
+      clock_in_photo_path: record.clock_in_photo_path ?? '',
+      clock_out_photo_path: record.clock_out_photo_path ?? null,
+      break_started_at: record.break_started_at ?? null,
+      break_ended_at: record.break_ended_at ?? null,
+      break_minutes: record.break_minutes ?? 0,
+      unpaid_break_started_at: record.unpaid_break_started_at ?? null,
+      unpaid_break_ended_at: record.unpaid_break_ended_at ?? null,
+      unpaid_break_minutes: record.unpaid_break_minutes ?? 0,
+      auto_clock_out: record.auto_clock_out === true,
+      approval_status: record.approval_status ?? (record.clock_out_at ? 'approved' : 'open'),
+      approved_hours: record.approved_hours ?? (record.clock_out_at ? calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, getClockBreakMinutes(record as ShiftClock)) : null),
+      manager_approved_by: record.manager_approved_by ?? null,
+      manager_approved_at: record.manager_approved_at ?? null,
+      manager_note: record.manager_note ?? null,
+      created_at: record.created_at ?? nowIso,
+      updated_at: nowIso,
+    })
+    .select('id')
+    .single()
+
+  if (error || !data?.id) {
+    return NextResponse.json({ error: error?.message ?? 'Failed to restore clock record' }, { status: 500 })
+  }
+
+  try {
+    return NextResponse.json({ success: true, record: await getClockRecordById(data.id) })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to reload restored clock record' }, { status: 500 })
+  }
+}
+
 async function upsertClockTaskCompletion(taskId: string | null | undefined, employeeId: string, sessionDate: string) {
   if (!taskId) return
   const { data: existing } = await supabaseAdmin
@@ -406,7 +475,7 @@ export async function GET(req: NextRequest) {
   let query = supabaseAdmin
     .from('shift_clocks')
     .select(minimal
-      ? 'id,session_date,employee_id,clock_in_at,clock_out_at,clock_in_photo_path,clock_out_photo_path,auto_clock_out,approval_status,approved_hours,manager_approved_by,manager_approved_at,manager_note,created_at,updated_at'
+      ? 'id,session_date,employee_id,clock_in_at,clock_out_at,clock_in_photo_path,clock_out_photo_path,break_started_at,break_ended_at,break_minutes,unpaid_break_started_at,unpaid_break_ended_at,unpaid_break_minutes,auto_clock_out,approval_status,approved_hours,manager_approved_by,manager_approved_at,manager_note,created_at,updated_at'
       : '*, employee:employees!shift_clocks_employee_id_fkey(*)')
     .order('session_date', { ascending: false })
     .order('clock_in_at', { ascending: false })
@@ -437,7 +506,7 @@ export async function POST(req: NextRequest) {
   if (configResponse) return configResponse
 
   const payload = await req.json() as {
-    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'start_break' | 'end_break' | 'toggle_break' | 'start_unpaid_break' | 'end_unpaid_break' | 'toggle_unpaid_break' | 'lookup_status'
+    action?: 'clock_in' | 'clock_out' | 'manual_add' | 'restore_deleted' | 'start_break' | 'end_break' | 'toggle_break' | 'start_unpaid_break' | 'end_unpaid_break' | 'toggle_unpaid_break' | 'lookup_status'
     pin?: string
     session_date?: string
     employee_id?: string
@@ -448,11 +517,15 @@ export async function POST(req: NextRequest) {
     task_id?: string
     skip_photo?: boolean
     work_department?: string | null
+    record?: Partial<ShiftClock>
   }
   const { action, pin, session_date, photo_data_url, task_id, skip_photo, work_department } = payload
 
   if (action === 'manual_add') {
     return createManualClockRecord(payload)
+  }
+  if (action === 'restore_deleted') {
+    return restoreDeletedClockRecord(payload)
   }
 
   if (!action || !session_date) {
@@ -544,6 +617,9 @@ export async function POST(req: NextRequest) {
       const { error } = await supabaseAdmin
         .from('shift_clocks')
         .update({
+          break_started_at: nowIso,
+          break_ended_at: null,
+          break_minutes: 0,
           manager_note: setMealBreakManagerNote(existingRecord.manager_note, { startedAt: nowIso, minutes: 0 }),
           updated_at: nowIso,
         })
@@ -566,6 +642,9 @@ export async function POST(req: NextRequest) {
       const { error } = await supabaseAdmin
         .from('shift_clocks')
         .update({
+          unpaid_break_started_at: nowIso,
+          unpaid_break_ended_at: null,
+          unpaid_break_minutes: 0,
           manager_note: setUnpaidBreakManagerNote(existingRecord.manager_note, { startedAt: nowIso, minutes: 0 }),
           updated_at: nowIso,
         })
@@ -586,6 +665,9 @@ export async function POST(req: NextRequest) {
       const { error } = await supabaseAdmin
         .from('shift_clocks')
         .update({
+          unpaid_break_started_at: unpaidBreakState.startedAt,
+          unpaid_break_ended_at: nowIso,
+          unpaid_break_minutes: elapsedMinutes,
           manager_note: setUnpaidBreakManagerNote(existingRecord.manager_note, {
             startedAt: unpaidBreakState.startedAt,
             endedAt: nowIso,
@@ -617,6 +699,9 @@ export async function POST(req: NextRequest) {
     const { error } = await supabaseAdmin
       .from('shift_clocks')
       .update({
+        break_started_at: breakState.startedAt,
+        break_ended_at: nowIso,
+        break_minutes: elapsedMinutes,
         manager_note: setMealBreakManagerNote(existingRecord.manager_note, {
           startedAt: breakState.startedAt,
           endedAt: nowIso,
@@ -819,6 +904,12 @@ export async function PATCH(req: NextRequest) {
     manager_note: nextManagerNote,
     clock_in_at: nextClockInAt,
     clock_out_at: nextClockOutAt,
+    break_started_at: nextMealBreak.startedAt,
+    break_ended_at: nextMealBreak.endedAt,
+    break_minutes: Math.max(0, Math.floor(nextMealBreak.minutes)),
+    unpaid_break_started_at: nextUnpaidBreak.startedAt,
+    unpaid_break_ended_at: nextUnpaidBreak.endedAt,
+    unpaid_break_minutes: Math.max(0, Math.floor(nextUnpaidBreak.minutes)),
     auto_clock_out: false,
     manager_approved_by: null,
     manager_approved_at: new Date().toISOString(),
@@ -870,5 +961,5 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, session_date: existing.session_date })
+  return NextResponse.json({ success: true, session_date: existing.session_date, record: existing })
 }

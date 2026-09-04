@@ -35,6 +35,7 @@ export default function DashboardPage() {
   const [announcementBoard, setAnnouncementBoard] = useState('')
   const [startingCash, setStartingCash] = useState<string>('')
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [initialLoading, setInitialLoading] = useState(true)
 
   const isResolvedCompletion = (completion: TaskCompletion) =>
     completion.status === 'incomplete' || completion.status === 'complete' || !completion.status
@@ -69,10 +70,10 @@ export default function DashboardPage() {
           .order('start_time'),
         supabase.from('task_categories').select('*').eq('is_active', true).order('display_order'),
         supabase.from('tasks').select('*').eq('is_active', true).order('display_order'),
-        supabase.from('task_completions').select('*, employee:employees(*)').eq('session_date', today),
-        supabase.from('task_completions').select('*').gte('session_date', monthStart).lte('session_date', today),
+        supabase.from('task_completions').select('id, task_id, employee_id, completed_at, session_date, status, points_awarded').eq('session_date', today),
+        supabase.from('task_completions').select('id, task_id, employee_id, completed_at, session_date, status, points_awarded').gte('session_date', monthStart).lte('session_date', today),
         supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
-        fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' })
+        fetch(`/api/clock-events?session_date=${today}&minimal=1`, { cache: 'no-store' })
           .then(async res => {
             const payload = (await res.json().catch(() => ({}))) as { error?: string; records?: ShiftClock[] }
             return res.ok
@@ -127,6 +128,8 @@ export default function DashboardPage() {
       setMonthCompletions([])
       setClockRecords([])
       setSession(null)
+    } finally {
+      setInitialLoading(false)
     }
   }, [today])
 
@@ -199,6 +202,16 @@ export default function DashboardPage() {
   const completedTasks = new Set(completions.filter(completion => isCompletedCompletion(completion) && visibleTaskIds.has(completion.task_id)).map(completion => completion.task_id)).size
   const progressPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
   const announcementLines = getAnnouncementLines(announcementBoard)
+
+  if (initialLoading) {
+    return (
+      <div className="flex min-h-full items-center justify-center p-6">
+        <div className="rounded-lg border bg-white px-5 py-4 text-sm font-medium text-muted-foreground shadow-sm">
+          Loading task board...
+        </div>
+      </div>
+    )
+  }
 
   // Show Register Open screen when session hasn't started yet or is in register_open phase
   if (!session || session.current_phase === 'register_open') {

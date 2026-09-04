@@ -8,7 +8,7 @@ const links = [
   { href: '/reporting/clock-records', label: 'Clock Records' },
   { href: '/reporting/wages', label: 'Wage Report' },
   { href: '/reporting/payroll-payouts', label: 'Payroll Payouts' },
-  { href: '/reporting/eod-history', label: 'EOD History' },
+  { href: '/reporting/eod-history', label: 'EOD Report' },
 ]
 
 export function ReportingNav() {

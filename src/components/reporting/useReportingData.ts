@@ -203,6 +203,7 @@ export function useClockRecords({
       if (sessionDate) params.set('session_date', sessionDate)
       if (startDate) params.set('start_date', startDate)
       if (endDate) params.set('end_date', endDate)
+      params.set('minimal', '1')
       const query = params.toString()
       const res = await fetch(`/api/clock-events${query ? `?${query}` : ''}`, { cache: 'no-store' })
       const json = (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
