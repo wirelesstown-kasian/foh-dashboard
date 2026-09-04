@@ -57,6 +57,10 @@ export async function POST(req: NextRequest) {
     name?: string
     description?: string
     points_cost?: number | string
+    completion_id?: string
+    review_id?: string
+    points?: number | string
+    points_awarded?: number | string
     employee_id?: string
     reward_id?: string | null
     points_delta?: number | string
@@ -105,12 +109,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: employeeResult.error.message }, { status: 500 })
     }
     if (!employeeResult.data?.is_active) {
-      return NextResponse.json({ error: 'Rewards can only be redeemed or deducted for active employees.' }, { status: 400 })
+      return NextResponse.json({ error: 'Point adjustments can only be saved for active employees.' }, { status: 400 })
     }
     const pointsDelta = normalizePoints(body.points_delta)
     if (pointsDelta === 0) return NextResponse.json({ error: 'Points change is required' }, { status: 400 })
     const memo = typeof body.memo === 'string' ? body.memo.trim() : ''
-    if (!memo) return NextResponse.json({ error: 'Memo is required for redemption or deduction' }, { status: 400 })
+    if (!memo) return NextResponse.json({ error: 'Memo is required for point adjustment' }, { status: 400 })
 
     const result = await supabaseAdmin
       .from('reward_redemptions')
@@ -125,10 +129,46 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (isMissingRewardsTable(result.error)) {
-      return NextResponse.json({ error: 'Run migration 034_add_rewards_points.sql before saving redemptions.' }, { status: 400 })
+      return NextResponse.json({ error: 'Run migration 034_add_rewards_points.sql before saving point adjustments.' }, { status: 400 })
     }
-    if (result.error || !result.data) return NextResponse.json({ error: result.error?.message ?? 'Failed to save redemption' }, { status: 500 })
+    if (result.error || !result.data) return NextResponse.json({ error: result.error?.message ?? 'Failed to save point adjustment' }, { status: 500 })
     return NextResponse.json({ success: true, redemption: result.data })
+  }
+
+  if (body.action === 'task_points') {
+    if (typeof body.completion_id !== 'string' || !body.completion_id) {
+      return NextResponse.json({ error: 'Task completion is required' }, { status: 400 })
+    }
+    const pointsAwarded = Math.max(0, normalizePoints(body.points_awarded ?? body.points))
+    const result = await supabaseAdmin
+      .from('task_completions')
+      .update({ points_awarded: pointsAwarded })
+      .eq('id', body.completion_id)
+      .select('*')
+      .single()
+
+    if (result.error || !result.data) {
+      return NextResponse.json({ error: result.error?.message ?? 'Failed to update task points' }, { status: 500 })
+    }
+    return NextResponse.json({ success: true, completion: result.data })
+  }
+
+  if (body.action === 'review_points') {
+    if (typeof body.review_id !== 'string' || !body.review_id) {
+      return NextResponse.json({ error: 'Review is required' }, { status: 400 })
+    }
+    const points = Math.max(0, normalizePoints(body.points ?? body.points_awarded))
+    const result = await supabaseAdmin
+      .from('google_reviews')
+      .update({ points, updated_at: new Date().toISOString() })
+      .eq('id', body.review_id)
+      .select('*')
+      .single()
+
+    if (result.error || !result.data) {
+      return NextResponse.json({ error: result.error?.message ?? 'Failed to update review points' }, { status: 500 })
+    }
+    return NextResponse.json({ success: true, review: result.data })
   }
 
   return NextResponse.json({ error: 'Invalid rewards action' }, { status: 400 })
