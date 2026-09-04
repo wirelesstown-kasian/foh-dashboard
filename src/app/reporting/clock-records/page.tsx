@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
+import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useClockRecords, useEmployees, usePayrollRuns, useSchedulesByRange } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
@@ -22,7 +23,7 @@ import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleForWork } from '@/lib/tipEligibility'
 import { supabase } from '@/lib/supabase'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
-import { AlertTriangle, Plus } from 'lucide-react'
+import { AlertTriangle, Plus, RotateCcw } from 'lucide-react'
 
 type ClockEditState = {
   sessionDate: string
@@ -45,6 +46,11 @@ type AddHourFormState = {
   note: string
 }
 
+type DeletedClockUndo = {
+  record: ShiftClock
+  employeeName: string
+}
+
 const ALL_STAFF_FILTER = 'all_staff'
 
 function isoToTimeInput(value: string | null) {
@@ -65,6 +71,13 @@ function timeInputToIso(sessionDate: string, value: string) {
 function getBreakMinutes(startIso: string | null, endIso: string | null) {
   if (!startIso || !endIso) return 0
   return Math.max(0, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000))
+}
+
+function addMinutesToTimeInput(value: string, minutesToAdd: number) {
+  const [hour = '0', minute = '0'] = value.split(':')
+  const date = new Date()
+  date.setHours(Number(hour), Number(minute) + minutesToAdd, 0, 0)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -151,7 +164,10 @@ export default function ClockRecordsPage() {
   })
   const [addingHour, setAddingHour] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ShiftClock | null>(null)
+  const [deleteConfirmed, setDeleteConfirmed] = useState(false)
   const [deletingClockId, setDeletingClockId] = useState<string | null>(null)
+  const [undoDeletedClock, setUndoDeletedClock] = useState<DeletedClockUndo | null>(null)
+  const [restoringClock, setRestoringClock] = useState(false)
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -242,6 +258,19 @@ export default function ClockRecordsPage() {
     setSelectedClockId(record.id)
     setDetailEditing(edit && !isClockRecordPaid(record))
     setStatus(null)
+  }
+
+  const applyQuickMealBreak = (record: ShiftClock, startTime = '16:00') => {
+    const currentEdit = clockEdits[record.id] ?? getClockEditState(record)
+    const mealBreakStart = startTime || '16:00'
+    setClockEdits(prev => ({
+      ...prev,
+      [record.id]: {
+        ...currentEdit,
+        mealBreakStart,
+        mealBreakEnd: addMinutesToTimeInput(mealBreakStart, 30),
+      },
+    }))
   }
 
   const openAddHourDialog = () => {
@@ -472,13 +501,16 @@ export default function ClockRecordsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: deleteTarget.id }),
     })
-    const json = (await res.json().catch(() => ({}))) as { success?: boolean; session_date?: string; error?: string }
+    const json = (await res.json().catch(() => ({}))) as { success?: boolean; session_date?: string; record?: ShiftClock; error?: string }
 
-    if (!res.ok || !json.success || !json.session_date) {
+    if (!res.ok || !json.success || !json.session_date || !json.record) {
       setStatus(json.error ?? 'Failed to delete clock record')
       setDeletingClockId(null)
       return
     }
+    const deletedRecord = json.record
+    const deletedEmployeeName = getClockRecordEmployeeName(deleteTarget, employees)
+    setUndoDeletedClock({ record: deletedRecord, employeeName: deletedEmployeeName })
 
     try {
       await recomputeSessionTips(json.session_date)
@@ -491,16 +523,46 @@ export default function ClockRecordsPage() {
         const payload = (await sheetSync.json().catch(() => ({}))) as { error?: string }
         throw new Error(payload.error ?? 'Google Sheets sync failed')
       }
-      setClockRecords(prev => prev.filter(item => item.id !== deleteTarget.id))
+      setClockRecords(prev => prev.filter(item => item.id !== deletedRecord.id))
       notifyReportingDataChanged()
       setDeleteTarget(null)
-      setSelectedClockId(current => current === deleteTarget.id ? null : current)
+      setDeleteConfirmed(false)
+      setSelectedClockId(current => current === deletedRecord.id ? null : current)
       setDetailEditing(false)
-      setStatus('Clock record deleted and tip distribution recalculated.')
+      setStatus(`${deletedEmployeeName} clock record deleted. You can undo this delete below.`)
     } catch (error) {
       setStatus(getErrorMessage(error, 'Clock record deleted, but Google Sheets sync failed'))
     } finally {
       setDeletingClockId(null)
+    }
+  }
+
+  const undoDeleteClockRecord = async () => {
+    if (!undoDeletedClock) return
+    setRestoringClock(true)
+    setStatus(null)
+    try {
+      const res = await fetch('/api/clock-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'restore_deleted', record: undoDeletedClock.record }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { record?: ShiftClock; error?: string }
+      if (!res.ok || !json.record) throw new Error(json.error ?? 'Failed to restore clock record')
+      setClockRecords(prev => [json.record!, ...prev].sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)))
+      await recomputeSessionTips(json.record.session_date)
+      await fetch('/api/clock-records-sheet-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record_id: json.record.id }),
+      })
+      notifyReportingDataChanged()
+      setUndoDeletedClock(null)
+      setStatus(`${undoDeletedClock.employeeName} clock record restored.`)
+    } catch (error) {
+      setStatus(getErrorMessage(error, 'Failed to restore clock record'))
+    } finally {
+      setRestoringClock(false)
     }
   }
 
@@ -512,6 +574,7 @@ export default function ClockRecordsPage() {
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
+      <ReportingNav />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('') }} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
@@ -554,7 +617,16 @@ export default function ClockRecordsPage() {
             </div>
           }
         />
-        {status && <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{status}</div>}
+        {status && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
+            <span>{status}</span>
+            {undoDeletedClock && (
+              <Button variant="outline" size="sm" onClick={undoDeleteClockRecord} disabled={restoringClock}>
+                <RotateCcw className="h-4 w-4" /> {restoringClock ? 'Restoring...' : 'Undo Delete'}
+              </Button>
+            )}
+          </div>
+        )}
         <Table>
           <TableHeader>
             <TableRow>
@@ -740,14 +812,19 @@ export default function ClockRecordsPage() {
                       </div>
                     </div>
                     <div className="rounded-lg border bg-muted/20 p-3">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Break Time</div>
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Break Time</div>
+                        <Button type="button" variant="outline" size="sm" onClick={() => applyQuickMealBreak(selectedClockRecord, selectedClockEdit.mealBreakStart || '16:00')}>
+                          30m Meal
+                        </Button>
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <Label>Meal Start</Label>
                           <Input
                             type="time"
                             value={selectedClockEdit.mealBreakStart}
-                            onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, mealBreakStart: event.target.value } }))}
+                            onChange={event => setClockEdits(prev => ({ ...prev, [selectedClockRecord.id]: { ...selectedClockEdit, mealBreakStart: event.target.value, mealBreakEnd: event.target.value ? addMinutesToTimeInput(event.target.value, 30) : '' } }))}
                           />
                         </div>
                         <div>
@@ -840,7 +917,10 @@ export default function ClockRecordsPage() {
                 <Button
                   variant="outline"
                   className="text-red-700 hover:text-red-800"
-                  onClick={() => setDeleteTarget(selectedClockRecord)}
+                  onClick={() => {
+                    setDeleteConfirmed(false)
+                    setDeleteTarget(selectedClockRecord)
+                  }}
                   disabled={savingClockId === selectedClockRecord.id}
                 >
                   Delete Record
@@ -947,7 +1027,12 @@ export default function ClockRecordsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => {
+        if (!open) {
+          setDeleteTarget(null)
+          setDeleteConfirmed(false)
+        }
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Clock Record</DialogTitle>
@@ -960,9 +1045,18 @@ export default function ClockRecordsPage() {
               ? `${getClockRecordEmployeeName(deleteTarget, employees)} • ${format(new Date(`${deleteTarget.session_date}T12:00:00`), 'MMM d, yyyy')} • ${format(new Date(deleteTarget.clock_in_at), 'p')}`
               : 'Delete this clock record?'}
           </div>
+          <label className="flex items-start gap-2 rounded-lg border bg-white px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={deleteConfirmed}
+              onChange={event => setDeleteConfirmed(event.target.checked)}
+            />
+            <span>I understand this removes the clock record and recalculates tips for that business day.</span>
+          </label>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deletingClockId !== null}>Cancel</Button>
-            <Button variant="destructive" onClick={deleteClockRecord} disabled={deletingClockId !== null}>
+            <Button variant="outline" onClick={() => { setDeleteTarget(null); setDeleteConfirmed(false) }} disabled={deletingClockId !== null}>Cancel</Button>
+            <Button variant="destructive" onClick={deleteClockRecord} disabled={deletingClockId !== null || !deleteConfirmed}>
               {deletingClockId ? 'Deleting…' : 'Delete Record'}
             </Button>
           </DialogFooter>

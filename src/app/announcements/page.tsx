@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import type { AnnouncementDuration, AnnouncementEvent, AnnouncementRecurrence } from '@/lib/appSettings'
 
@@ -27,6 +28,7 @@ const EMPTY_EVENT: AnnouncementEvent = {
   day_end_time: '',
   place: '',
   duration: '7days',
+  announcement_start_date: '',
   recurrence: 'none',
   recurrence_end_date: '',
   is_active: true,
@@ -35,6 +37,7 @@ const EMPTY_EVENT: AnnouncementEvent = {
 function durationLabel(duration: AnnouncementDuration) {
   if (duration === 'month') return '1 month before'
   if (duration === 'until_close') return 'Now until close'
+  if (duration === 'custom') return 'Custom start date'
   return '7 days before'
 }
 
@@ -117,6 +120,7 @@ function getEventDetailLine(event: AnnouncementEvent) {
   return [
     event.date || 'No date',
     event.time || null,
+    event.duration === 'custom' && event.announcement_start_date ? `show from ${event.announcement_start_date}` : null,
     dayWindow ? `day-of ${dayWindow}` : null,
     event.place ? `at ${event.place}` : null,
     recurrenceLabel(event.recurrence),
@@ -146,6 +150,7 @@ export default function AnnouncementsPage() {
   const [calendarMonth, setCalendarMonth] = useState(() => new Date())
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const [selectedDateKey, setSelectedDateKey] = useState(() => formatDateKey(new Date()))
+  const [eventPanelOpen, setEventPanelOpen] = useState(false)
   const [draftEvent, setDraftEvent] = useState<AnnouncementEvent>(() => ({
     ...EMPTY_EVENT,
     id: 'draft-event',
@@ -209,6 +214,10 @@ export default function AnnouncementsPage() {
       setError('Event title and date are required.')
       return
     }
+    if (draftEvent.duration === 'custom' && (!draftEvent.announcement_start_date || draftEvent.announcement_start_date > draftEvent.date)) {
+      setError('Custom announcement start date must be on or before the event date.')
+      return
+    }
     const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `event-${Date.now()}`
     const nextEvent = {
       ...draftEvent,
@@ -223,15 +232,11 @@ export default function AnnouncementsPage() {
     setError(null)
   }
 
-  const selectCalendarDate = (dateKey: string, matchingEvents: AnnouncementEvent[]) => {
+  const selectCalendarDate = (dateKey: string) => {
     setSelectedDateKey(dateKey)
     setCalendarMonth(new Date(`${dateKey}T12:00:00`))
-    const firstSavedEvent = matchingEvents.find(event => !isBirthdayCalendarEvent(event))
-    if (firstSavedEvent) {
-      setSelectedEventId(firstSavedEvent.id)
-      return
-    }
     resetDraftEvent(dateKey)
+    setEventPanelOpen(true)
   }
 
   const save = async () => {
@@ -239,6 +244,11 @@ export default function AnnouncementsPage() {
     setError(null)
     setMessage(null)
     try {
+      const invalidCustomEvent = events.find(event => event.duration === 'custom' && (!event.announcement_start_date || event.announcement_start_date > event.date))
+      if (invalidCustomEvent) {
+        setError(`Custom announcement start date must be on or before the event date for ${invalidCustomEvent.title}.`)
+        return
+      }
       const res = await fetch('/api/announcements', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -277,6 +287,119 @@ export default function AnnouncementsPage() {
   const selectedCalendarEvents = getCalendarEvents(calendarEvents, selectedDateKey)
   const creatorEvent = selectedExistingEvent ?? draftEvent
   const isEditingExistingEvent = selectedExistingEvent !== null
+  const eventCreatorPanel = (
+    <div className="space-y-4">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <Label>Event</Label>
+          <Input value={creatorEvent.title} onChange={input => updateCreatorEvent({ title: input.target.value })} className="mt-1" placeholder="Staff meeting" />
+        </div>
+        <div>
+          <Label>Date</Label>
+          <Input
+            type="date"
+            value={creatorEvent.date}
+            onChange={input => {
+              updateCreatorEvent({ date: input.target.value })
+              setSelectedDateKey(input.target.value)
+            }}
+            className="mt-1"
+          />
+        </div>
+        <div>
+          <Label>Time</Label>
+          <Input type="time" value={creatorEvent.time ?? ''} onChange={input => updateCreatorEvent({ time: input.target.value })} className="mt-1" />
+        </div>
+        <div>
+          <Label>Day-of Start</Label>
+          <Input type="time" value={creatorEvent.day_start_time ?? ''} onChange={input => updateCreatorEvent({ day_start_time: input.target.value })} className="mt-1" />
+        </div>
+        <div>
+          <Label>Day-of End</Label>
+          <Input type="time" value={creatorEvent.day_end_time ?? ''} onChange={input => updateCreatorEvent({ day_end_time: input.target.value })} className="mt-1" />
+        </div>
+        <div>
+          <Label>Place</Label>
+          <Input value={creatorEvent.place ?? ''} onChange={input => updateCreatorEvent({ place: input.target.value })} className="mt-1" placeholder="Dining room" />
+        </div>
+        <div>
+          <Label>Announcement Duration</Label>
+          <Select value={creatorEvent.duration} onValueChange={(value: string | null) => value && updateCreatorEvent({ duration: value as AnnouncementDuration })}>
+            <SelectTrigger className="mt-1">
+              <span>{durationLabel(creatorEvent.duration)}</span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7days">7 days before</SelectItem>
+              <SelectItem value="month">1 month before</SelectItem>
+              <SelectItem value="until_close">Now until event close</SelectItem>
+              <SelectItem value="custom">Custom start date</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {creatorEvent.duration === 'custom' && (
+          <div>
+            <Label>Show Starting On</Label>
+            <Input
+              type="date"
+              value={creatorEvent.announcement_start_date ?? ''}
+              onChange={input => updateCreatorEvent({ announcement_start_date: input.target.value })}
+              className="mt-1"
+            />
+          </div>
+        )}
+        <div>
+          <Label>Recurring</Label>
+          <Select value={creatorEvent.recurrence ?? 'none'} onValueChange={(value: string | null) => value && updateCreatorRecurrence(value as AnnouncementRecurrence)}>
+            <SelectTrigger className="mt-1">
+              <span>{recurrenceLabel(creatorEvent.recurrence)}</span>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No repeat</SelectItem>
+              <SelectItem value="daily">Daily</SelectItem>
+              <SelectItem value="weekly">Weekly</SelectItem>
+              <SelectItem value="monthly">Monthly</SelectItem>
+              <SelectItem value="annually">Annually</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Repeat Until</Label>
+          <Input
+            type="date"
+            value={creatorEvent.recurrence_end_date ?? ''}
+            onChange={input => updateCreatorEvent({ recurrence_end_date: input.target.value })}
+            className="mt-1"
+            disabled={(creatorEvent.recurrence ?? 'none') === 'none'}
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input type="checkbox" checked={creatorEvent.is_active} onChange={input => updateCreatorEvent({ is_active: input.target.checked })} />
+          Active
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {isEditingExistingEvent ? (
+            <Button
+              type="button"
+              variant="ghost"
+              className="text-red-600 hover:text-red-700"
+              onClick={() => {
+                setEvents(current => current.filter(item => item.id !== creatorEvent.id))
+                resetDraftEvent(selectedDateKey)
+              }}
+            >
+              <Trash2 className="h-4 w-4" /> Remove
+            </Button>
+          ) : (
+            <Button type="button" onClick={addDraftEvent}>
+              <Plus className="h-4 w-4" /> Add Event
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="p-4 sm:p-6">
@@ -358,7 +481,7 @@ export default function AnnouncementsPage() {
                             ? 'bg-white hover:border-blue-300 hover:bg-blue-50/40'
                             : 'bg-slate-50 text-slate-400 hover:border-blue-200'
                       }`}
-                      onClick={() => selectCalendarDate(dateKey, matchingEvents)}
+                      onClick={() => selectCalendarDate(dateKey)}
                     >
                       <div className="text-xs font-semibold">{date.getDate()}</div>
                       <div className="mt-1 space-y-1">
@@ -402,7 +525,10 @@ export default function AnnouncementsPage() {
                             : 'bg-white hover:border-blue-200 hover:bg-blue-50/40'
                         }`}
                         onClick={() => {
-                          if (!isBirthdayCalendarEvent(event)) setSelectedEventId(event.id)
+                          if (!isBirthdayCalendarEvent(event)) {
+                            setSelectedEventId(event.id)
+                            setEventPanelOpen(true)
+                          }
                         }}
                       >
                         <div className="font-semibold">{event.title}</div>
@@ -427,7 +553,14 @@ export default function AnnouncementsPage() {
                     <p className="text-sm text-muted-foreground">The next active event based on today&apos;s date.</p>
                   </div>
                 </div>
-                <Button type="button" variant="outline" onClick={() => resetDraftEvent(selectedDateKey)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    resetDraftEvent(selectedDateKey)
+                    setEventPanelOpen(true)
+                  }}
+                >
                   <Plus className="h-4 w-4" /> New Event
                 </Button>
               </div>
@@ -438,6 +571,7 @@ export default function AnnouncementsPage() {
                   onClick={() => {
                     setSelectedEventId(nextUpcomingEvent.id)
                     setSelectedDateKey(getNextOccurrenceKey(nextUpcomingEvent, todayKey) ?? nextUpcomingEvent.date)
+                    setEventPanelOpen(true)
                   }}
                 >
                   <div className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">Next Upcoming Event</div>
@@ -451,121 +585,6 @@ export default function AnnouncementsPage() {
               )}
             </section>
 
-            <section className="rounded-xl border bg-white p-4 shadow-sm sm:p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-                    <CalendarPlus className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className="font-semibold">Event Creator</h2>
-                    <p className="text-sm text-muted-foreground">{isEditingExistingEvent ? 'Editing selected calendar event.' : `New event date: ${formatDisplayDate(creatorEvent.date || selectedDateKey)}`}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div key={creatorEvent.id} className="rounded-lg border bg-slate-50 p-3">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="md:col-span-2">
-                      <Label>Event</Label>
-                      <Input value={creatorEvent.title} onChange={input => updateCreatorEvent({ title: input.target.value })} className="mt-1" placeholder="Staff meeting" />
-                    </div>
-                    <div>
-                      <Label>Date</Label>
-                      <Input
-                        type="date"
-                        value={creatorEvent.date}
-                        onChange={input => {
-                          updateCreatorEvent({ date: input.target.value })
-                          setSelectedDateKey(input.target.value)
-                        }}
-                        className="mt-1"
-                      />
-                    </div>
-                    <div>
-                      <Label>Time</Label>
-                      <Input type="time" value={creatorEvent.time ?? ''} onChange={input => updateCreatorEvent({ time: input.target.value })} className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>Day-of Start</Label>
-                      <Input type="time" value={creatorEvent.day_start_time ?? ''} onChange={input => updateCreatorEvent({ day_start_time: input.target.value })} className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>Day-of End</Label>
-                      <Input type="time" value={creatorEvent.day_end_time ?? ''} onChange={input => updateCreatorEvent({ day_end_time: input.target.value })} className="mt-1" />
-                    </div>
-                    <div>
-                      <Label>Place</Label>
-                      <Input value={creatorEvent.place ?? ''} onChange={input => updateCreatorEvent({ place: input.target.value })} className="mt-1" placeholder="Dining room" />
-                    </div>
-                    <div>
-                      <Label>Announcement Duration</Label>
-                      <Select value={creatorEvent.duration} onValueChange={(value: string | null) => value && updateCreatorEvent({ duration: value as AnnouncementDuration })}>
-                        <SelectTrigger className="mt-1">
-                          <span>{durationLabel(creatorEvent.duration)}</span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="7days">7 days before</SelectItem>
-                          <SelectItem value="month">1 month before</SelectItem>
-                          <SelectItem value="until_close">Now until event close</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Recurring</Label>
-                      <Select value={creatorEvent.recurrence ?? 'none'} onValueChange={(value: string | null) => value && updateCreatorRecurrence(value as AnnouncementRecurrence)}>
-                        <SelectTrigger className="mt-1">
-                          <span>{recurrenceLabel(creatorEvent.recurrence)}</span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No repeat</SelectItem>
-                          <SelectItem value="daily">Daily</SelectItem>
-                          <SelectItem value="weekly">Weekly</SelectItem>
-                          <SelectItem value="monthly">Monthly</SelectItem>
-                          <SelectItem value="annually">Annually</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Repeat Until</Label>
-                      <Input
-                        type="date"
-                        value={creatorEvent.recurrence_end_date ?? ''}
-                        onChange={input => updateCreatorEvent({ recurrence_end_date: input.target.value })}
-                        className="mt-1"
-                        disabled={(creatorEvent.recurrence ?? 'none') === 'none'}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <label className="flex items-center gap-2 text-sm font-medium">
-                      <input type="checkbox" checked={creatorEvent.is_active} onChange={input => updateCreatorEvent({ is_active: input.target.checked })} />
-                      Active
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {isEditingExistingEvent ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="text-red-600 hover:text-red-700"
-                          onClick={() => {
-                            setEvents(current => current.filter(item => item.id !== creatorEvent.id))
-                            resetDraftEvent(selectedDateKey)
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" /> Remove
-                        </Button>
-                      ) : (
-                        <Button type="button" onClick={addDraftEvent}>
-                          <Plus className="h-4 w-4" /> Add Event
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
           </div>
 
           <aside className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm xl:sticky xl:top-4 xl:self-start">
@@ -598,6 +617,19 @@ export default function AnnouncementsPage() {
           </aside>
         </div>
       )}
+      <Sheet open={eventPanelOpen} onOpenChange={setEventPanelOpen}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>{isEditingExistingEvent ? 'Edit Event' : 'Create Event'}</SheetTitle>
+            <SheetDescription>
+              {isEditingExistingEvent ? formatDisplayDate(creatorEvent.date) : formatDisplayDate(creatorEvent.date || selectedDateKey)}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-4">
+            {eventCreatorPanel}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

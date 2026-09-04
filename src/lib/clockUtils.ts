@@ -71,6 +71,12 @@ export function calculateClockHoursAfterBreak(clockInAt: string, clockOutAt: str
   return Math.max(0, Math.round((rawHours - breakHours) * 100) / 100)
 }
 
+function calculateBreakMinutes(startedAt: string | null | undefined, endedAt: string | null | undefined) {
+  if (!startedAt || !endedAt) return 0
+  const minutes = Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60_000)
+  return Number.isFinite(minutes) ? Math.max(0, minutes) : 0
+}
+
 export function getMealBreakState(record: Pick<ShiftClock, 'manager_note' | 'break_started_at' | 'break_ended_at' | 'break_minutes'>) {
   const note = record.manager_note ?? ''
   const getToken = (key: string) => {
@@ -78,28 +84,42 @@ export function getMealBreakState(record: Pick<ShiftClock, 'manager_note' | 'bre
     return note.match(new RegExp(`\\[meal_break_${escapedKey}=([^\\]]*)\\]`))?.[1] ?? null
   }
   const parsedMinutes = Number(getToken('minutes') ?? NaN)
+  const startedAt = record.break_started_at ?? getToken('started_at')
+  const endedAt = record.break_ended_at ?? getToken('ended_at')
+  const columnMinutes = typeof record.break_minutes === 'number' ? record.break_minutes : null
+  const tokenMinutes = Number.isFinite(parsedMinutes) ? parsedMinutes : null
+  const derivedMinutes = calculateBreakMinutes(startedAt, endedAt)
   return {
-    startedAt: record.break_started_at ?? getToken('started_at'),
-    endedAt: record.break_ended_at ?? getToken('ended_at'),
-    minutes: typeof record.break_minutes === 'number'
-      ? record.break_minutes
-      : Number.isFinite(parsedMinutes)
-        ? parsedMinutes
-        : 0,
+    startedAt,
+    endedAt,
+    minutes: columnMinutes && columnMinutes > 0
+      ? columnMinutes
+      : tokenMinutes && tokenMinutes > 0
+        ? tokenMinutes
+        : derivedMinutes,
   }
 }
 
-export function getUnpaidBreakState(record: Pick<ShiftClock, 'manager_note'>) {
+export function getUnpaidBreakState(record: Pick<ShiftClock, 'manager_note' | 'unpaid_break_started_at' | 'unpaid_break_ended_at' | 'unpaid_break_minutes'>) {
   const note = record.manager_note ?? ''
   const getToken = (key: string) => {
     const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     return note.match(new RegExp(`\\[unpaid_break_${escapedKey}=([^\\]]*)\\]`))?.[1] ?? null
   }
   const parsedMinutes = Number(getToken('minutes') ?? NaN)
+  const startedAt = record.unpaid_break_started_at ?? getToken('started_at')
+  const endedAt = record.unpaid_break_ended_at ?? getToken('ended_at')
+  const columnMinutes = typeof record.unpaid_break_minutes === 'number' ? record.unpaid_break_minutes : null
+  const tokenMinutes = Number.isFinite(parsedMinutes) ? parsedMinutes : null
+  const derivedMinutes = calculateBreakMinutes(startedAt, endedAt)
   return {
-    startedAt: getToken('started_at'),
-    endedAt: getToken('ended_at'),
-    minutes: Number.isFinite(parsedMinutes) ? parsedMinutes : 0,
+    startedAt,
+    endedAt,
+    minutes: columnMinutes && columnMinutes > 0
+      ? columnMinutes
+      : tokenMinutes && tokenMinutes > 0
+        ? tokenMinutes
+        : derivedMinutes,
   }
 }
 
@@ -108,12 +128,12 @@ export function isClockOnMealBreak(record: Pick<ShiftClock, 'manager_note' | 'br
   return Boolean(breakState.startedAt && !breakState.endedAt)
 }
 
-export function isClockOnUnpaidBreak(record: Pick<ShiftClock, 'manager_note'>) {
+export function isClockOnUnpaidBreak(record: Pick<ShiftClock, 'manager_note' | 'unpaid_break_started_at' | 'unpaid_break_ended_at' | 'unpaid_break_minutes'>) {
   const breakState = getUnpaidBreakState(record)
   return Boolean(breakState.startedAt && !breakState.endedAt)
 }
 
-export function getClockBreakMinutes(record: Pick<ShiftClock, 'manager_note' | 'break_started_at' | 'break_ended_at' | 'break_minutes'>) {
+export function getClockBreakMinutes(record: Pick<ShiftClock, 'manager_note' | 'break_started_at' | 'break_ended_at' | 'break_minutes' | 'unpaid_break_started_at' | 'unpaid_break_ended_at' | 'unpaid_break_minutes'>) {
   return getMealBreakState(record).minutes + getUnpaidBreakState(record).minutes
 }
 

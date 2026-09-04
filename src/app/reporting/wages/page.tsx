@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
+import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns, useScheduledDepartmentIds, useSchedulesByRange, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { clockMatchesWorkDepartment, getClockWorkDepartment, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { clockMatchesWorkDepartment, getClockWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { calculateTips } from '@/lib/tipCalc'
@@ -37,6 +38,7 @@ type ReportPaymentMethod = PaymentMethod | 'unknown'
 type WageDetailRow = {
   date: string
   hours: number
+  mealBreakMinutes: number
   tips: number
   baseWages: number
   guaranteeTopUp: number
@@ -48,6 +50,7 @@ type WageDetailRow = {
 type WageSummaryRow = {
   emp: Employee
   hours: number
+  mealBreakMinutes: number
   tips: number
   baseWages: number
   guaranteeTopUp: number
@@ -78,6 +81,10 @@ function getReportPaymentMethod(paymentMethod: PaymentMethod | null | undefined)
 
 function paymentMethodReportLabel(paymentMethod: ReportPaymentMethod) {
   return paymentMethod === 'unknown' ? 'Unknown' : paymentMethodLabel(paymentMethod)
+}
+
+function formatMealBreakMinutes(minutes: number) {
+  return minutes > 0 ? `${minutes}m` : '—'
 }
 
 function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
@@ -207,13 +214,14 @@ function getDailyWageDetail({
   savedTip?: SavedDailyTip
   useCalculatedTips: boolean
 }): WageDetailRow | null {
-  const clockHours = clockRecords
+  const matchingClockRecords = clockRecords
     .filter(record =>
       record.employee_id === emp.id &&
       record.session_date === date &&
       recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules)
     )
-    .reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+  const clockHours = matchingClockRecords.reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+  const mealBreakMinutes = matchingClockRecords.reduce((sum, record) => sum + getMealBreakState(record).minutes, 0)
   const hasDepartmentClock = employeeHasDepartmentClock(emp.id, date, department, employees, clockRecords, schedules)
   const calculatedHours = calculatedTip?.hours ?? 0
   const savedHours = savedTip?.hours ?? 0
@@ -233,6 +241,7 @@ function getDailyWageDetail({
   return {
     date,
     hours,
+    mealBreakMinutes,
     tips,
     baseWages,
     guaranteeTopUp,
@@ -502,6 +511,7 @@ export default function WageReportPage() {
           return {
             emp,
             hours: Number(item.hours ?? 0),
+            mealBreakMinutes: matchingClocks.reduce((sum, record) => sum + getMealBreakState(record).minutes, 0),
             tips: Number(item.tips ?? 0),
             baseWages: Number(item.base_wages ?? 0),
             guaranteeTopUp: Number(item.guarantee_top_up ?? 0),
@@ -523,6 +533,7 @@ export default function WageReportPage() {
         const detailRows = detailRowsByEmployeeId.get(emp.id) ?? []
         const hours = detailRows.reduce((sum, row) => sum + row.hours, 0)
         const tips = detailRows.reduce((sum, row) => sum + row.tips, 0)
+        const mealBreakMinutes = detailRows.reduce((sum, row) => sum + row.mealBreakMinutes, 0)
         const baseWages = detailRows.reduce((sum, row) => sum + row.baseWages, 0)
         const guaranteeTopUp = detailRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0)
         const totalEarnings = detailRows.reduce((sum, row) => sum + row.totalEarnings, 0)
@@ -537,6 +548,7 @@ export default function WageReportPage() {
         return {
           emp,
           hours,
+          mealBreakMinutes,
           tips,
           baseWages,
           guaranteeTopUp,
@@ -577,6 +589,7 @@ export default function WageReportPage() {
           <tr>
             <th>Date</th>
             <th class="right">Hours</th>
+            <th class="right">Meal Break</th>
             <th class="right">Tips</th>
             ${view === 'earnings' ? '<th class="right">Base Wages</th><th class="right">Top-Up</th><th class="right">Total</th>' : ''}
           </tr>
@@ -586,6 +599,7 @@ export default function WageReportPage() {
             <tr>
               <td>${detail.date}</td>
               <td class="right">${detail.hours.toFixed(2)}</td>
+              <td class="right">${formatMealBreakMinutes(detail.mealBreakMinutes)}</td>
               <td class="right">${formatCurrency(detail.tips)}</td>
               ${view === 'earnings' ? `<td class="right">${formatCurrency(detail.baseWages)}</td><td class="right">${formatCurrency(detail.guaranteeTopUp)}</td><td class="right">${formatCurrency(detail.totalEarnings)}</td>` : ''}
             </tr>
@@ -693,6 +707,7 @@ export default function WageReportPage() {
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
+      <ReportingNav />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         {refreshMessage && (
@@ -857,6 +872,7 @@ export default function WageReportPage() {
               <TableHead>Paid By</TableHead>
               <TableHead>Clock Status</TableHead>
               <TableHead className="text-right">Hours</TableHead>
+              <TableHead className="text-right">Meal Break</TableHead>
               <TableHead className="text-right">Tips</TableHead>
               <TableHead className="text-right">Tips / Hr</TableHead>
               <TableHead className="text-right">Tip Cap</TableHead>
@@ -904,6 +920,7 @@ export default function WageReportPage() {
                     )}
                   </span>
                 </TableCell>
+                <TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(row.mealBreakMinutes)}</TableCell>
                 <TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
                 <TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
                 <TableCell className="text-right text-muted-foreground">
@@ -922,7 +939,7 @@ export default function WageReportPage() {
             ))}
             {displayedRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={view === 'earnings' ? 13 : 8} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
+                <TableCell colSpan={view === 'earnings' ? 14 : 9} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -934,6 +951,7 @@ export default function WageReportPage() {
                 <TableCell />
                 <TableCell />
                 <TableCell className="text-right font-semibold">{displayedRows.reduce((sum, row) => sum + row.hours, 0).toFixed(2)}h</TableCell>
+                <TableCell className="text-right font-semibold">{formatMealBreakMinutes(displayedRows.reduce((sum, row) => sum + row.mealBreakMinutes, 0))}</TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.tips, 0))}</TableCell>
                 <TableCell className="text-right">
                   {(() => {
@@ -1029,6 +1047,7 @@ export default function WageReportPage() {
                     <TableRow>
                       <TableHead>Date</TableHead>
                       <TableHead className="text-right">Hours</TableHead>
+                      <TableHead className="text-right">Meal Break</TableHead>
                       <TableHead className="text-right">Tips</TableHead>
                       {view === 'earnings' && (
                         <>
@@ -1044,6 +1063,7 @@ export default function WageReportPage() {
                       <TableRow key={detail.date}>
                         <TableCell>{detail.date}</TableCell>
                         <TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(detail.mealBreakMinutes)}</TableCell>
                         <TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell>
                         {view === 'earnings' && (
                           <>

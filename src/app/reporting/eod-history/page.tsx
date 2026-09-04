@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { PinModal } from '@/components/layout/PinModal'
+import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useEmployees, useEodReports } from '@/components/reporting/useReportingData'
 import { Button } from '@/components/ui/button'
@@ -743,6 +744,7 @@ export default function EodHistoryPage() {
         backLabel="Back to Admin Board"
         rightSlot={<Button onClick={openCreateDialog}>Add Manual Entry</Button>}
       />
+      <ReportingNav />
       <div className="rounded-xl border bg-white p-5">
         {saveNotice && (
           <div className="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">

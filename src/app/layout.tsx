@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import { AppInstanceGuard } from '@/components/layout/AppInstanceGuard'
 import { TabNav } from '@/components/layout/TabNav'
 
 export const metadata: Metadata = {
@@ -16,12 +17,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="h-full">
       <body className="h-full flex flex-col bg-gray-50 antialiased overflow-hidden">
-        <TabNav />
-        <main className="min-h-0 flex-1 overflow-auto">
-          <div className="mx-auto min-h-full w-full max-w-[1400px]">
-            {children}
-          </div>
-        </main>
+        <AppInstanceGuard>
+          <TabNav />
+          <main className="min-h-0 flex-1 overflow-auto">
+            <div className="mx-auto min-h-full w-full max-w-[1400px]">
+              {children}
+            </div>
+          </main>
+        </AppInstanceGuard>
       </body>
     </html>
   )

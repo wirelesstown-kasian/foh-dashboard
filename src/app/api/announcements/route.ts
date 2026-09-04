@@ -25,6 +25,7 @@ function formatEventDetail(event: AnnouncementEvent) {
     ['Day-of Window', dayWindow || 'Not set'],
     ['Place', event.place || 'Not set'],
     ['Duration', event.duration],
+    ['Show Starting On', event.duration === 'custom' ? event.announcement_start_date || 'Not set' : 'Not set'],
     ['Recurring', recurrence],
     ['Repeat Until', event.recurrence_end_date || 'Not set'],
   ]

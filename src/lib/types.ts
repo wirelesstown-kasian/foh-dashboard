@@ -164,6 +164,9 @@ export interface ShiftClock {
   break_started_at?: string | null
   break_ended_at?: string | null
   break_minutes?: number
+  unpaid_break_started_at?: string | null
+  unpaid_break_ended_at?: string | null
+  unpaid_break_minutes?: number
   work_department?: string | null
   auto_clock_out: boolean
   approval_status: ShiftClockApprovalStatus

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { ReportingNav } from '@/components/reporting/ReportingNav'
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getClockWorkDepartment, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { calculatePayrollAmounts, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
@@ -493,12 +494,12 @@ export default function PayrollPayoutsReportPage() {
   const { eodReports } = useEodReports()
   const employees = useEmployees({ includeArchived: true })
   const { departmentDefinitions } = useAppSettings()
-  const [search, setSearch] = useState('')
   const [department, setDepartment] = useState('all')
   const [period, setPeriod] = useState<PayoutPeriod>('month')
   const [refDate, setRefDate] = useState(getDateInputValue(new Date()))
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
+  const [expandedRunIds, setExpandedRunIds] = useState<Set<string>>(new Set())
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('all')
   const [editing, setEditing] = useState(false)
@@ -524,20 +525,19 @@ export default function PayrollPayoutsReportPage() {
     { key: 'all', label: 'All' },
     ...departmentDefinitions.map(definition => ({ key: definition.key, label: definition.label })),
   ], [departmentDefinitions])
-  const sortedRuns = useMemo(() => [...payrollRuns].sort((left, right) => right.pay_date.localeCompare(left.pay_date) || right.created_at.localeCompare(left.created_at)), [payrollRuns])
+  const paidPayrollRuns = useMemo(() => payrollRuns.filter(run =>
+    Number(run.total_net ?? 0) > 0 || (run.payroll_run_items ?? []).some(item => Number(item.payout_amount ?? 0) > 0)
+  ), [payrollRuns])
+  const sortedRuns = useMemo(() => [...paidPayrollRuns].sort((left, right) => right.pay_date.localeCompare(left.pay_date) || right.created_at.localeCompare(left.created_at)), [paidPayrollRuns])
   const [rangeStart, rangeEnd] = useMemo(() => getPayoutRange(period, refDate, customStart, customEnd), [customEnd, customStart, period, refDate])
   const filteredRuns = useMemo(() => {
-    const query = search.trim().toLowerCase()
     return sortedRuns.filter(run => {
       if (department !== 'all' && run.department !== department) return false
-      if (rangeStart && run.end_date < rangeStart) return false
-      if (rangeEnd && run.start_date > rangeEnd) return false
-      const departmentLabel = departmentOptions.find(option => option.key === run.department)?.label ?? run.department
-      const employeesText = (run.payroll_run_items ?? []).map(item => item.employee_name).join(' ')
-      if (!query) return true
-      return [departmentLabel, run.department, run.pay_date, run.start_date, run.end_date, run.memo ?? '', employeesText].join(' ').toLowerCase().includes(query)
+      if (rangeStart && run.pay_date < rangeStart) return false
+      if (rangeEnd && run.pay_date > rangeEnd) return false
+      return true
     }).slice(0, 50)
-  }, [department, departmentOptions, rangeEnd, rangeStart, search, sortedRuns])
+  }, [department, rangeEnd, rangeStart, sortedRuns])
   const selectedRun = payrollRuns.find(run => run.id === selectedRunId) ?? null
   const selectedRunIndex = selectedRun ? sortedRuns.findIndex(run => run.id === selectedRun.id) : -1
   const editedItems = useMemo(() => [...(selectedRun?.payroll_run_items ?? [])]
@@ -563,6 +563,15 @@ export default function PayrollPayoutsReportPage() {
     (selectedAdjustment > 0 && adjustmentPaymentDirection === 'pay_out') ||
     (selectedAdjustment < 0 && adjustmentPaymentDirection === 'receive_credit')
   const hasClockTimeChanges = selectedClockRecords.some(record => clockEditChanged(record, clockEdits[record.id]))
+
+  const toggleRunExpanded = (runId: string) => {
+    setExpandedRunIds(current => {
+      const next = new Set(current)
+      if (next.has(runId)) next.delete(runId)
+      else next.add(runId)
+      return next
+    })
+  }
 
   const openSummary = (runId: string) => {
     const run = payrollRuns.find(item => item.id === runId)
@@ -1021,15 +1030,11 @@ export default function PayrollPayoutsReportPage() {
 
   return (
     <div className="p-6">
-      <AdminSubpageHeader title="Payroll Payouts" subtitle="Search, reprint, and edit saved payroll payouts." backHref="/admin" backLabel="Back to Admin Board" />
+      <AdminSubpageHeader title="Payroll Payouts" subtitle="Review, reprint, and edit saved payroll payouts." backHref="/admin" backLabel="Back to Admin Board" />
       <ReportingNav />
       {message && <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{message}</div>}
       <div className="rounded-xl border bg-white">
-        <div className="grid gap-3 border-b p-4 lg:grid-cols-[1fr_180px_170px_1fr]">
-          <div>
-            <Label>Search Payroll Payouts</Label>
-            <Input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by employee, department, pay date, period, or memo" />
-          </div>
+        <div className="grid gap-3 border-b p-4 lg:grid-cols-[180px_170px_1fr]">
           <div>
             <Label>Department</Label>
             <Select value={department} onValueChange={(value: string | null) => value && setDepartment(value)}>
@@ -1056,7 +1061,7 @@ export default function PayrollPayoutsReportPage() {
               </>
             ) : (
               <div className="sm:col-span-2">
-                <Label>Time Period</Label>
+                <Label>Pay Date</Label>
                 <Input type="date" value={refDate} onChange={event => setRefDate(event.target.value)} />
                 <p className="mt-1 text-xs text-muted-foreground">{rangeStart} to {rangeEnd}</p>
               </div>
@@ -1072,20 +1077,87 @@ export default function PayrollPayoutsReportPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredRuns.map(run => (
-                <TableRow key={run.id}>
-                  <TableCell><Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Paid</Badge></TableCell>
-                  <TableCell className="font-medium">{departmentOptions.find(option => option.key === run.department)?.label ?? run.department}</TableCell>
-                  <TableCell>{run.pay_date}</TableCell>
-                  <TableCell>{run.start_date} to {run.end_date}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(Number(run.total_cash ?? 0))}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(Number(run.total_check ?? 0))}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(Number(run.total_ach ?? 0))}</TableCell>
-                  <TableCell className="text-right font-semibold">{formatCurrency(Number(run.total_net ?? 0))}</TableCell>
-                  <TableCell>{format(new Date(run.updated_at ?? run.created_at), 'MMM d, h:mm a')}</TableCell>
-                  <TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => openSummary(run.id)}>Open</Button></TableCell>
-                </TableRow>
-              ))}
+              {filteredRuns.map(run => {
+                const expanded = expandedRunIds.has(run.id)
+                const items = [...(run.payroll_run_items ?? [])].sort((left, right) => left.display_order - right.display_order || left.employee_name.localeCompare(right.employee_name))
+                const runSummary = buildSavedPayrollSummary({ ...run, payroll_run_items: items })
+                return (
+                  <Fragment key={run.id}>
+                    <TableRow className="cursor-pointer" onClick={() => toggleRunExpanded(run.id)}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {expanded ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
+                          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Paid</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{departmentOptions.find(option => option.key === run.department)?.label ?? run.department}</TableCell>
+                      <TableCell>{run.pay_date}</TableCell>
+                      <TableCell>{run.start_date} to {run.end_date}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(Number(run.total_cash ?? 0))}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(Number(run.total_check ?? 0))}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(Number(run.total_ach ?? 0))}</TableCell>
+                      <TableCell className="text-right font-semibold">{formatCurrency(Number(run.total_net ?? 0))}</TableCell>
+                      <TableCell>{format(new Date(run.updated_at ?? run.created_at), 'MMM d, h:mm a')}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={event => {
+                            event.stopPropagation()
+                            toggleRunExpanded(run.id)
+                          }}
+                        >
+                          {expanded ? 'Collapse' : 'Details'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    {expanded && (
+                      <TableRow key={`${run.id}-details`} className="bg-slate-50/60 hover:bg-slate-50/60">
+                        <TableCell colSpan={10} className="p-4">
+                          <div className="space-y-3">
+                            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                              <div className="rounded-lg border bg-white px-3 py-2"><div className="text-[11px] uppercase text-slate-500">Staff</div><div className="font-bold">{runSummary.employeeCount}</div></div>
+                              <div className="rounded-lg border bg-white px-3 py-2"><div className="text-[11px] uppercase text-slate-500">Hours</div><div className="font-bold">{runSummary.hours.toFixed(2)}</div></div>
+                              <div className="rounded-lg border bg-white px-3 py-2"><div className="text-[11px] uppercase text-slate-500">Tips</div><div className="font-bold">{formatCurrency(runSummary.tips)}</div></div>
+                              <div className="rounded-lg border bg-white px-3 py-2"><div className="text-[11px] uppercase text-slate-500">Base</div><div className="font-bold">{formatCurrency(runSummary.baseWages)}</div></div>
+                              <div className="rounded-lg border bg-white px-3 py-2"><div className="text-[11px] uppercase text-slate-500">Top-Up</div><div className="font-bold">{formatCurrency(runSummary.topUp)}</div></div>
+                              <div className="rounded-lg border bg-white px-3 py-2"><div className="text-[11px] uppercase text-slate-500">Total</div><div className="font-bold">{formatCurrency(runSummary.net)}</div></div>
+                            </div>
+                            <div className="flex justify-end">
+                              <Button variant="outline" size="sm" onClick={() => openSummary(run.id)}>Adjust / Reprint</Button>
+                            </div>
+                            <div className="overflow-x-auto rounded-lg border bg-white">
+                              <Table className="min-w-[940px] text-xs">
+                                <TableHeader>
+                                  <TableRow className="bg-white hover:bg-white">
+                                    <TableHead>Paid By</TableHead><TableHead>Name</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Payout</TableHead><TableHead>Memo</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {items.map(item => (
+                                    <TableRow key={item.id}>
+                                      <TableCell>{paymentMethodLabel(item.payment_method)}</TableCell>
+                                      <TableCell className="font-medium">{item.employee_name}</TableCell>
+                                      <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>
+                                      <TableCell className="text-right">{Number(item.hours ?? 0).toFixed(2)}</TableCell>
+                                      <TableCell className="text-right">{formatCurrency(Number(item.tips ?? 0))}</TableCell>
+                                      <TableCell className="text-right">{formatCurrency(Number(item.base_wages ?? 0))}</TableCell>
+                                      <TableCell className="text-right">{formatCurrency(Number(item.guarantee_top_up ?? 0))}</TableCell>
+                                      <TableCell className="text-right text-red-700">{formatCurrency(Number(item.deductions ?? 0))}</TableCell>
+                                      <TableCell className="text-right font-semibold">{formatCurrency(Number(item.payout_amount ?? 0))}</TableCell>
+                                      <TableCell>{item.memo || ''}</TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                )
+              })}
               {filteredRuns.length === 0 && <TableRow><TableCell colSpan={10} className="py-6 text-center text-muted-foreground">No saved payroll payouts found.</TableCell></TableRow>}
             </TableBody>
           </Table>
