@@ -396,7 +396,7 @@ export default function WageReportPage() {
   }, [department, endDate, payrollRuns, startDate])
 
   const periodPayrollRuns = useMemo(() => payrollRuns.filter(run => {
-    if (run.start_date !== startDate || run.end_date !== endDate) return false
+    if (run.start_date < startDate || run.end_date > endDate) return false
     if (department === 'all') return true
     return run.department === department || run.department === 'all'
   }), [department, endDate, payrollRuns, startDate])
@@ -438,7 +438,7 @@ export default function WageReportPage() {
         .map(report => report.session_date)
     )
 
-    return new Map(
+    const detailMap = new Map(
       filteredEmployees.map(emp => {
         const employeeDates = Array.from(new Set([
           ...rangeReports
@@ -476,13 +476,57 @@ export default function WageReportPage() {
         return [emp.id, detailRows] as const
       })
     )
-  }, [clockRecords, department, employees, eodReports, filteredEmployees, endDate, schedules, startDate])
+
+    for (const run of periodPayrollRuns) {
+      for (const item of run.payroll_run_items ?? []) {
+        if (department !== 'all' && item.department !== department) continue
+        if (detailMap.get(item.employee_id ?? '')?.length) continue
+        const savedAmount = Number(item.hours ?? 0) + Number(item.tips ?? 0) + Number(item.base_wages ?? 0) + Number(item.guarantee_top_up ?? 0) + Number(item.commission ?? 0)
+        if (savedAmount <= 0) continue
+        detailMap.set(item.employee_id ?? item.id, [{
+          date: run.pay_date,
+          hours: Number(item.hours ?? 0),
+          mealBreakMinutes: 0,
+          tips: Number(item.tips ?? 0),
+          baseWages: Number(item.base_wages ?? 0),
+          guaranteeTopUp: Number(item.guarantee_top_up ?? 0),
+          commission: Number(item.commission ?? 0),
+          deductions: Number(item.deductions ?? 0),
+          totalEarnings: Number(item.payout_amount ?? item.net_pay ?? 0),
+        }])
+      }
+    }
+
+    return detailMap
+  }, [clockRecords, department, employees, eodReports, filteredEmployees, endDate, periodPayrollRuns, schedules, startDate])
 
   const rows = useMemo(() => {
-    if (matchingPayrollRun?.payroll_run_items?.length) {
-      return matchingPayrollRun.payroll_run_items
-        .filter(item => department === 'all' || item.department === department)
-        .map(item => {
+    const savedItems = periodPayrollRuns.flatMap(run => (run.payroll_run_items ?? [])
+      .filter(item => department === 'all' || item.department === department)
+      .map(item => ({ ...item, runId: run.id })))
+    const savedItemsByEmployee = new Map<string, typeof savedItems[number]>()
+    for (const item of savedItems) {
+      const key = item.employee_id ?? item.employee_name
+      const current = savedItemsByEmployee.get(key)
+      if (!current) {
+        savedItemsByEmployee.set(key, { ...item })
+        continue
+      }
+      savedItemsByEmployee.set(key, {
+        ...current,
+        hours: Number(current.hours ?? 0) + Number(item.hours ?? 0),
+        tips: Number(current.tips ?? 0) + Number(item.tips ?? 0),
+        base_wages: Number(current.base_wages ?? 0) + Number(item.base_wages ?? 0),
+        guarantee_top_up: Number(current.guarantee_top_up ?? 0) + Number(item.guarantee_top_up ?? 0),
+        commission: Number(current.commission ?? 0) + Number(item.commission ?? 0),
+        deductions: Number(current.deductions ?? 0) + Number(item.deductions ?? 0),
+        payout_amount: Number(current.payout_amount ?? 0) + Number(item.payout_amount ?? 0),
+        net_pay: Number(current.net_pay ?? 0) + Number(item.net_pay ?? 0),
+      })
+    }
+
+    if (savedItemsByEmployee.size > 0) {
+      return [...savedItemsByEmployee.values()].map(item => {
           const existingEmployee = employees.find(employee => employee.id === item.employee_id)
           const emp: Employee = existingEmployee ?? {
             id: item.employee_id ?? item.id,
@@ -564,7 +608,7 @@ export default function WageReportPage() {
         }
       })
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
-  }, [clockRecords, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, matchingPayrollRun, schedules, startDate])
+  }, [clockRecords, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, periodPayrollRuns, schedules, startDate])
 
   const buildWageReportHtml = (row: WageSummaryRow) => {
     const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
@@ -576,6 +620,7 @@ export default function WageReportPage() {
         <div class="card"><strong>Paid By</strong><div class="metric">${paymentMethodReportLabel(row.paymentMethod)}</div></div>
         <div class="card"><strong>Tips</strong><div class="metric">${formatCurrency(row.tips)}</div></div>
         ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div class="metric">${formatCurrency(row.baseWages)}</div></div>` : ''}
+        ${view === 'earnings' ? `<div class="card"><strong>Commission</strong><div class="metric">${formatCurrency(row.commission)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Deductions</strong><div class="metric">${formatCurrency(row.deductions)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Total Earnings</strong><div class="metric">${formatCurrency(row.totalEarnings)}</div></div>` : ''}
       </div>
@@ -591,7 +636,7 @@ export default function WageReportPage() {
             <th class="right">Hours</th>
             <th class="right">Meal Break</th>
             <th class="right">Tips</th>
-            ${view === 'earnings' ? '<th class="right">Base Wages</th><th class="right">Top-Up</th><th class="right">Total</th>' : ''}
+            ${view === 'earnings' ? '<th class="right">Base Wages</th><th class="right">Top-Up</th><th class="right">Commission</th><th class="right">Total</th>' : ''}
           </tr>
         </thead>
         <tbody>
@@ -601,7 +646,7 @@ export default function WageReportPage() {
               <td class="right">${detail.hours.toFixed(2)}</td>
               <td class="right">${formatMealBreakMinutes(detail.mealBreakMinutes)}</td>
               <td class="right">${formatCurrency(detail.tips)}</td>
-              ${view === 'earnings' ? `<td class="right">${formatCurrency(detail.baseWages)}</td><td class="right">${formatCurrency(detail.guaranteeTopUp)}</td><td class="right">${formatCurrency(detail.totalEarnings)}</td>` : ''}
+              ${view === 'earnings' ? `<td class="right">${formatCurrency(detail.baseWages)}</td><td class="right">${formatCurrency(detail.guaranteeTopUp)}</td><td class="right">${formatCurrency(detail.commission)}</td><td class="right">${formatCurrency(detail.totalEarnings)}</td>` : ''}
             </tr>
           `).join('')}
         </tbody>
@@ -1027,6 +1072,11 @@ export default function WageReportPage() {
                   <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
                 <div className="rounded-2xl border bg-white p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Commission</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.commission)}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
+                </div>
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total Earnings</div>
                   <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.totalEarnings)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">wages + tips + top-up</div>
@@ -1053,6 +1103,7 @@ export default function WageReportPage() {
                         <>
                           <TableHead className="text-right">Base Wages</TableHead>
                           <TableHead className="text-right">Top-Up</TableHead>
+                          <TableHead className="text-right">Commission</TableHead>
                           <TableHead className="text-right">Total</TableHead>
                         </>
                       )}
@@ -1069,6 +1120,7 @@ export default function WageReportPage() {
                           <>
                             <TableCell className="text-right">{formatCurrency(detail.baseWages)}</TableCell>
                             <TableCell className="text-right">{formatCurrency(detail.guaranteeTopUp)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(detail.commission)}</TableCell>
                             <TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell>
                           </>
                         )}

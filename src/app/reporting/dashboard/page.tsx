@@ -556,11 +556,11 @@ export default function ReportingDashboardPage() {
     [cashEntries, previousEndDate, previousStartDate]
   )
   const currentPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate),
+    () => payrollRuns.filter(run => run.start_date >= startDate && run.end_date <= endDate),
     [endDate, payrollRuns, startDate]
   )
   const previousPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate),
+    () => payrollRuns.filter(run => run.start_date >= previousStartDate && run.end_date <= previousEndDate),
     [payrollRuns, previousEndDate, previousStartDate]
   )
   const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
@@ -585,7 +585,7 @@ export default function ReportingDashboardPage() {
       const monthStart = toDateKey(startOfMonth(monthDate))
       const monthEnd = toDateKey(endOfMonth(monthDate))
       const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
-      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd)
+      const monthPayrollRuns = payrollRuns.filter(run => run.start_date >= monthStart && run.end_date <= monthEnd)
       const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
       const monthPayrollSummary = summarizePayrollRuns(monthPayrollRuns)
       const savedPayroll = monthPayrollSummary.totalPayrollOut
@@ -618,6 +618,7 @@ export default function ReportingDashboardPage() {
       manager: 0,
       other: 0,
       tipOut: 0,
+      commission: 0,
       payroll: 0,
       payrollWithTip: 0,
     }
@@ -626,6 +627,7 @@ export default function ReportingDashboardPage() {
       for (const item of run.payroll_run_items ?? []) {
         const payout = Number(item.payout_amount ?? 0)
         const tips = Number(item.tips ?? 0)
+        totals.commission += Number(item.commission ?? 0)
         const wageOnly = Math.max(0, payout - tips)
         totals[getPayrollDepartmentGroup(item.department)] += wageOnly
         totals.tipOut += tips
@@ -798,6 +800,7 @@ export default function ReportingDashboardPage() {
   const payrollRatio = currentTotals.net > 0 ? (currentTotals.payrollOut / currentTotals.net) * 100 : null
   const netSalesWithTips = currentTotals.net + currentTotals.collectedTip
   const totalPayrollRatio = netSalesWithTips > 0 ? (currentTotals.totalPayrollOut / netSalesWithTips) * 100 : null
+  const houseCollectedTip = currentTotals.collectedTip * 0.15
 
   return (
     <div className="p-6">
@@ -953,14 +956,15 @@ export default function ReportingDashboardPage() {
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             {[
+              ['Total Tips Collected (gross)', currentTotals.collectedTip],
+              ['House Tip (15%)', houseCollectedTip],
+              ['Tips Paid Out', currentTotals.tipOut],
               ['Kitchen Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.kitchen : null],
               ['Server Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.server : null],
               ['Manager Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.manager : null],
-              ['Other Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.other : null],
-              ['Tips Paid Out', currentTotals.tipOut],
+              ['Commission Paid', hasCurrentSavedPayroll ? payrollPanel.commission : null],
               ['Payroll (excl. tips)', currentTotals.payrollOut],
               ['Total Payroll (incl. tips)', currentTotals.totalPayrollOut],
-              ['Total Tip Collected', currentTotals.collectedTip],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border bg-white px-3 py-2">
                 <div className="text-[10px] font-medium uppercase text-muted-foreground">{label}</div>
@@ -981,9 +985,9 @@ export default function ReportingDashboardPage() {
             </div>
           </div>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-            <p>Net sales exclude sales tax and collected tips. Payroll / Net Sales excludes tips. Total Payroll (including tips) is divided by net sales plus total tips collected. Tips paid out may differ from tips collected.</p>
+            <p>Tip cards read left to right: gross collected tips → 15% house share → employee tips paid out. Payout timing may differ from the selected business period.</p>
             <p>{hasCurrentSavedPayroll
-              ? 'Saved payroll by pay date. Department amounts, including server payroll, exclude tips and reflect payouts after deductions and rounding.'
+              ? 'Saved payroll by worksheet work period. Department amounts, including server payroll, exclude tips and reflect payouts after deductions and rounding.'
               : 'Estimated payroll from clock hours and hourly wages, plus EOD tip distributions. Save a wage worksheet to see payroll by department.'}</p>
             {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}
             {netSalesWithTips <= 0 && <p>Total Payroll / (Net Sales + Total Tips) is unavailable when net sales plus collected tips are zero or negative.</p>}
