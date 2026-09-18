@@ -203,7 +203,7 @@ function sortPayrollRows(rows: PayrollDraftRow[]) {
   }).map((row, index) => ({ ...row, display_order: index }))
 }
 
-function mergeWorksheetRowsWithClockSource(currentRows: PayrollDraftRow[], sourceRows: PayrollDraftRow[]) {
+function mergeWorksheetRowsWithClockSource(currentRows: PayrollDraftRow[], sourceRows: PayrollDraftRow[], manualEmployeeIds: string[]) {
   const currentByEmployeeId = new Map(currentRows.map(row => [row.employee_id, row]))
   return sourceRows.map(sourceRow => {
     const currentRow = currentByEmployeeId.get(sourceRow.employee_id)
@@ -216,7 +216,10 @@ function mergeWorksheetRowsWithClockSource(currentRows: PayrollDraftRow[], sourc
       memo: currentRow.memo,
     }
     return { ...merged, ...calculatePayrollAmounts(merged) }
-  })
+  }).concat(currentRows.filter(row =>
+    manualEmployeeIds.includes(row.employee_id) &&
+    !sourceRows.some(sourceRow => sourceRow.employee_id === row.employee_id)
+  ))
 }
 
 function arePayrollRowsEqual(leftRows: PayrollDraftRow[], rightRows: PayrollDraftRow[]) {
@@ -450,6 +453,8 @@ export default function WageWorksheetPage() {
   const [memo, setMemo] = useState('')
   const [rows, setRows] = useState<PayrollDraftRow[]>([])
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([])
+  const [allowZeroHours, setAllowZeroHours] = useState(false)
+  const [manualEmployeeIds, setManualEmployeeIds] = useState<string[]>([])
   const [employeeToAdd, setEmployeeToAdd] = useState('')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmStep, setConfirmStep] = useState<'summary' | 'final' | 'done'>('summary')
@@ -604,6 +609,7 @@ export default function WageWorksheetPage() {
 
   const handleDepartmentChange = (value: string) => {
     setDepartment(value)
+    setAllowZeroHours(false)
     setEmployeeToAdd('')
     applyPayrollPeriod(getPayrollCycleForDepartment(value, departmentDefinitions))
   }
@@ -646,7 +652,7 @@ export default function WageWorksheetPage() {
       endDate,
       schedules,
     }).filter(row => row.hours > 0)
-    if (nextRows.length === 0) {
+    if (nextRows.length === 0 && !allowZeroHours) {
       if (existingPayoutRun) {
         setRows(sortPayrollRows((existingPayoutRun.payroll_run_items ?? []).map(payrollItemToDraftRow)))
         setExcludedEmployeeIds([])
@@ -656,15 +662,18 @@ export default function WageWorksheetPage() {
         setMessage('This payroll period is already paid. Viewing only; edit paid payroll from Payroll Payouts.')
         return
       }
-      setMessage('No unpaid hours found for this period.')
+      setMessage('No unpaid hours found for this period. Enable “Continue without recorded hours” to create salary or commission payroll.')
       return
     }
     setRows(sortPayrollRows(nextRows))
+    setManualEmployeeIds([])
     setExcludedEmployeeIds([])
     setWorksheetMode('editable')
     setStep('worksheet')
     window.history.pushState({ wageWorksheetStep: 'worksheet' }, '', window.location.href)
-    setMessage(existingPayoutRun ? 'Already-paid clock records were removed from this worksheet. Only unpaid hours are payable.' : null)
+    setMessage(allowZeroHours
+      ? 'Add employees below. Leave hours at zero and enter salary in Base / Salary or commission in Commission. Already-paid employees must be edited from Payroll Payouts.'
+      : existingPayoutRun ? 'Already-paid clock records were removed from this worksheet. Only unpaid hours are payable.' : null)
   }
 
   useEffect(() => {
@@ -681,10 +690,10 @@ export default function WageWorksheetPage() {
     }).filter(row => row.hours > 0 && !excludedEmployeeIds.includes(row.employee_id))
 
     setRows(currentRows => {
-      const nextRows = sortPayrollRows(mergeWorksheetRowsWithClockSource(currentRows, sourceRows))
+      const nextRows = sortPayrollRows(mergeWorksheetRowsWithClockSource(currentRows, sourceRows, manualEmployeeIds))
       return arePayrollRowsEqual(currentRows, nextRows) ? currentRows : nextRows
     })
-  }, [department, employees, endDate, excludedEmployeeIds, schedules, startDate, step, unpaidClockRecords, unpaidEodReports, worksheetMode])
+  }, [department, employees, endDate, excludedEmployeeIds, manualEmployeeIds, schedules, startDate, step, unpaidClockRecords, unpaidEodReports, worksheetMode])
 
   const updateRow = (employeeId: string, patch: Partial<PayrollDraftRow>) => {
     if (worksheetMode === 'paid_view') return
@@ -964,6 +973,9 @@ export default function WageWorksheetPage() {
       display_order: rows.length,
     }
     setRows(currentRows => sortPayrollRows([...currentRows, rowToAdd]))
+    if (rowToAdd.hours === 0) {
+      setManualEmployeeIds(current => current.includes(employee.id) ? current : [...current, employee.id])
+    }
     setExcludedEmployeeIds(current => current.filter(id => id !== employeeToAdd))
     setEmployeeToAdd('')
   }
@@ -1307,6 +1319,11 @@ export default function WageWorksheetPage() {
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4">
               <div>
                 <p className="text-sm text-muted-foreground">Rows with zero recorded hours are skipped unless added manually.</p>
+                <label className="mt-2 flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={allowZeroHours} onChange={event => setAllowZeroHours(event.target.checked)} />
+                  Continue without recorded hours (salary / commission)
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">Opens the worksheet so you can add employees manually and enter salary or commission with zero hours.</p>
                 {existingPayoutRun && (
                   <p className="mt-1 text-sm font-medium text-red-700">
                     Some staff in this period are already paid. New worksheets only include unpaid staff; edit paid records from Payroll Payouts.
@@ -1454,7 +1471,7 @@ export default function WageWorksheetPage() {
                   <TableHead className="h-9 border-r px-2 py-1 align-middle">Breaktime Review</TableHead>
                   <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Hours</TableHead>
                   <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Tips</TableHead>
-                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Base</TableHead>
+                  <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Base / Salary</TableHead>
                   <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Top-Up</TableHead>
                   <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Commission</TableHead>
                   <TableHead className="h-9 border-r px-2 py-1 text-right align-middle">Deductions</TableHead>
