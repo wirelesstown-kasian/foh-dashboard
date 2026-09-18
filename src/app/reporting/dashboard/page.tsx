@@ -796,7 +796,8 @@ export default function ReportingDashboardPage() {
   ]
   const mixTotal = currentTotals.cash + currentTotals.card + currentTotals.delivery
   const payrollRatio = currentTotals.net > 0 ? (currentTotals.payrollOut / currentTotals.net) * 100 : null
-  const totalPayrollRatio = currentTotals.net > 0 ? (currentTotals.totalPayrollOut / currentTotals.net) * 100 : null
+  const netSalesWithTips = currentTotals.net + currentTotals.collectedTip
+  const totalPayrollRatio = netSalesWithTips > 0 ? (currentTotals.totalPayrollOut / netSalesWithTips) * 100 : null
 
   return (
     <div className="p-6">
@@ -973,18 +974,19 @@ export default function ReportingDashboardPage() {
               <div className="mt-1 text-xs text-slate-300">{formatCurrency(currentTotals.payrollOut)} ÷ {formatCurrency(currentTotals.net)}</div>
             </div>
             <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-blue-950">
-              <div className="text-xs font-medium">Total Payroll / Net Sales</div>
-              <div className="text-xs text-blue-800">Including tips paid out</div>
+              <div className="text-xs font-medium">Total Payroll (including tips) / (Net Sales + Total Tips)</div>
+              <div className="text-xs text-blue-800">Payroll includes tips paid out; sales include tips collected</div>
               <div className="mt-1 text-2xl font-bold">{totalPayrollRatio === null ? '—' : `${totalPayrollRatio.toFixed(1)}%`}</div>
-              <div className="mt-1 text-xs text-blue-800">{formatCurrency(currentTotals.totalPayrollOut)} ÷ {formatCurrency(currentTotals.net)}</div>
+              <div className="mt-1 text-xs text-blue-800">{formatCurrency(currentTotals.totalPayrollOut)} ÷ ({formatCurrency(currentTotals.net)} + {formatCurrency(currentTotals.collectedTip)}) × 100</div>
             </div>
           </div>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-            <p>Net sales exclude sales tax and collected tips. Both percentages use the same net sales; tips are not added to the denominator. Total payroll includes tips paid out, which may differ from tips collected.</p>
+            <p>Net sales exclude sales tax and collected tips. Payroll / Net Sales excludes tips. Total Payroll (including tips) is divided by net sales plus total tips collected. Tips paid out may differ from tips collected.</p>
             <p>{hasCurrentSavedPayroll
               ? 'Saved payroll by pay date. Department amounts, including server payroll, exclude tips and reflect payouts after deductions and rounding.'
               : 'Estimated payroll from clock hours and hourly wages, plus EOD tip distributions. Save a wage worksheet to see payroll by department.'}</p>
-            {currentTotals.net <= 0 && <p>Percentages are unavailable when net sales are zero or negative.</p>}
+            {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}
+            {netSalesWithTips <= 0 && <p>Total Payroll / (Net Sales + Total Tips) is unavailable when net sales plus collected tips are zero or negative.</p>}
           </div>
           <div className="mt-6 rounded-lg border bg-slate-50 p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
