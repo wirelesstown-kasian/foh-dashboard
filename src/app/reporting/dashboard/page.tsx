@@ -795,7 +795,8 @@ export default function ReportingDashboardPage() {
     { key: 'cashFlow' as const, label: 'Cash In / Out', value: currentTotals.cashFlow, previous: previousTotals.cashFlow, points: cashFlowSeries, color: '#0891b2', icon: Banknote },
   ]
   const mixTotal = currentTotals.cash + currentTotals.card + currentTotals.delivery
-  const payrollRatio = currentTotals.net > 0 ? (currentTotals.totalPayrollOut / currentTotals.net) * 100 : null
+  const payrollRatio = currentTotals.net > 0 ? (currentTotals.payrollOut / currentTotals.net) * 100 : null
+  const totalPayrollRatio = currentTotals.net > 0 ? (currentTotals.totalPayrollOut / currentTotals.net) * 100 : null
 
   return (
     <div className="p-6">
@@ -951,24 +952,39 @@ export default function ReportingDashboardPage() {
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             {[
-              ['Kitchen Payroll', payrollPanel.kitchen],
-              ['Server Payroll', payrollPanel.server],
-              ['Manager Payroll', payrollPanel.manager],
-              ['Other Payroll', payrollPanel.other],
-              ['Tip Out', payrollPanel.tipOut],
-              ['Total Payroll', payrollPanel.payroll],
-              ['Total Payroll With Tip', payrollPanel.payrollWithTip],
+              ['Kitchen Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.kitchen : null],
+              ['Server Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.server : null],
+              ['Manager Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.manager : null],
+              ['Other Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.other : null],
+              ['Tips Paid Out', currentTotals.tipOut],
+              ['Payroll (excl. tips)', currentTotals.payrollOut],
+              ['Total Payroll (incl. tips)', currentTotals.totalPayrollOut],
               ['Total Tip Collected', currentTotals.collectedTip],
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border bg-white px-3 py-2">
                 <div className="text-[10px] font-medium uppercase text-muted-foreground">{label}</div>
-                <div className="mt-0.5 text-lg font-bold text-slate-950">{formatCurrency(Number(value))}</div>
+                <div className="mt-0.5 text-lg font-bold text-slate-950">{value === null ? '—' : formatCurrency(Number(value))}</div>
               </div>
             ))}
             <div className="rounded-lg border bg-slate-950 px-3 py-2 text-white">
-              <div className="text-[10px] font-medium uppercase text-slate-300">Payroll / Net %</div>
-              <div className="mt-0.5 text-lg font-bold">{payrollRatio === null ? '-' : `${payrollRatio.toFixed(1)}%`}</div>
+              <div className="text-xs font-medium text-slate-300">Payroll / Net Sales</div>
+              <div className="text-xs text-slate-300">Excluding tips</div>
+              <div className="mt-1 text-2xl font-bold">{payrollRatio === null ? '—' : `${payrollRatio.toFixed(1)}%`}</div>
+              <div className="mt-1 text-xs text-slate-300">{formatCurrency(currentTotals.payrollOut)} ÷ {formatCurrency(currentTotals.net)}</div>
             </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-blue-950">
+              <div className="text-xs font-medium">Total Payroll / Net Sales</div>
+              <div className="text-xs text-blue-800">Including tips paid out</div>
+              <div className="mt-1 text-2xl font-bold">{totalPayrollRatio === null ? '—' : `${totalPayrollRatio.toFixed(1)}%`}</div>
+              <div className="mt-1 text-xs text-blue-800">{formatCurrency(currentTotals.totalPayrollOut)} ÷ {formatCurrency(currentTotals.net)}</div>
+            </div>
+          </div>
+          <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+            <p>Net sales exclude sales tax and collected tips. Both percentages use the same net sales; tips are not added to the denominator. Total payroll includes tips paid out, which may differ from tips collected.</p>
+            <p>{hasCurrentSavedPayroll
+              ? 'Saved payroll by pay date. Department amounts, including server payroll, exclude tips and reflect payouts after deductions and rounding.'
+              : 'Estimated payroll from clock hours and hourly wages, plus EOD tip distributions. Save a wage worksheet to see payroll by department.'}</p>
+            {currentTotals.net <= 0 && <p>Percentages are unavailable when net sales are zero or negative.</p>}
           </div>
           <div className="mt-6 rounded-lg border bg-slate-50 p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
@@ -1000,7 +1016,7 @@ export default function ReportingDashboardPage() {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-xs font-medium uppercase text-muted-foreground">Payroll By Department</p>
-            <h2 className="text-lg font-semibold text-slate-950">{hasCurrentSavedPayroll ? 'Saved payroll payouts' : 'Estimated from approved clock hours'}</h2>
+            <h2 className="text-lg font-semibold text-slate-950">{hasCurrentSavedPayroll ? 'Saved payroll payouts (including tips)' : 'Estimated from approved clock hours'}</h2>
           </div>
           <Badge variant="outline">{hasCurrentSavedPayroll ? 'Worksheet' : 'Estimate'}</Badge>
         </div>
