@@ -1127,10 +1127,10 @@ export default function PayrollPayoutsReportPage() {
                               <Button variant="outline" size="sm" onClick={() => openSummary(run.id)}>Adjust / Reprint</Button>
                             </div>
                             <div className="overflow-x-auto rounded-lg border bg-white">
-                              <Table className="min-w-[940px] text-xs">
+                              <Table className="min-w-[1020px] text-xs">
                                 <TableHeader>
                                   <TableRow className="bg-white hover:bg-white">
-                                    <TableHead>Paid By</TableHead><TableHead>Name</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Payout</TableHead><TableHead>Memo</TableHead>
+                                    <TableHead>Paid By</TableHead><TableHead>Name</TableHead><TableHead>Department</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Payout</TableHead><TableHead>Memo</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1143,6 +1143,7 @@ export default function PayrollPayoutsReportPage() {
                                       <TableCell className="text-right">{formatCurrency(Number(item.tips ?? 0))}</TableCell>
                                       <TableCell className="text-right">{formatCurrency(Number(item.base_wages ?? 0))}</TableCell>
                                       <TableCell className="text-right">{formatCurrency(Number(item.guarantee_top_up ?? 0))}</TableCell>
+                                      <TableCell className="text-right">{formatCurrency(Number(item.commission ?? 0))}</TableCell>
                                       <TableCell className="text-right text-red-700">{formatCurrency(Number(item.deductions ?? 0))}</TableCell>
                                       <TableCell className="text-right font-semibold">{formatCurrency(Number(item.payout_amount ?? 0))}</TableCell>
                                       <TableCell>{item.memo || ''}</TableCell>
