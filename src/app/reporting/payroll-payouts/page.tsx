@@ -17,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getClockWorkDepartment, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
-import { calculatePayrollAmounts, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
+import { calculatePayrollAmounts, formatPayrollPaymentSummary, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
 import { formatCurrency } from '@/lib/reporting'
 import { supabase } from '@/lib/supabase'
 import { calculateTips } from '@/lib/tipCalc'
@@ -122,6 +122,9 @@ function buildSavedPayrollSummary(run: SavedPayrollRun) {
 
 function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollRunItem>, employees: Employee[] = []) {
   const paymentMethod = patch.payment_method ?? item.payment_method
+  const requestedCommissionPaymentMethod = patch.commission_payment_method === undefined
+    ? item.commission_payment_method
+    : patch.commission_payment_method
   const hours = normalizeMoney(patch.hours ?? item.hours)
   const employee = getPayrollItemEmployee({ ...item, ...patch }, employees)
   const hourlyRate = Number(employee?.hourly_wage ?? 0)
@@ -133,15 +136,20 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
   const topUp = patch.guarantee_top_up === undefined && (patch.hours !== undefined || patch.tips !== undefined || patch.base_wages !== undefined)
     ? normalizeMoney(Math.max(0, hours * guaranteedRate - (baseWages + tips)))
     : normalizeMoney(patch.guarantee_top_up ?? item.guarantee_top_up)
+  const commission = normalizeMoney(patch.commission ?? item.commission)
+  const commissionPaymentMethod = commission > 0 && requestedCommissionPaymentMethod !== paymentMethod
+    ? requestedCommissionPaymentMethod
+    : null
   const updated = {
     ...item,
     ...patch,
     payment_method: paymentMethod,
+    commission_payment_method: commissionPaymentMethod === paymentMethod ? null : commissionPaymentMethod,
     hours,
     base_wages: baseWages,
     guarantee_top_up: topUp,
     tips,
-    commission: normalizeMoney(patch.commission ?? item.commission),
+    commission,
     deductions: normalizeMoney(patch.deductions ?? item.deductions),
   }
   return { ...updated, ...calculatePayrollAmounts({
@@ -152,6 +160,7 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
     commission: updated.commission,
     deductions: updated.deductions,
     payment_method: updated.payment_method ?? '',
+    commission_payment_method: updated.commission_payment_method,
   }) }
 }
 
@@ -212,6 +221,9 @@ function getPayrollChangeDetails({
     details.push(`${updatedItem.employee_name}`)
     if ((originalItem.payment_method ?? '') !== (updatedItem.payment_method ?? '')) {
       details.push(`Paid By: ${paymentMethodLabel(originalItem.payment_method)} -> ${paymentMethodLabel(updatedItem.payment_method)}`)
+    }
+    if ((originalItem.commission_payment_method ?? '') !== (updatedItem.commission_payment_method ?? '')) {
+      details.push(`Commission Paid By: ${paymentMethodLabel(originalItem.commission_payment_method ?? originalItem.payment_method)} -> ${paymentMethodLabel(updatedItem.commission_payment_method ?? updatedItem.payment_method)}`)
     }
     if (moneyChanged(originalItem.hours, updatedItem.hours)) {
       details.push(`Hours: ${Number(originalItem.hours ?? 0).toFixed(2)} -> ${Number(updatedItem.hours ?? 0).toFixed(2)}`)
@@ -473,10 +485,10 @@ function printSavedPayroll(run: SavedPayrollRun, items: PayrollRunItem[], clockR
           <div class="card"><div class="muted">Total</div><div class="metric">${formatCurrency(summary.net)}</div></div>
         </div>
         <table><thead><tr><th>Paid By</th><th>Name</th><th class="right">Hours</th><th class="right">Tips</th><th class="right">Commission</th><th class="right">Deductions</th><th class="right">Payout</th><th>Memo</th></tr></thead><tbody>
-          ${items.map(item => `<tr><td>${paymentMethodLabel(item.payment_method)}</td><td>${escapePrintValue(item.employee_name)}</td><td class="right">${Number(item.hours ?? 0).toFixed(2)}</td><td class="right">${formatCurrency(Number(item.tips ?? 0))}</td><td class="right">${formatCurrency(Number(item.commission ?? 0))}</td><td class="right">${formatCurrency(Number(item.deductions ?? 0))}</td><td class="right">${formatCurrency(Number(item.payout_amount ?? 0))}</td><td>${escapePrintValue(item.memo ?? '')}</td></tr>`).join('')}
+          ${items.map(item => `<tr><td>${formatPayrollPaymentSummary(item)}</td><td>${escapePrintValue(item.employee_name)}</td><td class="right">${Number(item.hours ?? 0).toFixed(2)}</td><td class="right">${formatCurrency(Number(item.tips ?? 0))}</td><td class="right">${formatCurrency(Number(item.commission ?? 0))}</td><td class="right">${formatCurrency(Number(item.deductions ?? 0))}</td><td class="right">${formatCurrency(Number(item.payout_amount ?? 0))}</td><td>${escapePrintValue(item.memo ?? '')}</td></tr>`).join('')}
         </tbody></table>
       </section>
-      ${employeePages.map(page => `<section class="page"><div class="employee-header"><div><h2>${escapePrintValue(page.item.employee_name)}</h2><div class="muted">${run.start_date} - ${run.end_date} | Paid by ${paymentMethodLabel(page.item.payment_method)}</div></div><div class="right"><div class="muted">Total Payout</div><div class="metric">${formatCurrency(Number(page.item.payout_amount ?? 0))}</div></div></div><table><thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Meal Break</th><th>Regular Break</th><th class="right">Unpaid Minutes</th><th class="right">Worked Hours</th><th class="right">Daily Payout</th></tr></thead><tbody>${page.records.map(record => {
+      ${employeePages.map(page => `<section class="page"><div class="employee-header"><div><h2>${escapePrintValue(page.item.employee_name)}</h2><div class="muted">${run.start_date} - ${run.end_date} | Paid by ${formatPayrollPaymentSummary(page.item)}</div></div><div class="right"><div class="muted">Total Payout</div><div class="metric">${formatCurrency(Number(page.item.payout_amount ?? 0))}</div></div></div><table><thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Meal Break</th><th>Regular Break</th><th class="right">Unpaid Minutes</th><th class="right">Worked Hours</th><th class="right">Daily Payout</th></tr></thead><tbody>${page.records.map(record => {
         const mealBreak = getMealBreakState(record)
         const regularBreak = getUnpaidBreakState(record)
         const hours = getEffectiveClockHours(record)
@@ -751,6 +763,7 @@ export default function PayrollPayoutsReportPage() {
           moneyChanged(original.deductions, row.deductions) ||
           moneyChanged(original.payout_amount, row.payout_amount) ||
           (original.payment_method ?? '') !== (row.payment_method ?? '') ||
+          (original.commission_payment_method ?? '') !== (row.commission_payment_method ?? '') ||
           (original.memo ?? '') !== (row.memo ?? '')
         if (changed) {
           next[row.id] = {
@@ -762,6 +775,7 @@ export default function PayrollPayoutsReportPage() {
             commission: row.commission,
             deductions: row.deductions,
             payment_method: row.payment_method,
+            commission_payment_method: row.commission_payment_method,
             memo: row.memo,
           }
         }
@@ -879,6 +893,8 @@ export default function PayrollPayoutsReportPage() {
       if (!res.ok) throw new Error(payload.error ?? 'Failed to update payroll payout.')
       const totals = getPayrollTotals(rowsForSave.map(item => ({
         payment_method: item.payment_method ?? '',
+        commission_payment_method: item.commission_payment_method,
+        commission: Number(item.commission ?? 0),
         payout_amount: Number(item.payout_amount ?? 0),
         gross_pay: Number(item.gross_pay ?? 0),
         deductions: Number(item.deductions ?? 0),
@@ -1136,7 +1152,7 @@ export default function PayrollPayoutsReportPage() {
                                 <TableBody>
                                   {items.map(item => (
                                     <TableRow key={item.id}>
-                                      <TableCell>{paymentMethodLabel(item.payment_method)}</TableCell>
+                                      <TableCell>{formatPayrollPaymentSummary(item)}</TableCell>
                                       <TableCell className="font-medium">{item.employee_name}</TableCell>
                                       <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>
                                       <TableCell className="text-right">{Number(item.hours ?? 0).toFixed(2)}</TableCell>
@@ -1229,7 +1245,7 @@ export default function PayrollPayoutsReportPage() {
                           const delta = normalizeMoney(Number(item.payout_amount ?? 0) - Number(original?.payout_amount ?? item.payout_amount ?? 0))
                           return (
                             <TableRow key={item.id}>
-                              <TableCell>{paymentMethodLabel(item.payment_method)}</TableCell>
+                              <TableCell>{formatPayrollPaymentSummary(item)}</TableCell>
                               <TableCell className="font-medium">
                                 <button type="button" className="text-left font-semibold text-blue-700 underline-offset-2 hover:underline" onClick={() => openEmployeeAdjustment(item)}>{item.employee_name}</button>
                                 {item.employee_id && tipImpactEmployeeIds.has(item.employee_id) && <Badge variant="outline" className="ml-2 border-amber-300 bg-amber-50 text-amber-800">Tip Recalculated</Badge>}
@@ -1270,7 +1286,7 @@ export default function PayrollPayoutsReportPage() {
                     </div>
                     {selectedItem.employee_id && tipImpactEmployeeIds.has(selectedItem.employee_id) && <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Tip Recalculated</Badge>}
                   </div>
-                  <div className="grid gap-3 md:grid-cols-5">
+                  <div className="grid gap-3 md:grid-cols-6">
                     <div>
                       <Label>Paid By</Label>
                       <Select value={selectedItem.payment_method ?? undefined} onValueChange={(value: string | null) => value && updateItemEdit(selectedItem, { payment_method: value as PaymentMethod })}>
@@ -1287,6 +1303,19 @@ export default function PayrollPayoutsReportPage() {
                       <Input className="h-9 text-right" type="number" step="0.01" value={Number(selectedItem.commission ?? 0)} onChange={event => updateItemEdit(selectedItem, { commission: normalizeMoney(event.target.value) })} />
                     </div>
                     <div>
+                      <Label>Commission Paid By</Label>
+                      <Select
+                        value={selectedItem.commission_payment_method ?? 'same'}
+                        onValueChange={(value: string | null) => updateItemEdit(selectedItem, {
+                          commission_payment_method: value === 'same' ? null : (value as PaymentMethod),
+                        })}
+                        disabled={Number(selectedItem.commission ?? 0) <= 0}
+                      >
+                        <SelectTrigger className="h-9"><span>{selectedItem.commission_payment_method ? paymentMethodLabel(selectedItem.commission_payment_method) : 'Same as regular'}</span></SelectTrigger>
+                        <SelectContent><SelectItem value="same">Same as regular</SelectItem><SelectItem value="cash">Cash</SelectItem><SelectItem value="check">Check</SelectItem><SelectItem value="ach">ACH</SelectItem></SelectContent>
+                      </Select>
+                    </div>
+                    <div>
                       <Label>Deduction</Label>
                       <Input className="h-9 text-right" type="number" step="0.01" value={Number(selectedItem.deductions ?? 0)} onChange={event => updateItemEdit(selectedItem, { deductions: normalizeMoney(event.target.value) })} />
                     </div>
@@ -1294,7 +1323,10 @@ export default function PayrollPayoutsReportPage() {
                       <Label>Updated Payout</Label>
                       <div className="flex h-9 items-center justify-end rounded-md border bg-slate-50 px-3 text-sm font-bold">{formatCurrency(Number(selectedItem.payout_amount ?? 0))}</div>
                     </div>
-                    <div className="md:col-span-5">
+                    <div className="md:col-span-6 rounded-md border bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-950">
+                      {formatPayrollPaymentSummary(selectedItem)}
+                    </div>
+                    <div className="md:col-span-6">
                       <Label>Employee Memo</Label>
                       <Input className="h-9" value={selectedItem.memo || ''} onChange={event => updateItemEdit(selectedItem, { memo: event.target.value })} />
                     </div>

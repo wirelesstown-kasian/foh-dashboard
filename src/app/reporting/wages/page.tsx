@@ -19,7 +19,7 @@ import { getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleForWork } from '@/lib/tipEligibility'
-import { paymentMethodLabel } from '@/lib/payroll'
+import { getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
 import type { Employee, PaymentMethod, Schedule, ShiftClock } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
@@ -60,6 +60,7 @@ type WageSummaryRow = {
   tipRate: number | null
   effectiveRate: number | null
   paymentMethod: ReportPaymentMethod
+  paymentBreakdown: Record<ReportPaymentMethod, number>
   hasAutoClockOut: boolean
   hasOpenClock: boolean
   hasMissingMealBreak: boolean
@@ -79,8 +80,12 @@ function getReportPaymentMethod(paymentMethod: PaymentMethod | null | undefined)
   return paymentMethod ?? 'unknown'
 }
 
-function paymentMethodReportLabel(paymentMethod: ReportPaymentMethod) {
-  return paymentMethod === 'unknown' ? 'Unknown' : paymentMethodLabel(paymentMethod)
+function formatPaymentBreakdown(breakdown: Record<ReportPaymentMethod, number>) {
+  const parts = (['cash', 'check', 'ach'] as PaymentMethod[])
+    .filter(method => breakdown[method] > 0)
+    .map(method => `${paymentMethodLabel(method)} ${formatCurrency(breakdown[method])}`)
+  if (breakdown.unknown > 0) parts.push(`Unknown ${formatCurrency(breakdown.unknown)}`)
+  return parts.length > 0 ? parts.join(' + ') : 'Unknown'
 }
 
 function formatMealBreakMinutes(minutes: number) {
@@ -505,8 +510,24 @@ export default function WageReportPage() {
       .filter(item => department === 'all' || item.department === department)
       .map(item => ({ ...item, runId: run.id })))
     const savedItemsByEmployee = new Map<string, typeof savedItems[number]>()
+    const paymentBreakdownsByEmployee = new Map<string, Record<ReportPaymentMethod, number>>()
     for (const item of savedItems) {
       const key = item.employee_id ?? item.employee_name
+      const itemBreakdown = item.payment_method
+        ? getPayrollPaymentBreakdown({
+          payment_method: item.payment_method,
+          commission_payment_method: item.commission_payment_method,
+          commission: Number(item.commission ?? 0),
+          net_pay: Number(item.net_pay ?? item.payout_amount ?? 0),
+        })
+        : null
+      const currentBreakdown = paymentBreakdownsByEmployee.get(key) ?? { cash: 0, check: 0, ach: 0, unknown: 0 }
+      paymentBreakdownsByEmployee.set(key, {
+        cash: normalizeMoney(currentBreakdown.cash + Number(itemBreakdown?.cash ?? 0)),
+        check: normalizeMoney(currentBreakdown.check + Number(itemBreakdown?.check ?? 0)),
+        ach: normalizeMoney(currentBreakdown.ach + Number(itemBreakdown?.ach ?? 0)),
+        unknown: normalizeMoney(currentBreakdown.unknown + (itemBreakdown ? 0 : Number(item.payout_amount ?? 0))),
+      })
       const current = savedItemsByEmployee.get(key)
       if (!current) {
         savedItemsByEmployee.set(key, { ...item })
@@ -565,6 +586,7 @@ export default function WageReportPage() {
             tipRate: Number(item.hours ?? 0) > 0 ? Number(item.tips ?? 0) / Number(item.hours ?? 0) : null,
             effectiveRate: Number(item.hours ?? 0) > 0 ? Number(item.payout_amount ?? item.net_pay ?? 0) / Number(item.hours ?? 0) : null,
             paymentMethod: getReportPaymentMethod(item.payment_method),
+            paymentBreakdown: paymentBreakdownsByEmployee.get(item.employee_id ?? item.employee_name) ?? { cash: 0, check: 0, ach: 0, unknown: Number(item.payout_amount ?? 0) },
             hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
             hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
             hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
@@ -602,6 +624,12 @@ export default function WageReportPage() {
           tipRate: hours > 0 ? tips / hours : null,
           effectiveRate: hours > 0 ? totalEarnings / hours : null,
           paymentMethod: getReportPaymentMethod(emp.payment_method),
+          paymentBreakdown: {
+            cash: emp.payment_method === 'cash' ? totalEarnings : 0,
+            check: emp.payment_method === 'check' ? totalEarnings : 0,
+            ach: emp.payment_method === 'ach' ? totalEarnings : 0,
+            unknown: emp.payment_method ? 0 : totalEarnings,
+          },
           hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
           hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
           hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
@@ -617,7 +645,7 @@ export default function WageReportPage() {
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
       <div class="summary">
         <div class="card"><strong>Hours</strong><div class="metric">${row.hours.toFixed(2)} hrs</div></div>
-        <div class="card"><strong>Paid By</strong><div class="metric">${paymentMethodReportLabel(row.paymentMethod)}</div></div>
+        <div class="card"><strong>Paid By</strong><div class="metric">${formatPaymentBreakdown(row.paymentBreakdown)}</div></div>
         <div class="card"><strong>Tips</strong><div class="metric">${formatCurrency(row.tips)}</div></div>
         ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div class="metric">${formatCurrency(row.baseWages)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Commission</strong><div class="metric">${formatCurrency(row.commission)}</div></div>` : ''}
@@ -686,7 +714,10 @@ export default function WageReportPage() {
   )
   const displayedPaymentTotals = useMemo(
     () => displayedRows.reduce<Record<ReportPaymentMethod, number>>((totals, row) => {
-      totals[row.paymentMethod] += row.totalEarnings
+      totals.cash += row.paymentBreakdown.cash
+      totals.check += row.paymentBreakdown.check
+      totals.ach += row.paymentBreakdown.ach
+      totals.unknown += row.paymentBreakdown.unknown
       return totals
     }, { cash: 0, check: 0, ach: 0, unknown: 0 }),
     [displayedRows]
@@ -941,7 +972,7 @@ export default function WageReportPage() {
                   </button>
                 </TableCell>
                 <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
-                <TableCell>{paymentMethodReportLabel(row.paymentMethod)}</TableCell>
+                <TableCell>{formatPaymentBreakdown(row.paymentBreakdown)}</TableCell>
                 <TableCell>
                   {row.hasOpenClock ? (
                     <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge>
