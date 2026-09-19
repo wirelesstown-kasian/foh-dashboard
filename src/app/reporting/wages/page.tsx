@@ -728,6 +728,25 @@ export default function WageReportPage() {
     }, { cash: 0, check: 0, ach: 0, unknown: 0 }),
     [displayedRows]
   )
+  const unpaidTotal = useMemo(() => {
+    const visibleEmployees = employeeFilter === 'all'
+      ? filteredEmployees
+      : filteredEmployees.filter(employee => employee.id === employeeFilter)
+
+    return normalizeMoney(visibleEmployees.reduce((total, employee) => {
+      const employeeRuns = periodPayrollRuns.filter(run =>
+        (run.payroll_run_items ?? []).some(item => item.employee_id === employee.id)
+      )
+      const unpaidEarnings = (detailRowsByEmployeeId.get(employee.id) ?? [])
+        .filter(detail => !employeeRuns.some(run => (
+          (detail.date >= run.start_date && detail.date <= run.end_date) ||
+          detail.date === run.pay_date
+        )))
+        .reduce((sum, detail) => sum + detail.totalEarnings, 0)
+
+      return total + unpaidEarnings
+    }, 0))
+  }, [detailRowsByEmployeeId, employeeFilter, filteredEmployees, periodPayrollRuns])
   const tipSummary = useMemo(() => {
     const totalCollected = eodReports
       .filter(report => report.session_date >= startDate && report.session_date <= endDate)
@@ -970,8 +989,9 @@ export default function WageReportPage() {
             <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(displayedPaymentTotals.ach)}</p>
           </div>
           <div className="rounded-lg border bg-amber-50 p-3">
-            <p className="text-xs font-medium uppercase text-amber-700">Unknown Pay Out</p>
-            <p className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(displayedPaymentTotals.unknown)}</p>
+            <p className="text-xs font-medium uppercase text-amber-700">Unpaid Total</p>
+            <p className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(unpaidTotal)}</p>
+            <p className="mt-0.5 text-[11px] text-amber-700">Calculated wages waiting for a pay date</p>
           </div>
         </div>
         <Table>
