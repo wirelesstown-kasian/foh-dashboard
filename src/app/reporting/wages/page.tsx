@@ -411,6 +411,18 @@ export default function WageReportPage() {
     return run.department === department || run.department === 'all'
   }), [department, endDate, payrollRuns, startDate])
 
+  // Wage records from before the worksheet rollout have no payroll_run to match,
+  // but were already paid through the legacy workflow. Do not count those as unpaid.
+  const legacyWageCutoffDate = useMemo(() => {
+    const firstWorksheetRun = payrollRuns
+      .filter(run => (run.payroll_run_items ?? []).length > 0)
+      .reduce<string | null>((earliest, run) => {
+        if (!earliest || run.start_date < earliest) return run.start_date
+        return earliest
+      }, null)
+    return firstWorksheetRun
+  }, [payrollRuns])
+
   const payoutStatus = useMemo(() => {
     if (matchingPayrollRun) return 'created'
     if (periodPayrollRuns.length > 0) return 'partial'
@@ -738,15 +750,18 @@ export default function WageReportPage() {
         (run.payroll_run_items ?? []).some(item => item.employee_id === employee.id)
       )
       const unpaidEarnings = (detailRowsByEmployeeId.get(employee.id) ?? [])
-        .filter(detail => !employeeRuns.some(run => (
-          (detail.date >= run.start_date && detail.date <= run.end_date) ||
-          detail.date === run.pay_date
-        )))
+        .filter(detail => {
+          if (legacyWageCutoffDate && detail.date < legacyWageCutoffDate) return false
+          return !employeeRuns.some(run => (
+            (detail.date >= run.start_date && detail.date <= run.end_date) ||
+            detail.date === run.pay_date
+          ))
+        })
         .reduce((sum, detail) => sum + detail.totalEarnings, 0)
 
       return total + unpaidEarnings
     }, 0))
-  }, [detailRowsByEmployeeId, employeeFilter, filteredEmployees, periodPayrollRuns])
+  }, [detailRowsByEmployeeId, employeeFilter, filteredEmployees, legacyWageCutoffDate, periodPayrollRuns])
   const tipSummary = useMemo(() => {
     const totalCollected = eodReports
       .filter(report => report.session_date >= startDate && report.session_date <= endDate)
@@ -787,10 +802,17 @@ export default function WageReportPage() {
       })
       .filter(group => group.rows.length > 0)
     const unpaidRows = detailRows.filter(detail => !assignedDates.has(detail.date))
-    return unpaidRows.length > 0
-      ? [{ key: 'unpaid', title: 'Unpaid', subtitle: 'Calculated work not included in a saved payout', paid: false, rows: unpaidRows }, ...paidGroups]
-      : paidGroups
-  }, [detailRows, detailTarget, periodPayrollRuns])
+    const legacyRows = legacyWageCutoffDate
+      ? unpaidRows.filter(detail => detail.date < legacyWageCutoffDate)
+      : []
+    const currentUnpaidRows = unpaidRows.filter(detail => !legacyRows.some(row => row.date === detail.date))
+    const legacyGroup = legacyRows.length > 0
+      ? [{ key: 'legacy-paid', title: 'Legacy paid', subtitle: 'Recorded before payroll worksheet tracking began', paid: true, rows: legacyRows }]
+      : []
+    return currentUnpaidRows.length > 0
+      ? [{ key: 'unpaid', title: 'Unpaid', subtitle: 'Calculated work not included in a saved payout', paid: false, rows: currentUnpaidRows }, ...legacyGroup, ...paidGroups]
+      : [...legacyGroup, ...paidGroups]
+  }, [detailRows, detailTarget, legacyWageCutoffDate, periodPayrollRuns])
   const selectedEmployeeName = employeeFilter === 'all'
     ? 'All Staff'
     : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
