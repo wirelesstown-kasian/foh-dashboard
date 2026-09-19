@@ -406,38 +406,47 @@ export default function WageReportPage() {
   }, [department, endDate, payrollRuns, startDate])
 
   const periodPayrollRuns = useMemo(() => payrollRuns.filter(run => {
-    if (run.start_date < startDate || run.end_date > endDate) return false
+    const periodOverlaps = run.start_date <= endDate && run.end_date >= startDate
+    const payDateInRange = run.pay_date >= startDate && run.pay_date <= endDate
+    if (!periodOverlaps && !payDateInRange) return false
     if (department === 'all') return true
     return run.department === department || run.department === 'all'
   }), [department, endDate, payrollRuns, startDate])
+
+  const todayDate = format(new Date(), 'yyyy-MM-dd')
+  const completedPayrollRuns = useMemo(
+    () => periodPayrollRuns.filter(run => run.pay_date <= todayDate),
+    [periodPayrollRuns, todayDate]
+  )
 
   // Wage records from before the worksheet rollout have no payroll_run to match,
   // but were already paid through the legacy workflow. Do not count those as unpaid.
   const legacyWageCutoffDate = useMemo(() => {
     const firstWorksheetRun = payrollRuns
+      .filter(run => run.pay_date <= todayDate)
       .filter(run => (run.payroll_run_items ?? []).length > 0)
       .reduce<string | null>((earliest, run) => {
         if (!earliest || run.start_date < earliest) return run.start_date
         return earliest
       }, null)
     return firstWorksheetRun
-  }, [payrollRuns])
+  }, [payrollRuns, todayDate])
 
   const payoutStatus = useMemo(() => {
-    if (matchingPayrollRun) return 'created'
-    if (periodPayrollRuns.length > 0) return 'partial'
+    if (matchingPayrollRun && matchingPayrollRun.pay_date <= todayDate) return 'created'
+    if (completedPayrollRuns.length > 0) return 'partial'
     return 'preview'
-  }, [matchingPayrollRun, periodPayrollRuns.length])
+  }, [completedPayrollRuns.length, matchingPayrollRun, todayDate])
 
   const payoutStatusTotals = useMemo(() => {
-    const sourceRuns = matchingPayrollRun ? [matchingPayrollRun] : periodPayrollRuns
+    const sourceRuns = matchingPayrollRun && matchingPayrollRun.pay_date <= todayDate ? [matchingPayrollRun] : completedPayrollRuns
     return sourceRuns.reduce((totals, run) => ({
       cash: totals.cash + Number(run.total_cash ?? 0),
       check: totals.check + Number(run.total_check ?? 0),
       ach: totals.ach + Number(run.total_ach ?? 0),
       net: totals.net + Number(run.total_net ?? 0),
     }), { cash: 0, check: 0, ach: 0, net: 0 })
-  }, [matchingPayrollRun, periodPayrollRuns])
+  }, [completedPayrollRuns, matchingPayrollRun, todayDate])
 
   const detailRowsByEmployeeId = useMemo(() => {
     const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
@@ -499,7 +508,7 @@ export default function WageReportPage() {
       })
     )
 
-    for (const run of periodPayrollRuns) {
+    for (const run of completedPayrollRuns) {
       for (const item of run.payroll_run_items ?? []) {
         if (department !== 'all' && item.department !== department) continue
         if (detailMap.get(item.employee_id ?? '')?.length) continue
@@ -520,10 +529,10 @@ export default function WageReportPage() {
     }
 
     return detailMap
-  }, [clockRecords, department, employees, eodReports, filteredEmployees, endDate, periodPayrollRuns, schedules, startDate])
+  }, [clockRecords, completedPayrollRuns, department, employees, eodReports, filteredEmployees, endDate, schedules, startDate])
 
   const rows = useMemo(() => {
-    const savedItems = periodPayrollRuns.flatMap(run => (run.payroll_run_items ?? [])
+    const savedItems = completedPayrollRuns.flatMap(run => (run.payroll_run_items ?? [])
       .filter(item => department === 'all' || item.department === department)
       .map(item => ({ ...item, runId: run.id })))
     const savedItemsByEmployee = new Map<string, typeof savedItems[number]>()
@@ -654,7 +663,7 @@ export default function WageReportPage() {
         }
       })
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
-  }, [clockRecords, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, periodPayrollRuns, schedules, startDate])
+  }, [clockRecords, completedPayrollRuns, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, schedules, startDate])
 
   const buildWageReportHtml = (row: WageSummaryRow) => {
     const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
@@ -746,7 +755,7 @@ export default function WageReportPage() {
       : filteredEmployees.filter(employee => employee.id === employeeFilter)
 
     return normalizeMoney(visibleEmployees.reduce((total, employee) => {
-      const employeeRuns = periodPayrollRuns.filter(run =>
+        const employeeRuns = completedPayrollRuns.filter(run =>
         (run.payroll_run_items ?? []).some(item => item.employee_id === employee.id)
       )
       const unpaidEarnings = (detailRowsByEmployeeId.get(employee.id) ?? [])
@@ -761,7 +770,7 @@ export default function WageReportPage() {
 
       return total + unpaidEarnings
     }, 0))
-  }, [detailRowsByEmployeeId, employeeFilter, filteredEmployees, legacyWageCutoffDate, periodPayrollRuns])
+  }, [completedPayrollRuns, detailRowsByEmployeeId, employeeFilter, filteredEmployees, legacyWageCutoffDate])
   const tipSummary = useMemo(() => {
     const totalCollected = eodReports
       .filter(report => report.session_date >= startDate && report.session_date <= endDate)
@@ -784,7 +793,7 @@ export default function WageReportPage() {
   const detailPayoutGroups = useMemo(() => {
     if (!detailTarget) return []
     const assignedDates = new Set<string>()
-    const paidGroups = [...periodPayrollRuns]
+    const paidGroups = [...completedPayrollRuns]
       .filter(run => (run.payroll_run_items ?? []).some(item => item.employee_id === detailTarget.emp.id))
       .sort((left, right) => right.pay_date.localeCompare(left.pay_date))
       .map(run => {
@@ -812,7 +821,7 @@ export default function WageReportPage() {
     return currentUnpaidRows.length > 0
       ? [{ key: 'unpaid', title: 'Unpaid', subtitle: 'Calculated work not included in a saved payout', paid: false, rows: currentUnpaidRows }, ...legacyGroup, ...paidGroups]
       : [...legacyGroup, ...paidGroups]
-  }, [detailRows, detailTarget, legacyWageCutoffDate, periodPayrollRuns])
+  }, [completedPayrollRuns, detailRows, detailTarget, legacyWageCutoffDate])
   const selectedEmployeeName = employeeFilter === 'all'
     ? 'All Staff'
     : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
@@ -942,14 +951,16 @@ export default function WageReportPage() {
                       : 'This is calculated from clock records, EOD tips, and staffing settings. No payout has been saved yet.'}
                 </span>
               </div>
-              {matchingPayrollRun ? (
+              {matchingPayrollRun && matchingPayrollRun.pay_date <= todayDate ? (
                 <p className="mt-1 text-xs text-slate-600">
                   Run created {format(new Date(matchingPayrollRun.created_at), 'MMM d, yyyy h:mm a')} · Pay date {matchingPayrollRun.pay_date} · {matchingPayrollRun.department === 'all' ? 'All Staff' : matchingPayrollRun.department}
                 </p>
-              ) : periodPayrollRuns.length > 0 ? (
+              ) : completedPayrollRuns.length > 0 ? (
                 <p className="mt-1 text-xs text-slate-600">
-                  Saved runs in this range: {periodPayrollRuns.map(run => `${run.department} ${formatCurrency(Number(run.total_net ?? 0))}`).join(', ')}
+                  Saved runs in this range: {completedPayrollRuns.map(run => `${run.department} ${formatCurrency(Number(run.total_net ?? 0))}`).join(', ')}
                 </p>
+              ) : periodPayrollRuns.length > 0 ? (
+                <p className="mt-1 text-xs text-slate-600">Payroll runs are pending their pay date. Daily wages remain unpaid until payday.</p>
               ) : (
                 <p className="mt-1 text-xs text-slate-600">Save from Wage Worksheet when payroll is actually paid or ready to record.</p>
               )}

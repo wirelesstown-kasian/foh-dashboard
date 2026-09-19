@@ -627,12 +627,14 @@ export default function ReportingDashboardPage() {
       for (const item of run.payroll_run_items ?? []) {
         const payout = Number(item.payout_amount ?? 0)
         const tips = Number(item.tips ?? 0)
-        totals.commission += Number(item.commission ?? 0)
+        const commission = Number(item.commission ?? 0)
         const wageOnly = Math.max(0, payout - tips)
-        totals[getPayrollDepartmentGroup(item.department)] += wageOnly
+        const departmentWages = Math.max(0, wageOnly - commission)
+        totals.commission += commission
+        totals[getPayrollDepartmentGroup(item.department)] += departmentWages
         totals.tipOut += tips
-        totals.payroll += wageOnly
-        totals.payrollWithTip += payout
+        totals.payroll += departmentWages + commission
+        totals.payrollWithTip += departmentWages + commission + tips
       }
     }
 
@@ -646,8 +648,17 @@ export default function ReportingDashboardPage() {
   }, [currentPayrollRuns, currentReports, estimatedCurrentWageSpend])
 
   const currentTotals = useMemo(
-    () => sumReports(currentReports, currentCashEntries, currentPayrollSummary, estimatedCurrentWageSpend, hasCurrentSavedPayroll),
-    [currentCashEntries, currentPayrollSummary, currentReports, estimatedCurrentWageSpend, hasCurrentSavedPayroll]
+    () => {
+      const totals = sumReports(currentReports, currentCashEntries, currentPayrollSummary, estimatedCurrentWageSpend, hasCurrentSavedPayroll)
+      if (!hasCurrentSavedPayroll) return totals
+      return {
+        ...totals,
+        tipOut: payrollPanel.tipOut,
+        payrollOut: payrollPanel.payroll,
+        totalPayrollOut: payrollPanel.payrollWithTip,
+      }
+    },
+    [currentCashEntries, currentPayrollSummary, currentReports, estimatedCurrentWageSpend, hasCurrentSavedPayroll, payrollPanel]
   )
   const currentGrossRevenue = useMemo(
     () => currentReports.reduce((sum, report) => sum + Number(report.revenue_total ?? 0), 0),

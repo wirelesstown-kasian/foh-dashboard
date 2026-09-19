@@ -35,6 +35,7 @@ import { isTipEligibleForWork } from '@/lib/tipEligibility'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import { CashBalanceEntry, Employee, EodReport, Schedule, ShiftClock } from '@/lib/types'
 import { getCashVariance, getExpectedCashDeposit } from '@/lib/eodVariance'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 
 function isEodCloserRole(role: Employee['role']) {
   return role === 'manager' || role === 'server' || role === 'busser' || role === 'runner'
@@ -173,6 +174,7 @@ export default function EodHistoryPage() {
   const [saveAllRunning, setSaveAllRunning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [cashEntrySaving, setCashEntrySaving] = useState(false)
+  const [cashEntriesExpanded, setCashEntriesExpanded] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
 
@@ -767,9 +769,23 @@ export default function EodHistoryPage() {
           onCustomEndChange={setCustomEnd}
         />
         <div className="mb-5 rounded-2xl border bg-slate-50/70 p-3">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-left hover:bg-white/70"
+            onClick={() => setCashEntriesExpanded(current => !current)}
+            aria-expanded={cashEntriesExpanded}
+          >
+            <span>
+              <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash In / Cash Out</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {cashEntriesExpanded ? 'Hide cash movement details' : `${filteredCashEntries.length} cash movement${filteredCashEntries.length === 1 ? '' : 's'} in this range`}
+              </span>
+            </span>
+            {cashEntriesExpanded ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
+          </button>
+          {cashEntriesExpanded && <div className="mt-3">
           <div className="grid gap-3 xl:grid-cols-[1.55fr_0.45fr]">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash In / Cash Out</div>
               <div className="mt-2 grid gap-2 md:grid-cols-[140px_120px_120px_110px]">
                 <div>
                   <Label className="text-xs text-muted-foreground">Date</Label>
@@ -865,6 +881,7 @@ export default function EodHistoryPage() {
               </TableBody>
             </Table>
           </div>
+          </div>}
         </div>
         <Table>
           <TableHeader>
