@@ -956,19 +956,20 @@ export default function ReportingDashboardPage() {
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             {[
-              ['Total Tips Collected (gross)', currentTotals.collectedTip],
+              ['Total Tips Collected (gross)', currentTotals.collectedTip, `EOD business dates: ${dateLabel}`],
               ['House Tip (15%)', houseCollectedTip],
-              ['Tips Paid Out (by pay date)', currentTotals.tipOut],
+              ['Tips Paid Out (by pay date)', currentTotals.tipOut, `Payroll pay dates: ${dateLabel}`],
               ['Kitchen Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.kitchen : null],
               ['Server Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.server : null],
               ['Manager Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.manager : null],
               ['Commission Paid', hasCurrentSavedPayroll ? payrollPanel.commission : null],
-              ['Payroll (excl. tips)', currentTotals.payrollOut],
+              ['Total Payroll (excl. tips)', currentTotals.payrollOut],
               ['Total Payroll (incl. tips)', currentTotals.totalPayrollOut],
-            ].map(([label, value]) => (
+            ].map(([label, value, note]) => (
               <div key={label} className="rounded-lg border bg-white px-3 py-2">
                 <div className="text-[10px] font-medium uppercase text-muted-foreground">{label}</div>
                 <div className="mt-0.5 text-lg font-bold text-slate-950">{value === null ? '—' : formatCurrency(Number(value))}</div>
+                {note && <div className="mt-0.5 text-[10px] text-muted-foreground">{note}</div>}
               </div>
             ))}
             <div className="rounded-lg border bg-slate-950 px-3 py-2 text-white">
