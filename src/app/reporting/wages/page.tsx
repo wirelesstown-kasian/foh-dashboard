@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
@@ -13,7 +13,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { FileSpreadsheet, Printer } from 'lucide-react'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { clockMatchesWorkDepartment, getClockWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getRoleLabel } from '@/lib/organization'
@@ -81,10 +80,6 @@ function getReportPaymentMethod(paymentMethod: PaymentMethod | null | undefined)
   return paymentMethod ?? 'unknown'
 }
 
-function paymentMethodReportLabel(paymentMethod: ReportPaymentMethod) {
-  return paymentMethod === 'unknown' ? 'Unknown' : paymentMethodLabel(paymentMethod)
-}
-
 function formatPaymentBreakdown(breakdown: Record<ReportPaymentMethod, number>) {
   const parts = (['cash', 'check', 'ach'] as PaymentMethod[])
     .filter(method => breakdown[method] > 0)
@@ -95,20 +90,6 @@ function formatPaymentBreakdown(breakdown: Record<ReportPaymentMethod, number>) 
 
 function formatMealBreakMinutes(minutes: number) {
   return minutes > 0 ? `${minutes}m` : '—'
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function getExportFileName(startDate: string, endDate: string, view: TipReportView) {
-  const datePart = startDate === endDate ? startDate : `${startDate}_to_${endDate}`
-  return `wage-report-${view}-${datePart}`
 }
 
 function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
@@ -295,6 +276,7 @@ export default function WageReportPage() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null)
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
+  const [expandedPayoutEmployeeId, setExpandedPayoutEmployeeId] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
 
   const [startDate, endDate] = useMemo(
@@ -732,6 +714,12 @@ export default function WageReportPage() {
     () => (employeeFilter === 'all' ? rows : rows.filter(row => row.emp.id === employeeFilter)),
     [employeeFilter, rows]
   )
+  const paidEmployeeIds = useMemo(() => new Set(
+    periodPayrollRuns.flatMap(run => (run.payroll_run_items ?? [])
+      .filter(item => Number(item.payout_amount ?? 0) > 0 || Number(item.net_pay ?? 0) > 0)
+      .map(item => item.employee_id)
+      .filter((id): id is string => Boolean(id)))
+  ), [periodPayrollRuns])
   const displayedPaymentTotals = useMemo(
     () => displayedRows.reduce<Record<ReportPaymentMethod, number>>((totals, row) => {
       totals.cash += row.paymentBreakdown.cash
@@ -761,137 +749,6 @@ export default function WageReportPage() {
   const selectedEmployeeName = employeeFilter === 'all'
     ? 'All Staff'
     : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
-
-  const summaryTotals = useMemo(() => {
-    const hours = displayedRows.reduce((sum, row) => sum + row.hours, 0)
-    const mealBreakMinutes = displayedRows.reduce((sum, row) => sum + row.mealBreakMinutes, 0)
-    const tips = displayedRows.reduce((sum, row) => sum + row.tips, 0)
-    const baseWages = displayedRows.reduce((sum, row) => sum + row.baseWages, 0)
-    const guaranteeTopUp = displayedRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0)
-    const commission = displayedRows.reduce((sum, row) => sum + row.commission, 0)
-    const deductions = displayedRows.reduce((sum, row) => sum + row.deductions, 0)
-    const totalEarnings = displayedRows.reduce((sum, row) => sum + row.totalEarnings, 0)
-
-    return {
-      hours,
-      mealBreakMinutes,
-      tips,
-      baseWages,
-      guaranteeTopUp,
-      commission,
-      deductions,
-      totalEarnings,
-      tipRate: hours > 0 ? tips / hours : null,
-    }
-  }, [displayedRows])
-
-  const buildWageSummaryReportHtml = () => `
-    <h1>Wage Report</h1>
-    <p class="muted">${escapeHtml(selectedEmployeeName)} | ${startDate === endDate ? startDate : `${startDate} - ${endDate}`} | ${view === 'earnings' ? 'Earnings' : 'Tip Only'}</p>
-    <div class="summary">
-      <div class="card"><strong>Hours</strong><div class="metric">${summaryTotals.hours.toFixed(2)} hrs</div></div>
-      <div class="card"><strong>Meal Break</strong><div class="metric">${formatMealBreakMinutes(summaryTotals.mealBreakMinutes)}</div></div>
-      <div class="card"><strong>Tips</strong><div class="metric">${formatCurrency(summaryTotals.tips)}</div></div>
-      <div class="card"><strong>Total Earnings</strong><div class="metric">${formatCurrency(summaryTotals.totalEarnings)}</div></div>
-    </div>
-    <table class="compact-table">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Role</th>
-          <th>Paid By</th>
-          <th class="right">Hours</th>
-          <th class="right">Meal Break</th>
-          <th class="right">Tips</th>
-          <th class="right">Tips / Hr</th>
-          <th class="right">Tip Cap</th>
-          ${view === 'earnings' ? '<th class="right">Base Wages</th><th class="right">Top-Up</th><th class="right">Commission</th><th class="right">Deductions</th><th class="right">Total Earnings</th>' : ''}
-        </tr>
-      </thead>
-      <tbody>
-        ${displayedRows.map(row => `
-          <tr>
-            <td>${escapeHtml(row.emp.name)}</td>
-            <td>${escapeHtml(getRoleLabel(row.emp.role, roleDefinitions))}</td>
-            <td>${escapeHtml(paymentMethodReportLabel(row.paymentMethod))}</td>
-            <td class="right">${row.hours.toFixed(2)}h</td>
-            <td class="right">${formatMealBreakMinutes(row.mealBreakMinutes)}</td>
-            <td class="right">${formatCurrency(row.tips)}</td>
-            <td class="right">${row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</td>
-            <td class="right">${row.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(row.emp.tip_pool_hourly_rate))}/hr` : '—'}</td>
-            ${view === 'earnings' ? `<td class="right">${formatCurrency(row.baseWages)}</td><td class="right">${formatCurrency(row.guaranteeTopUp)}</td><td class="right">${formatCurrency(row.commission)}</td><td class="right">${formatCurrency(row.deductions)}</td><td class="right">${formatCurrency(row.totalEarnings)}</td>` : ''}
-          </tr>
-        `).join('')}
-        <tr>
-          <td colspan="3"><strong>Period Total</strong></td>
-          <td class="right"><strong>${summaryTotals.hours.toFixed(2)}h</strong></td>
-          <td class="right"><strong>${formatMealBreakMinutes(summaryTotals.mealBreakMinutes)}</strong></td>
-          <td class="right"><strong>${formatCurrency(summaryTotals.tips)}</strong></td>
-          <td class="right"><strong>${summaryTotals.tipRate !== null ? formatCurrency(summaryTotals.tipRate) : '—'}</strong></td>
-          <td></td>
-          ${view === 'earnings' ? `<td class="right"><strong>${formatCurrency(summaryTotals.baseWages)}</strong></td><td class="right"><strong>${formatCurrency(summaryTotals.guaranteeTopUp)}</strong></td><td class="right"><strong>${formatCurrency(summaryTotals.commission)}</strong></td><td class="right"><strong>${formatCurrency(summaryTotals.deductions)}</strong></td><td class="right"><strong>${formatCurrency(summaryTotals.totalEarnings)}</strong></td>` : ''}
-        </tr>
-      </tbody>
-    </table>
-  `
-
-  const handlePdfExport = () => {
-    exportReportToPdf('Wage Report', buildWageSummaryReportHtml())
-  }
-
-  const handleExcelExport = async () => {
-    const XLSX = await import('xlsx')
-    const summaryRows = displayedRows.map(row => ({
-      Name: row.emp.name,
-      Role: getRoleLabel(row.emp.role, roleDefinitions),
-      'Paid By': paymentMethodReportLabel(row.paymentMethod),
-      'Clock Status': row.hasOpenClock ? 'Clock Out Needed' : row.hasAutoClockOut ? 'Auto Clock-Out' : 'Verified',
-      Hours: Number(row.hours.toFixed(2)),
-      'Meal Break': formatMealBreakMinutes(row.mealBreakMinutes),
-      Tips: Number(row.tips.toFixed(2)),
-      'Tips / Hr': row.tipRate !== null ? Number(row.tipRate.toFixed(2)) : '',
-      'Tip Cap': row.emp.tip_pool_hourly_rate !== null ? Number(row.emp.tip_pool_hourly_rate) : '',
-      'Base Wages': Number(row.baseWages.toFixed(2)),
-      'Guaranteed Top-Up': Number(row.guaranteeTopUp.toFixed(2)),
-      Commission: Number(row.commission.toFixed(2)),
-      Deductions: Number(row.deductions.toFixed(2)),
-      'Total Earnings': Number(row.totalEarnings.toFixed(2)),
-    }))
-    summaryRows.push({
-      Name: 'Period Total',
-      Role: '',
-      'Paid By': '',
-      'Clock Status': '',
-      Hours: Number(summaryTotals.hours.toFixed(2)),
-      'Meal Break': formatMealBreakMinutes(summaryTotals.mealBreakMinutes),
-      Tips: Number(summaryTotals.tips.toFixed(2)),
-      'Tips / Hr': summaryTotals.tipRate !== null ? Number(summaryTotals.tipRate.toFixed(2)) : '',
-      'Tip Cap': '',
-      'Base Wages': Number(summaryTotals.baseWages.toFixed(2)),
-      'Guaranteed Top-Up': Number(summaryTotals.guaranteeTopUp.toFixed(2)),
-      Commission: Number(summaryTotals.commission.toFixed(2)),
-      Deductions: Number(summaryTotals.deductions.toFixed(2)),
-      'Total Earnings': Number(summaryTotals.totalEarnings.toFixed(2)),
-    })
-
-    const detailRows = displayedRows.flatMap(row => (detailRowsByEmployeeId.get(row.emp.id) ?? []).map(detail => ({
-      Name: row.emp.name,
-      Date: detail.date,
-      Hours: Number(detail.hours.toFixed(2)),
-      'Meal Break': formatMealBreakMinutes(detail.mealBreakMinutes),
-      Tips: Number(detail.tips.toFixed(2)),
-      'Base Wages': Number(detail.baseWages.toFixed(2)),
-      'Guaranteed Top-Up': Number(detail.guaranteeTopUp.toFixed(2)),
-      Commission: Number(detail.commission.toFixed(2)),
-      Deductions: Number(detail.deductions.toFixed(2)),
-      Total: Number(detail.totalEarnings.toFixed(2)),
-    })))
-
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Wage Summary')
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(detailRows), 'Daily Detail')
-    XLSX.writeFile(workbook, `${getExportFileName(startDate, endDate, view)}.xlsx`)
-  }
 
   const handleRefresh = async () => {
     setRefreshing(true)
@@ -983,14 +840,6 @@ export default function WageReportPage() {
               <Button variant="outline" size="sm" onClick={handleSheetSync} disabled={sheetSyncing}>
                 {sheetSyncing ? 'Syncing Sheet...' : 'Sync Sheet'}
               </Button>
-              <Button variant="outline" size="sm" onClick={handlePdfExport}>
-                <Printer />
-                Print / PDF
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleExcelExport()}>
-                <FileSpreadsheet />
-                Excel
-              </Button>
               <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
                 {refreshing ? 'Refreshing…' : 'Refresh'}
               </Button>
@@ -1062,151 +911,104 @@ export default function WageReportPage() {
         <div className="mb-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border bg-emerald-50 p-3">
             <p className="text-xs font-medium uppercase text-emerald-700">Total Tip Collected</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-emerald-950">{formatCurrency(tipSummary.totalCollected)}</p>
+            <p className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(tipSummary.totalCollected)}</p>
             <p className="mt-0.5 text-[11px] text-emerald-700">EOD total tips in range</p>
           </div>
           <div className="rounded-lg border bg-slate-50 p-3">
             <p className="text-xs font-medium uppercase text-slate-500">15% House Tip</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-slate-950">{formatCurrency(tipSummary.houseTip)}</p>
+            <p className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(tipSummary.houseTip)}</p>
             <p className="mt-0.5 text-[11px] text-slate-500">House share from collected tips</p>
           </div>
           <div className="rounded-lg border bg-blue-50 p-3">
             <p className="text-xs font-medium uppercase text-blue-700">Total Tip Out</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-blue-950">{formatCurrency(tipSummary.totalTipOut)}</p>
+            <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(tipSummary.totalTipOut)}</p>
             <p className="mt-0.5 text-[11px] text-blue-700">Displayed wage rows</p>
           </div>
           <div className="rounded-lg border bg-violet-50 p-3">
             <p className="text-xs font-medium uppercase text-violet-700">Distribution Summary</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-violet-950">{formatCurrency(tipSummary.distributionTotal)}</p>
+            <p className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(tipSummary.distributionTotal)}</p>
             <p className="mt-0.5 text-[11px] text-violet-700">House + tip out</p>
           </div>
         </div>
         <div className="mb-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border bg-emerald-50 p-3">
             <p className="text-xs font-medium uppercase text-emerald-700">Cash Pay Out</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-emerald-950">{formatCurrency(displayedPaymentTotals.cash)}</p>
+            <p className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(displayedPaymentTotals.cash)}</p>
           </div>
           <div className="rounded-lg border bg-slate-50 p-3">
             <p className="text-xs font-medium uppercase text-slate-500">Check Pay Out</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-slate-950">{formatCurrency(displayedPaymentTotals.check)}</p>
+            <p className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(displayedPaymentTotals.check)}</p>
           </div>
           <div className="rounded-lg border bg-blue-50 p-3">
             <p className="text-xs font-medium uppercase text-blue-700">ACH Pay Out</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-blue-950">{formatCurrency(displayedPaymentTotals.ach)}</p>
+            <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(displayedPaymentTotals.ach)}</p>
           </div>
           <div className="rounded-lg border bg-amber-50 p-3">
             <p className="text-xs font-medium uppercase text-amber-700">Unknown Pay Out</p>
-            <p className="mt-1 break-words text-xl font-bold leading-tight text-amber-950">{formatCurrency(displayedPaymentTotals.unknown)}</p>
+            <p className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(displayedPaymentTotals.unknown)}</p>
           </div>
         </div>
-        <div className="-mx-5 overflow-x-auto px-5 pb-2">
-        <Table className={view === 'earnings' ? 'min-w-[1320px]' : 'min-w-[960px]'}>
+        <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-40">Name</TableHead>
-              <TableHead className="min-w-28">Role</TableHead>
-              <TableHead className="min-w-24">Paid By</TableHead>
-              <TableHead className="min-w-36">Clock Status</TableHead>
-              <TableHead className="min-w-24 text-right">Hours</TableHead>
-              <TableHead className="min-w-28 text-right">Meal Break</TableHead>
-              <TableHead className="min-w-28 text-right">Tips</TableHead>
-              <TableHead className="min-w-28 text-right">Tips / Hr</TableHead>
-              <TableHead className="min-w-28 text-right">Tip Cap</TableHead>
-              {view === 'earnings' && (
-                <>
-                  <TableHead className="min-w-32 text-right">Base Wages</TableHead>
-                  <TableHead className="min-w-40 text-right">Guaranteed Top-Up</TableHead>
-                  <TableHead className="min-w-32 text-right">Commission</TableHead>
-                  <TableHead className="min-w-32 text-right">Deductions</TableHead>
-                  <TableHead className="min-w-36 text-right">Total Earnings</TableHead>
-                </>
-              )}
+              <TableHead>Name</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Payout Summary</TableHead>
+              <TableHead>Clock Status</TableHead>
+              <TableHead className="text-right">Hours</TableHead>
+              <TableHead className="text-right">Tips</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {displayedRows.map(row => (
-              <TableRow key={row.emp.id}>
-                <TableCell>
-                  <button className="font-medium hover:underline" onClick={() => setDetailEmployeeId(row.emp.id)}>
-                    {row.emp.name}
-                  </button>
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
-                <TableCell className="whitespace-nowrap">{formatPaymentBreakdown(row.paymentBreakdown)}</TableCell>
-                <TableCell>
-                  {row.hasOpenClock ? (
-                    <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge>
-                  ) : row.hasAutoClockOut ? (
-                    <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge>
-                  ) : (
-                    <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>
+            {displayedRows.map(row => {
+              const isPaid = paidEmployeeIds.has(row.emp.id)
+              const expanded = expandedPayoutEmployeeId === row.emp.id
+              const rowDetails = detailRowsByEmployeeId.get(row.emp.id) ?? []
+              return (
+                <Fragment key={row.emp.id}>
+                  <TableRow>
+                    <TableCell className="font-medium">{row.emp.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
+                    <TableCell>
+                      <button type="button" className="rounded-md text-left hover:bg-slate-50" onClick={() => setExpandedPayoutEmployeeId(expanded ? null : row.emp.id)}>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={isPaid ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>{isPaid ? 'Paid' : 'Unpaid'}</Badge>
+                          <span className="font-semibold">{formatCurrency(row.totalEarnings)}</span>
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">{formatPaymentBreakdown(row.paymentBreakdown)} · {expanded ? 'Hide details' : 'View details'}</div>
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      {row.hasOpenClock ? <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge> : row.hasAutoClockOut ? <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge> : <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>}
+                    </TableCell>
+                    <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell>
+                    <TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
+                  </TableRow>
+                  {expanded && (
+                    <TableRow className="bg-slate-50/70">
+                      <TableCell colSpan={6} className="p-4">
+                        <div className="space-y-3">
+                          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                            <div><div className="text-xs text-muted-foreground">Regular wages</div><div className="font-semibold">{formatCurrency(row.baseWages)}</div></div>
+                            <div><div className="text-xs text-muted-foreground">Guaranteed top-up</div><div className="font-semibold">{formatCurrency(row.guaranteeTopUp)}</div></div>
+                            <div><div className="text-xs text-muted-foreground">Commission</div><div className="font-semibold">{formatCurrency(row.commission)}</div></div>
+                            <div><div className="text-xs text-muted-foreground">Deductions</div><div className="font-semibold text-red-700">-{formatCurrency(row.deductions)}</div></div>
+                            <div><div className="text-xs text-muted-foreground">Tips / hour</div><div className="font-semibold">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</div></div>
+                            <div><div className="text-xs text-muted-foreground">Payment method</div><div className="font-semibold">{formatPaymentBreakdown(row.paymentBreakdown)}</div></div>
+                          </div>
+                          {rowDetails.length > 0 && <div className="overflow-x-auto rounded-md border bg-white"><Table className="text-xs"><TableHeader><TableRow><TableHead>Date</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader><TableBody>{rowDetails.map(detail => <TableRow key={detail.date}><TableCell>{detail.date}</TableCell><TableCell className="text-right">{detail.hours.toFixed(2)}</TableCell><TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell></TableRow>)}</TableBody></Table></div>}
+                          <Button variant="outline" size="sm" onClick={() => setDetailEmployeeId(row.emp.id)}>Open full wage detail</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   )}
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-right">
-                  <span className="inline-flex items-center justify-end gap-1.5">
-                    {row.hours.toFixed(2)}h
-                    {row.hasMissingMealBreak && (
-                      <span
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold leading-none text-white"
-                        title="Break audit needed"
-                        aria-label="Break audit needed"
-                      >
-                        !
-                      </span>
-                    )}
-                  </span>
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-right text-muted-foreground">{formatMealBreakMinutes(row.mealBreakMinutes)}</TableCell>
-                <TableCell className="whitespace-nowrap text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
-                <TableCell className="whitespace-nowrap text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
-                <TableCell className="whitespace-nowrap text-right text-muted-foreground">
-                  {row.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(row.emp.tip_pool_hourly_rate))}/hr` : '—'}
-                </TableCell>
-                {view === 'earnings' && (
-                  <>
-                    <TableCell className="whitespace-nowrap text-right">{formatCurrency(row.baseWages)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right text-violet-700">{formatCurrency(row.guaranteeTopUp)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right">{formatCurrency(row.commission)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right text-red-700">{formatCurrency(row.deductions)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-bold">{formatCurrency(row.totalEarnings)}</TableCell>
-                  </>
-                )}
-              </TableRow>
-            ))}
-            {displayedRows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={view === 'earnings' ? 14 : 9} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell>
-              </TableRow>
-            )}
+                </Fragment>
+              )
+            })}
+            {displayedRows.length === 0 && <TableRow><TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell></TableRow>}
           </TableBody>
-          {displayedRows.length > 0 && (
-            <tfoot>
-              <TableRow>
-                <TableCell className="font-semibold">Period Total</TableCell>
-                <TableCell />
-                <TableCell />
-                <TableCell />
-                <TableCell className="whitespace-nowrap text-right font-semibold">{summaryTotals.hours.toFixed(2)}h</TableCell>
-                <TableCell className="whitespace-nowrap text-right font-semibold">{formatMealBreakMinutes(summaryTotals.mealBreakMinutes)}</TableCell>
-                <TableCell className="whitespace-nowrap text-right font-semibold">{formatCurrency(summaryTotals.tips)}</TableCell>
-                <TableCell className="whitespace-nowrap text-right">
-                  {summaryTotals.tipRate !== null ? formatCurrency(summaryTotals.tipRate) : '—'}
-                </TableCell>
-                <TableCell />
-                {view === 'earnings' && (
-                  <>
-                    <TableCell className="whitespace-nowrap text-right font-semibold">{formatCurrency(summaryTotals.baseWages)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-semibold text-violet-700">{formatCurrency(summaryTotals.guaranteeTopUp)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-semibold">{formatCurrency(summaryTotals.commission)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-semibold text-red-700">{formatCurrency(summaryTotals.deductions)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-bold">{formatCurrency(summaryTotals.totalEarnings)}</TableCell>
-                  </>
-                )}
-              </TableRow>
-            </tfoot>
-          )}
+          {displayedRows.length > 0 && <tfoot><TableRow><TableCell className="font-semibold">Period Total</TableCell><TableCell /><TableCell className="text-right font-bold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.totalEarnings, 0))}</TableCell><TableCell /><TableCell className="text-right font-semibold">{displayedRows.reduce((sum, row) => sum + row.hours, 0).toFixed(2)}h</TableCell><TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.tips, 0))}</TableCell></TableRow></tfoot>}
         </Table>
-        </div>
       </div>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
@@ -1219,54 +1021,54 @@ export default function WageReportPage() {
             return (
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Performance Score</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{perf?.score ?? '—'}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf?.score ?? '—'}</div>
                   <div className="mt-0.5 text-xs text-slate-400">monthly weighted KPI</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Overall Rank</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{perf ? `#${perf.overallRank}` : '—'}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf ? `#${perf.overallRank}` : '—'}</div>
                   <div className="mt-0.5 text-xs text-slate-400">{perf ? `of ${perf.staffCount} staff` : 'no data'}</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips / Hr</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
                   <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tip Cap</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{detailTarget.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(detailTarget.emp.tip_pool_hourly_rate))}/hr` : '—'}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(detailTarget.emp.tip_pool_hourly_rate))}/hr` : '—'}</div>
                   <div className="mt-0.5 text-xs text-slate-400">maximum tips / hr</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
                   <div className="mt-0.5 text-xs text-slate-400">total earnings / hr</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Hours Worked</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{detailTarget.hours.toFixed(2)}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.hours.toFixed(2)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">hrs this period</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{formatCurrency(detailTarget.tips)}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.tips)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Base Wages</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{formatCurrency(detailTarget.baseWages)}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.baseWages)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Commission</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{formatCurrency(detailTarget.commission)}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.commission)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
-                <div className="min-w-0 rounded-lg border bg-white p-4">
+                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total Earnings</div>
-                  <div className="mt-2 break-words text-2xl font-bold leading-tight text-slate-700">{formatCurrency(detailTarget.totalEarnings)}</div>
+                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.totalEarnings)}</div>
                   <div className="mt-0.5 text-xs text-slate-400">wages + tips + top-up</div>
                 </div>
               </div>
