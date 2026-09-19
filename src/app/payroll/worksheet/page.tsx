@@ -1081,8 +1081,9 @@ export default function WageWorksheetPage() {
 
     const departmentLabel = departmentOptions.find(option => option.key === department)?.label ?? department
     const cashPaidDetails = rows
-      .filter(row => row.payment_method === 'cash' && row.payout_amount > 0)
-      .map(row => `${row.employee_name} ${formatCurrency(row.payout_amount)}`)
+      .map(row => ({ row, cash: getPayrollPaymentBreakdown(row).cash }))
+      .filter(({ cash }) => cash > 0)
+      .map(({ row, cash }) => `${row.employee_name} ${formatCurrency(cash)}`)
       .join(', ')
     const description = [
       `Wage Worksheet cash payout - ${departmentLabel}`,
@@ -1549,26 +1550,23 @@ export default function WageWorksheetPage() {
                   return (
                   <TableRow key={row.employee_id} className="border-b">
                     <TableCell className="border-r p-1 align-middle">
-                      <Select value={row.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(row.employee_id, { payment_method: value as PaymentMethod })} disabled={worksheetMode === 'paid_view'}>
+                      <Select value={row.payment_method || undefined} onValueChange={(value: string | null) => {
+                        if (!value) return
+                        if (value === 'split') openSplitPayment(row)
+                        else updateRow(row.employee_id, { payment_method: value as PaymentMethod })
+                      }} disabled={worksheetMode === 'paid_view'}>
                         <SelectTrigger className="h-8 w-full"><span>{paymentMethodLabel(row.payment_method)}</span></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="cash">Cash</SelectItem>
                           <SelectItem value="check">Check</SelectItem>
                           <SelectItem value="ach">ACH</SelectItem>
+                          <SelectItem value="split">Split payment…</SelectItem>
                         </SelectContent>
                       </Select>
                       {hasSplitPayment && (
                         <div className="mt-1 text-[10px] leading-tight text-blue-700">{formatPayrollPaymentSummary(row)}</div>
                       )}
-                      {worksheetMode !== 'paid_view' && row.payment_method && (
-                        <button
-                          type="button"
-                          className="mt-1 text-left text-[10px] font-medium text-blue-700 hover:underline"
-                          onClick={() => openSplitPayment(row)}
-                        >
-                          {hasSplitPayment ? 'Edit split payment' : 'Split payment'}
-                        </button>
-                      )}
+                      {hasSplitPayment && <div className="mt-1 text-[10px] leading-tight text-blue-700">Split allocation active</div>}
                     </TableCell>
                     <TableCell className="border-r px-2 py-1 align-middle font-medium">{row.employee_name}</TableCell>
                     <TableCell className="border-r p-1 align-middle">
@@ -1656,9 +1654,16 @@ export default function WageWorksheetPage() {
             const allocations = splitPaymentRow.payment_allocations ?? getSuggestedPaymentAllocations(splitPaymentRow)
             const allocationTotal = normalizeMoney(Number(allocations.cash ?? 0) + Number(allocations.check ?? 0) + Number(allocations.ach ?? 0))
             const allocationDifference = normalizeMoney(splitPaymentRow.net_pay - allocationTotal)
-            const updateAllocation = (method: PaymentMethod, value: string) => updateRow(splitPaymentRow.employee_id, {
-              payment_allocations: { ...allocations, [method]: normalizeMoney(value) },
-            })
+            const updateAllocation = (method: PaymentMethod, value: string) => {
+              const otherAllocations = (['cash', 'check', 'ach'] as PaymentMethod[])
+                .filter(otherMethod => otherMethod !== method)
+                .reduce((sum, otherMethod) => sum + Number(allocations[otherMethod] ?? 0), 0)
+              const maximum = Math.max(0, splitPaymentRow.net_pay - otherAllocations)
+              const nextValue = Math.min(maximum, Math.max(0, normalizeMoney(value)))
+              updateRow(splitPaymentRow.employee_id, {
+                payment_allocations: { ...allocations, [method]: nextValue },
+              })
+            }
             return (
               <div className="space-y-4">
                 <div className="rounded-lg border bg-slate-50 p-3">
@@ -1689,7 +1694,7 @@ export default function WageWorksheetPage() {
                     {(['cash', 'check', 'ach'] as PaymentMethod[]).map(method => (
                       <div key={method}>
                         <Label>{paymentMethodLabel(method)}</Label>
-                        <Input className="mt-1 h-10 text-right" type="number" min="0" step="0.01" value={Number(allocations[method] ?? 0)} onChange={event => updateAllocation(method, event.target.value)} />
+                        <Input className="mt-1 h-10 text-right" type="number" min="0" max={Number(allocations[method] ?? 0) + Math.max(0, allocationDifference)} step="0.01" value={Number(allocations[method] ?? 0)} onChange={event => updateAllocation(method, event.target.value)} />
                       </div>
                     ))}
                   </div>

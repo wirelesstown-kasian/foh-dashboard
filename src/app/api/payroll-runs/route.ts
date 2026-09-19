@@ -71,6 +71,16 @@ function isPaymentMethod(value: unknown): value is PaymentMethod {
   return value === 'cash' || value === 'check' || value === 'ach'
 }
 
+function getPaymentAllocationError(row: NonNullable<PayrollRunPayload['rows']>[number], netPay: number) {
+  const allocations = row.payment_allocations
+  if (!allocations) return null
+  const values = (['cash', 'check', 'ach'] as PaymentMethod[]).map(method => Number(allocations[method] ?? 0))
+  if (values.some(value => !Number.isFinite(value) || value < 0)) return `Payment allocations for ${row.employee_name || 'an employee'} must be zero or greater.`
+  const total = normalizeMoney(values.reduce((sum, value) => sum + value, 0))
+  if (total > normalizeMoney(netPay)) return `Payment allocations for ${row.employee_name || 'an employee'} cannot exceed calculated net payroll of $${normalizeMoney(netPay).toFixed(2)}.`
+  return null
+}
+
 function dateRangesOverlap(leftStart: string, leftEnd: string, rightStart: string, rightEnd: string) {
   return leftStart <= rightEnd && rightStart <= leftEnd
 }
@@ -202,6 +212,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Select a payment method for the balance or credit adjustment.' }, { status: 400 })
     }
     const calculatedRows = rows.map(calculatePayrollRow)
+    const allocationError = calculatedRows.map((row, index) => getPaymentAllocationError(rows[index], row.net_pay)).find(Boolean)
+    if (allocationError) return NextResponse.json({ error: allocationError }, { status: 400 })
     const calculatedTotals = getPayrollTotals(calculatedRows)
 
     const existingRunResult = await supabaseAdmin
@@ -319,6 +331,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Select a payment method for the balance or credit adjustment.' }, { status: 400 })
     }
     const calculatedRows = rows.map(calculatePayrollRow)
+    const allocationError = calculatedRows.map((row, index) => getPaymentAllocationError(rows[index], row.net_pay)).find(Boolean)
+    if (allocationError) return NextResponse.json({ error: allocationError }, { status: 400 })
 
     const { data: existingRun, error: existingRunError } = await supabaseAdmin
       .from('payroll_runs')
