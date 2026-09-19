@@ -556,11 +556,11 @@ export default function ReportingDashboardPage() {
     [cashEntries, previousEndDate, previousStartDate]
   )
   const currentPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.start_date >= startDate && run.end_date <= endDate),
+    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate),
     [endDate, payrollRuns, startDate]
   )
   const previousPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.start_date >= previousStartDate && run.end_date <= previousEndDate),
+    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate),
     [payrollRuns, previousEndDate, previousStartDate]
   )
   const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
@@ -585,7 +585,7 @@ export default function ReportingDashboardPage() {
       const monthStart = toDateKey(startOfMonth(monthDate))
       const monthEnd = toDateKey(endOfMonth(monthDate))
       const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
-      const monthPayrollRuns = payrollRuns.filter(run => run.start_date >= monthStart && run.end_date <= monthEnd)
+      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd)
       const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
       const monthPayrollSummary = summarizePayrollRuns(monthPayrollRuns)
       const savedPayroll = monthPayrollSummary.totalPayrollOut
@@ -958,7 +958,7 @@ export default function ReportingDashboardPage() {
             {[
               ['Total Tips Collected (gross)', currentTotals.collectedTip],
               ['House Tip (15%)', houseCollectedTip],
-              ['Tips Paid Out', currentTotals.tipOut],
+              ['Tips Paid Out (by pay date)', currentTotals.tipOut],
               ['Kitchen Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.kitchen : null],
               ['Server Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.server : null],
               ['Manager Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.manager : null],
@@ -985,9 +985,9 @@ export default function ReportingDashboardPage() {
             </div>
           </div>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-            <p>Tip cards read left to right: gross collected tips → 15% house share → employee tips paid out. Payout timing may differ from the selected business period.</p>
+            <p>Collected tips use EOD business dates. Tips paid out use payroll pay dates, so a payout can include a prior work period when months overlap.</p>
             <p>{hasCurrentSavedPayroll
-              ? 'Saved payroll by worksheet work period. Department amounts, including server payroll, exclude tips and reflect payouts after deductions and rounding.'
+              ? 'Saved payroll by pay date. Department amounts, including server payroll, exclude tips and reflect payouts after deductions and rounding.'
               : 'Estimated payroll from clock hours and hourly wages, plus EOD tip distributions. Save a wage worksheet to see payroll by department.'}</p>
             {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}
             {netSalesWithTips <= 0 && <p>Total Payroll / (Net Sales + Total Tips) is unavailable when net sales plus collected tips are zero or negative.</p>}
