@@ -10,6 +10,7 @@ export type PayrollDraftRow = {
   role: string
   department: string
   payment_method: PaymentMethod | ''
+  commission_payment_method: PaymentMethod | null
   hours: number
   tips: number
   base_wages: number
@@ -54,23 +55,72 @@ export function normalizeMoney(value: unknown) {
   return Number.isFinite(numberValue) ? Math.round(numberValue * 100) / 100 : 0
 }
 
-export function calculatePayrollAmounts(row: Pick<PayrollDraftRow, 'hours' | 'tips' | 'base_wages' | 'guarantee_top_up' | 'commission' | 'deductions' | 'payment_method'>) {
-  const gross = normalizeMoney(row.base_wages + row.guarantee_top_up + row.tips + row.commission)
-  const net = normalizeMoney(Math.max(0, gross - row.deductions))
-  const payout = row.payment_method === 'cash' ? Math.floor(net) : net
+type PayrollPaymentRow = {
+  payment_method: PaymentMethod | '' | null | undefined
+  commission_payment_method: PaymentMethod | null | undefined
+  commission: number
+  net_pay: number
+}
+
+export function getPayrollPaymentBreakdown(row: PayrollPaymentRow) {
+  const breakdown: Record<PaymentMethod, number> = { cash: 0, check: 0, ach: 0 }
+  const primaryMethod = row.payment_method
+  const commissionMethod = row.commission_payment_method
+  const netPay = normalizeMoney(row.net_pay)
+
+  if (!primaryMethod) {
+    return { ...breakdown, payout: 0, cashRounding: 0 }
+  }
+
+  const hasCommissionSplit = Boolean(
+    commissionMethod &&
+    commissionMethod !== primaryMethod &&
+    normalizeMoney(row.commission) > 0
+  )
+  const commissionPayout = hasCommissionSplit ? Math.min(netPay, normalizeMoney(row.commission)) : 0
+  const primaryPayout = normalizeMoney(netPay - commissionPayout)
+  breakdown[primaryMethod] = primaryPayout
+  if (hasCommissionSplit && commissionMethod) {
+    breakdown[commissionMethod] = normalizeMoney(breakdown[commissionMethod] + commissionPayout)
+  }
+
+  const rawCash = breakdown.cash
+  breakdown.cash = Math.floor(rawCash)
+  const payout = normalizeMoney(breakdown.cash + breakdown.check + breakdown.ach)
+
   return {
-    gross_pay: gross,
-    net_pay: net,
-    payout_amount: payout,
-    cash_rounding: normalizeMoney(net - payout),
+    ...breakdown,
+    payout,
+    cashRounding: normalizeMoney(netPay - payout),
   }
 }
 
-export function getPayrollTotals(rows: Array<Pick<PayrollDraftRow, 'payment_method' | 'payout_amount' | 'gross_pay' | 'deductions' | 'net_pay'>>) {
+export function formatPayrollPaymentSummary(row: PayrollPaymentRow) {
+  const breakdown = getPayrollPaymentBreakdown(row)
+  const parts = (['cash', 'check', 'ach'] as PaymentMethod[])
+    .filter(method => breakdown[method] > 0)
+    .map(method => `${paymentMethodLabel(method)} ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(breakdown[method])}`)
+  return parts.length > 0 ? parts.join(' + ') : paymentMethodLabel(row.payment_method)
+}
+
+export function calculatePayrollAmounts(row: Pick<PayrollDraftRow, 'hours' | 'tips' | 'base_wages' | 'guarantee_top_up' | 'commission' | 'deductions' | 'payment_method' | 'commission_payment_method'>) {
+  const gross = normalizeMoney(row.base_wages + row.guarantee_top_up + row.tips + row.commission)
+  const net = normalizeMoney(Math.max(0, gross - row.deductions))
+  const breakdown = getPayrollPaymentBreakdown({ ...row, net_pay: net })
+  return {
+    gross_pay: gross,
+    net_pay: net,
+    payout_amount: breakdown.payout,
+    cash_rounding: breakdown.cashRounding,
+  }
+}
+
+export function getPayrollTotals(rows: Array<Pick<PayrollDraftRow, 'payment_method' | 'commission_payment_method' | 'commission' | 'payout_amount' | 'gross_pay' | 'deductions' | 'net_pay'>>) {
   return rows.reduce<PayrollTotals>((totals, row) => {
-    if (row.payment_method === 'cash') totals.cash += row.payout_amount
-    if (row.payment_method === 'check') totals.check += row.payout_amount
-    if (row.payment_method === 'ach') totals.ach += row.payout_amount
+    const breakdown = getPayrollPaymentBreakdown(row)
+    totals.cash += breakdown.cash
+    totals.check += breakdown.check
+    totals.ach += breakdown.ach
     totals.gross += row.gross_pay
     totals.deductions += row.deductions
     totals.net += row.net_pay
@@ -232,6 +282,7 @@ export function buildPayrollDraftRows({
         role: employee.role,
         department: department === 'all' ? (getEmployeeScheduleDepartments(employee)[0] ?? employee.primary_department ?? 'all') : department,
         payment_method: paymentMethod,
+        commission_payment_method: null,
         hours,
         tips,
         base_wages: baseWages,
@@ -259,6 +310,7 @@ export function payrollItemToDraftRow(item: PayrollRunItem): PayrollDraftRow {
     role: item.role ?? '',
     department: item.department,
     payment_method: item.payment_method ?? '',
+    commission_payment_method: item.commission_payment_method ?? null,
     hours: Number(item.hours ?? 0),
     tips: Number(item.tips ?? 0),
     base_wages: Number(item.base_wages ?? 0),

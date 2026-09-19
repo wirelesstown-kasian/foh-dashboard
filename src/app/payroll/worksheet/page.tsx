@@ -22,6 +22,8 @@ import {
   PayrollDraftRow,
   buildPayrollDraftRows,
   calculatePayrollAmounts,
+  formatPayrollPaymentSummary,
+  getPayrollPaymentBreakdown,
   getPayrollTotals,
   normalizeMoney,
   payrollItemToDraftRow,
@@ -146,25 +148,37 @@ function calculateDailyPayout(row: Pick<PayrollDraftRow | PayrollRunItem, 'hours
 
 function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollRunItem>) {
   const paymentMethod = patch.payment_method ?? item.payment_method
+  const requestedCommissionPaymentMethod = patch.commission_payment_method === undefined
+    ? item.commission_payment_method
+    : patch.commission_payment_method
   const baseWages = normalizeMoney(item.base_wages)
   const topUp = normalizeMoney(item.guarantee_top_up)
   const tips = normalizeMoney(item.tips)
   const commission = normalizeMoney(patch.commission ?? item.commission)
+  const commissionPaymentMethod = commission > 0 && requestedCommissionPaymentMethod !== paymentMethod
+    ? requestedCommissionPaymentMethod
+    : null
   const deductions = normalizeMoney(patch.deductions ?? item.deductions)
   const grossPay = normalizeMoney(baseWages + topUp + tips + commission)
   const netPay = normalizeMoney(Math.max(0, grossPay - deductions))
-  const payoutAmount = paymentMethod === 'cash' ? Math.floor(netPay) : netPay
+  const paymentBreakdown = getPayrollPaymentBreakdown({
+    payment_method: paymentMethod ?? '',
+    commission_payment_method: commissionPaymentMethod ?? null,
+    commission,
+    net_pay: netPay,
+  })
 
   return {
     ...item,
     ...patch,
     payment_method: paymentMethod,
+    commission_payment_method: commissionPaymentMethod,
     commission,
     deductions,
     gross_pay: grossPay,
     net_pay: netPay,
-    payout_amount: payoutAmount,
-    cash_rounding: normalizeMoney(netPay - payoutAmount),
+    payout_amount: paymentBreakdown.payout,
+    cash_rounding: paymentBreakdown.cashRounding,
   }
 }
 
@@ -211,6 +225,7 @@ function mergeWorksheetRowsWithClockSource(currentRows: PayrollDraftRow[], sourc
     const merged = {
       ...sourceRow,
       payment_method: currentRow.payment_method,
+      commission_payment_method: currentRow.commission_payment_method,
       commission: currentRow.commission,
       deductions: currentRow.deductions,
       memo: currentRow.memo,
@@ -229,6 +244,7 @@ function arePayrollRowsEqual(leftRows: PayrollDraftRow[], rightRows: PayrollDraf
     if (!rightRow) return false
     return leftRow.employee_id === rightRow.employee_id &&
       leftRow.payment_method === rightRow.payment_method &&
+      leftRow.commission_payment_method === rightRow.commission_payment_method &&
       leftRow.hours === rightRow.hours &&
       leftRow.tips === rightRow.tips &&
       leftRow.base_wages === rightRow.base_wages &&
@@ -456,6 +472,7 @@ export default function WageWorksheetPage() {
   const [allowZeroHours, setAllowZeroHours] = useState(false)
   const [manualEmployeeIds, setManualEmployeeIds] = useState<string[]>([])
   const [employeeToAdd, setEmployeeToAdd] = useState('')
+  const [splitPaymentEmployeeId, setSplitPaymentEmployeeId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmStep, setConfirmStep] = useState<'summary' | 'final' | 'done'>('summary')
   const [confirmMessage, setConfirmMessage] = useState<string | null>(null)
@@ -568,6 +585,7 @@ export default function WageWorksheetPage() {
       })
     : []
   const breakReviewRow = rows.find(row => row.employee_id === breakReviewEmployeeId) ?? null
+  const splitPaymentRow = rows.find(row => row.employee_id === splitPaymentEmployeeId) ?? null
   const breakReviewRecords = breakReviewEmployeeId
     ? getEmployeeClockRecords({ employeeId: breakReviewEmployeeId, clockRecords, employees, department, startDate, endDate, schedules })
     : []
@@ -705,7 +723,9 @@ export default function WageWorksheetPage() {
       const next = { ...row, ...patch }
       if (employee?.commission_enabled !== true) {
         next.commission = 0
+        next.commission_payment_method = null
       }
+      if (next.commission <= 0 || next.commission_payment_method === next.payment_method) next.commission_payment_method = null
 
       if (patch.hours !== undefined && patch.base_wages === undefined) {
         next.base_wages = normalizeMoney(next.hours * hourlyRate)
@@ -742,6 +762,7 @@ export default function WageWorksheetPage() {
       const merged = {
         ...nextRow,
         payment_method: row.payment_method,
+        commission_payment_method: row.commission_payment_method,
         commission: row.commission,
         deductions: row.deductions,
         memo: row.memo,
@@ -819,6 +840,8 @@ export default function WageWorksheetPage() {
 
       const updatedTotals = getPayrollTotals(editedItems.map(item => ({
         payment_method: item.payment_method ?? '',
+        commission_payment_method: item.commission_payment_method ?? null,
+        commission: Number(item.commission ?? 0),
         payout_amount: Number(item.payout_amount ?? 0),
         gross_pay: Number(item.gross_pay ?? 0),
         deductions: Number(item.deductions ?? 0),
@@ -956,6 +979,7 @@ export default function WageWorksheetPage() {
       role: employee.role,
       department: department === 'all' ? (getEmployeeScheduleDepartments(employee)[0] ?? employee.primary_department ?? 'all') : department,
       payment_method: employee.payment_method ?? '',
+      commission_payment_method: null,
       hours: 0,
       tips: 0,
       base_wages: 0,
@@ -1486,6 +1510,7 @@ export default function WageWorksheetPage() {
                   const hourlyRate = Number(employee?.hourly_wage ?? 0)
                   const commissionAvailable = employee?.commission_enabled === true
                   const breakReviewCount = breakReviewCounts.get(row.employee_id) ?? 0
+                  const hasSplitPayment = Boolean(row.commission_payment_method && row.commission_payment_method !== row.payment_method && row.commission > 0)
 
                   return (
                   <TableRow key={row.employee_id} className="border-b">
@@ -1498,6 +1523,18 @@ export default function WageWorksheetPage() {
                           <SelectItem value="ach">ACH</SelectItem>
                         </SelectContent>
                       </Select>
+                      {hasSplitPayment && (
+                        <div className="mt-1 text-[10px] leading-tight text-blue-700">{formatPayrollPaymentSummary(row)}</div>
+                      )}
+                      {worksheetMode !== 'paid_view' && row.commission > 0 && (
+                        <button
+                          type="button"
+                          className="mt-1 text-left text-[10px] font-medium text-blue-700 hover:underline"
+                          onClick={() => setSplitPaymentEmployeeId(row.employee_id)}
+                        >
+                          {hasSplitPayment ? 'Edit split payment' : 'Pay commission separately'}
+                        </button>
+                      )}
                     </TableCell>
                     <TableCell className="border-r px-2 py-1 align-middle font-medium">{row.employee_name}</TableCell>
                     <TableCell className="border-r p-1 align-middle">
@@ -1560,7 +1597,7 @@ export default function WageWorksheetPage() {
                     <TableCell className="border-r p-1 align-middle"><Input className="h-8 w-full text-right" type="number" step="0.01" value={row.deductions} disabled={worksheetMode === 'paid_view'} onChange={event => updateRow(row.employee_id, { deductions: normalizeMoney(event.target.value) })} /></TableCell>
                     <TableCell className="border-r p-1 text-right align-middle font-semibold">
                       {formatCurrency(row.payout_amount)}
-                      {row.payment_method === 'cash' && row.cash_rounding > 0 && (
+                      {row.cash_rounding > 0 && (
                         <div className="text-[10px] leading-none text-muted-foreground">rounded {formatCurrency(row.cash_rounding)}</div>
                       )}
                     </TableCell>
@@ -1574,6 +1611,70 @@ export default function WageWorksheetPage() {
           </div>
         </div>
       )}
+
+      <Dialog open={!!splitPaymentRow} onOpenChange={(open) => { if (!open) setSplitPaymentEmployeeId(null) }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg p-6">
+          <DialogHeader>
+            <DialogTitle>Split Payment — {splitPaymentRow?.employee_name}</DialogTitle>
+          </DialogHeader>
+          {splitPaymentRow && (() => {
+            const breakdown = getPayrollPaymentBreakdown(splitPaymentRow)
+            const commissionPayout = Math.min(splitPaymentRow.net_pay, splitPaymentRow.commission)
+            const regularPayout = normalizeMoney(splitPaymentRow.net_pay - commissionPayout)
+            return (
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-slate-50 p-3">
+                  <div className="text-xs uppercase text-muted-foreground">Net Payroll</div>
+                  <div className="mt-1 text-2xl font-bold text-slate-950">{formatCurrency(splitPaymentRow.net_pay)}</div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border bg-white p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Regular pay after deductions</div>
+                    <div className="mt-1 text-lg font-bold">{formatCurrency(regularPayout)}</div>
+                    <Label className="mt-3 block">Pay by</Label>
+                    <Select value={splitPaymentRow.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(splitPaymentRow.employee_id, { payment_method: value as PaymentMethod })}>
+                      <SelectTrigger><span>{paymentMethodLabel(splitPaymentRow.payment_method)}</span></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">Cash</SelectItem>
+                        <SelectItem value="check">Check</SelectItem>
+                        <SelectItem value="ach">ACH</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="rounded-lg border bg-white p-3">
+                    <div className="text-xs font-medium text-muted-foreground">Commission</div>
+                    <div className="mt-1 text-lg font-bold">{formatCurrency(commissionPayout)}</div>
+                    <Label className="mt-3 block">Pay by</Label>
+                    <Select
+                      value={splitPaymentRow.commission_payment_method ?? 'same'}
+                      onValueChange={(value: string | null) => updateRow(splitPaymentRow.employee_id, {
+                        commission_payment_method: value === 'same' ? null : (value as PaymentMethod),
+                      })}
+                    >
+                      <SelectTrigger><span>{splitPaymentRow.commission_payment_method ? paymentMethodLabel(splitPaymentRow.commission_payment_method) : 'Same as regular pay'}</span></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="same">Same as regular pay</SelectItem>
+                        <SelectItem value="cash">Cash</SelectItem>
+                        <SelectItem value="check">Check</SelectItem>
+                        <SelectItem value="ach">ACH</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+                  <div className="font-semibold">{formatPayrollPaymentSummary(splitPaymentRow)}</div>
+                  <div className="mt-1 text-xs text-blue-800">
+                    Cash {formatCurrency(breakdown.cash)} · Check {formatCurrency(breakdown.check)} · ACH {formatCurrency(breakdown.ach)}
+                  </div>
+                  {breakdown.cashRounding > 0 && <div className="mt-1 text-xs text-blue-800">Cash rounding: {formatCurrency(breakdown.cashRounding)}</div>}
+                </div>
+                <p className="text-xs text-muted-foreground">Deductions are applied before the split. Commission is assigned first, and the remaining net payroll uses the regular payment method.</p>
+                <div className="flex justify-end"><Button onClick={() => setSplitPaymentEmployeeId(null)}>Apply Split</Button></div>
+              </div>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!breakReviewEmployeeId} onOpenChange={(open) => { if (!open) setBreakReviewEmployeeId(null) }}>
         <DialogContent className="w-[calc(100vw-2rem)] !max-w-6xl max-h-[90vh] overflow-y-auto p-6">
@@ -1819,17 +1920,30 @@ export default function WageWorksheetPage() {
                   <TableBody>
                     {selectedSummaryItems.map(item => (
                         <TableRow key={item.id}>
-                          <TableCell>
+                          <TableCell className="min-w-48">
                             {editingSummary ? (
-                              <Select value={item.payment_method ?? undefined} onValueChange={(value: string | null) => value && updateSummaryItemEdit(item, { payment_method: value as PaymentMethod })}>
-                                <SelectTrigger className="h-8 w-28"><span>{paymentMethodLabel(item.payment_method)}</span></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="cash">Cash</SelectItem>
-                                  <SelectItem value="check">Check</SelectItem>
-                                  <SelectItem value="ach">ACH</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            ) : paymentMethodLabel(item.payment_method)}
+                              <div className="space-y-1">
+                                <Select value={item.payment_method ?? undefined} onValueChange={(value: string | null) => value && updateSummaryItemEdit(item, { payment_method: value as PaymentMethod })}>
+                                  <SelectTrigger className="h-8 w-full"><span>{paymentMethodLabel(item.payment_method)}</span></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="cash">Cash</SelectItem>
+                                    <SelectItem value="check">Check</SelectItem>
+                                    <SelectItem value="ach">ACH</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {Number(item.commission ?? 0) > 0 && (
+                                  <Select value={item.commission_payment_method ?? 'same'} onValueChange={(value: string | null) => updateSummaryItemEdit(item, { commission_payment_method: value === 'same' ? null : (value as PaymentMethod) })}>
+                                    <SelectTrigger className="h-8 w-full"><span>{item.commission_payment_method ? `Commission: ${paymentMethodLabel(item.commission_payment_method)}` : 'Commission: Same'}</span></SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="same">Commission: Same</SelectItem>
+                                      <SelectItem value="cash">Commission: Cash</SelectItem>
+                                      <SelectItem value="check">Commission: Check</SelectItem>
+                                      <SelectItem value="ach">Commission: ACH</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                              </div>
+                            ) : formatPayrollPaymentSummary(item)}
                           </TableCell>
                           <TableCell className="font-medium">{item.employee_name}</TableCell>
                           <TableCell>{departmentOptions.find(option => option.key === item.department)?.label ?? item.department}</TableCell>

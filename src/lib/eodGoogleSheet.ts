@@ -1,5 +1,6 @@
 import { createSign } from 'crypto'
 import { getClockWorkDepartment, getEffectiveClockHours, getVisibleManagerNote } from '@/lib/clockUtils'
+import { formatPayrollPaymentSummary } from '@/lib/payroll'
 import type { CashBalanceEntry, EodReport, PayrollRun, PayrollRunItem, ShiftClock } from '@/lib/types'
 
 type GoogleSheetsConfig = {
@@ -277,7 +278,7 @@ function buildPayrollSheetRow(run: PayrollSheetRun, item: PayrollRunItem) {
     run.end_date,
     run.department,
     run.memo ?? '',
-    item.payment_method?.toUpperCase() ?? 'UNKNOWN',
+    formatPayrollPaymentSummary(item),
     item.employee_name,
     item.role ?? '',
     item.department,

@@ -3,6 +3,8 @@ import { cookies } from 'next/headers'
 import { buildEmailDocument, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { formatPayrollPaymentSummary } from '@/lib/payroll'
+import type { PaymentMethod } from '@/lib/types'
 import { getEmailSettings } from '@/lib/appSettings'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import type { ShiftClock } from '@/lib/types'
@@ -127,7 +129,9 @@ export async function POST(req: NextRequest) {
         commission: number
         deductions: number
         payout_amount: number
-        payment_method: string | null
+        net_pay: number
+        payment_method: PaymentMethod | null
+        commission_payment_method: PaymentMethod | null
         has_auto_clock_out: boolean
         has_open_clock: boolean
         memo: string | null
@@ -150,7 +154,12 @@ export async function POST(req: NextRequest) {
         ` : ''}
         <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
           <tr><td><strong>Period</strong></td><td>${label}</td></tr>
-          <tr><td><strong>Paid By</strong></td><td>${payrollItem.payment_method ? String(payrollItem.payment_method).toUpperCase() : 'UNKNOWN'}</td></tr>
+          <tr><td><strong>Paid By</strong></td><td>${formatPayrollPaymentSummary({
+            payment_method: payrollItem.payment_method ?? '',
+            commission_payment_method: payrollItem.commission_payment_method,
+            commission: Number(payrollItem.commission ?? 0),
+            net_pay: Number(payrollItem.net_pay ?? payrollItem.payout_amount ?? 0),
+          })}</td></tr>
           <tr><td><strong>Hours Worked</strong></td><td>${hours.toFixed(2)} hrs</td></tr>
           <tr><td><strong>Tips Earned</strong></td><td>${formatCurrency(tips)}</td></tr>
           <tr><td><strong>Base Wages</strong></td><td>${formatCurrency(Number(payrollItem.base_wages ?? 0))}</td></tr>

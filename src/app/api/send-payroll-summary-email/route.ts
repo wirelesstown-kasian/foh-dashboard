@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { getAppSettings } from '@/lib/appSettings'
 import { escapeHtml, renderEmailShell, sendEmail } from '@/lib/emailUtils'
+import { formatPayrollPaymentSummary } from '@/lib/payroll'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import type { PayrollRun, PayrollRunItem } from '@/lib/types'
 
@@ -12,13 +13,6 @@ const PAYROLL_SUMMARY_ADMIN_EMAIL = 'admin@newvillagepub.com'
 
 function formatCurrency(value: number) {
   return `$${Number(value ?? 0).toFixed(2)}`
-}
-
-function formatPaymentMethod(value: string | null | undefined) {
-  if (value === 'ach') return 'ACH'
-  if (value === 'check') return 'Check'
-  if (value === 'cash') return 'Cash'
-  return 'Unknown'
 }
 
 function formatStatus(item: PayrollRunItem) {
@@ -82,7 +76,7 @@ export async function POST(req: NextRequest) {
       <tr>
         <td>${escapeHtml(item.employee_name)}</td>
         <td>${escapeHtml(item.department)}</td>
-        <td>${formatPaymentMethod(item.payment_method)}</td>
+        <td>${escapeHtml(formatPayrollPaymentSummary(item))}</td>
         <td class="right">${Number(item.hours ?? 0).toFixed(2)}</td>
         <td class="right">${formatCurrency(Number(item.tips ?? 0))}</td>
         <td class="right">${formatCurrency(Number(item.base_wages ?? 0))}</td>

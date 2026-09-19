@@ -218,6 +218,7 @@ export interface PayrollRunItem {
   role: string | null
   department: string
   payment_method: PaymentMethod | null
+  commission_payment_method: PaymentMethod | null
   hours: number
   tips: number
   base_wages: number

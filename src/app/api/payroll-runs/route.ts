@@ -25,6 +25,7 @@ type PayrollRunPayload = {
     role?: string | null
     department?: string
     payment_method?: PaymentMethod | ''
+    commission_payment_method?: PaymentMethod | null
     hours?: number
     tips?: number
     base_wages?: number
@@ -73,8 +74,32 @@ function dateRangesOverlap(leftStart: string, leftEnd: string, rightStart: strin
   return leftStart <= rightEnd && rightStart <= leftEnd
 }
 
+function getPaymentBreakdown(
+  paymentMethod: PaymentMethod,
+  commissionPaymentMethod: PaymentMethod | null,
+  commission: number,
+  netPay: number
+) {
+  const breakdown: Record<PaymentMethod, number> = { cash: 0, check: 0, ach: 0 }
+  const splitCommission = commissionPaymentMethod && commissionPaymentMethod !== paymentMethod
+    ? Math.min(netPay, commission)
+    : 0
+  breakdown[paymentMethod] = normalizeMoney(netPay - splitCommission)
+  if (commissionPaymentMethod && commissionPaymentMethod !== paymentMethod) {
+    breakdown[commissionPaymentMethod] = normalizeMoney(breakdown[commissionPaymentMethod] + splitCommission)
+  }
+  const rawCash = breakdown.cash
+  breakdown.cash = Math.floor(rawCash)
+  const payout = normalizeMoney(breakdown.cash + breakdown.check + breakdown.ach)
+  return { ...breakdown, payout, cashRounding: normalizeMoney(netPay - payout) }
+}
+
 function calculatePayrollRow(row: NonNullable<PayrollRunPayload['rows']>[number]) {
   const paymentMethod = row.payment_method as PaymentMethod
+  const commission = normalizeMoney(row.commission)
+  const commissionPaymentMethod = isPaymentMethod(row.commission_payment_method) && row.commission_payment_method !== paymentMethod && commission > 0
+    ? row.commission_payment_method
+    : null
   const grossPay = normalizeMoney(
     normalizeNumber(row.base_wages) +
     normalizeNumber(row.guarantee_top_up) +
@@ -83,21 +108,22 @@ function calculatePayrollRow(row: NonNullable<PayrollRunPayload['rows']>[number]
   )
   const deductions = normalizeMoney(row.deductions)
   const netPay = normalizeMoney(Math.max(0, grossPay - deductions))
-  const payoutAmount = paymentMethod === 'cash' ? Math.floor(netPay) : netPay
+  const breakdown = getPaymentBreakdown(paymentMethod, commissionPaymentMethod, commission, netPay)
 
   return {
     ...row,
     payment_method: paymentMethod,
+    commission_payment_method: commissionPaymentMethod,
     hours: normalizeMoney(row.hours),
     tips: normalizeMoney(row.tips),
     base_wages: normalizeMoney(row.base_wages),
     guarantee_top_up: normalizeMoney(row.guarantee_top_up),
-    commission: normalizeMoney(row.commission),
+    commission,
     deductions,
     gross_pay: grossPay,
     net_pay: netPay,
-    payout_amount: payoutAmount,
-    cash_rounding: normalizeMoney(netPay - payoutAmount),
+    payout_amount: breakdown.payout,
+    cash_rounding: breakdown.cashRounding,
   }
 }
 
@@ -119,10 +145,16 @@ export async function GET() {
 
 function getPayrollTotals(rows: NonNullable<PayrollRunPayload['rows']>) {
   return rows.reduce<{ cash: number; check: number; ach: number; gross: number; deductions: number; net: number }>((totals, row) => {
-    const payout = normalizeNumber(row.payout_amount)
-    if (row.payment_method === 'cash') totals.cash += payout
-    if (row.payment_method === 'check') totals.check += payout
-    if (row.payment_method === 'ach') totals.ach += payout
+    if (!isPaymentMethod(row.payment_method)) return totals
+    const breakdown = getPaymentBreakdown(
+      row.payment_method,
+      isPaymentMethod(row.commission_payment_method) ? row.commission_payment_method : null,
+      normalizeMoney(row.commission),
+      normalizeMoney(row.net_pay)
+    )
+    totals.cash += breakdown.cash
+    totals.check += breakdown.check
+    totals.ach += breakdown.ach
     totals.gross += normalizeNumber(row.gross_pay)
     totals.deductions += normalizeNumber(row.deductions)
     totals.net += normalizeNumber(row.net_pay)
@@ -149,6 +181,10 @@ export async function POST(req: NextRequest) {
     const missingPaymentRow = rows.find(row => !isPaymentMethod(row.payment_method))
     if (missingPaymentRow) {
       return NextResponse.json({ error: `Select a payment method for ${missingPaymentRow.employee_name || 'every employee'} before saving.` }, { status: 400 })
+    }
+    const invalidCommissionPaymentRow = rows.find(row => row.commission_payment_method != null && !isPaymentMethod(row.commission_payment_method))
+    if (invalidCommissionPaymentRow) {
+      return NextResponse.json({ error: `Select a valid commission payment method for ${invalidCommissionPaymentRow.employee_name || 'every employee'}.` }, { status: 400 })
     }
     if (normalizeNumber(payload.adjustment?.amount) > 0 && !isPaymentMethod(payload.adjustment?.method)) {
       return NextResponse.json({ error: 'Select a payment method for the balance or credit adjustment.' }, { status: 400 })
@@ -215,6 +251,7 @@ export async function POST(req: NextRequest) {
       role: row.role || null,
       department: row.department || payload.department,
       payment_method: row.payment_method,
+      commission_payment_method: row.commission_payment_method,
       hours: row.hours,
       tips: row.tips,
       base_wages: row.base_wages,
@@ -261,6 +298,10 @@ export async function PATCH(req: NextRequest) {
     if (missingPaymentRow) {
       return NextResponse.json({ error: `Select a payment method for ${missingPaymentRow.employee_name || 'every employee'} before saving.` }, { status: 400 })
     }
+    const invalidCommissionPaymentRow = rows.find(row => row.commission_payment_method != null && !isPaymentMethod(row.commission_payment_method))
+    if (invalidCommissionPaymentRow) {
+      return NextResponse.json({ error: `Select a valid commission payment method for ${invalidCommissionPaymentRow.employee_name || 'every employee'}.` }, { status: 400 })
+    }
     if (normalizeNumber(payload.adjustment?.amount) > 0 && !isPaymentMethod(payload.adjustment?.method)) {
       return NextResponse.json({ error: 'Select a payment method for the balance or credit adjustment.' }, { status: 400 })
     }
@@ -303,6 +344,7 @@ export async function PATCH(req: NextRequest) {
           role: row.role || null,
           department: row.department || existingRun.department,
           payment_method: row.payment_method,
+          commission_payment_method: row.commission_payment_method,
           hours: row.hours,
           tips: row.tips,
           base_wages: row.base_wages,
