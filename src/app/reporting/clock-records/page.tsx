@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
@@ -148,6 +148,7 @@ export default function ClockRecordsPage() {
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [employeeFilter, setEmployeeFilter] = useState('')
+  const [expandedDate, setExpandedDate] = useState<string | null>(null)
   const [selectedClockId, setSelectedClockId] = useState<string | null>(null)
   const [detailEditing, setDetailEditing] = useState(false)
   const [clockEdits, setClockEdits] = useState<Record<string, ClockEditState>>({})
@@ -213,6 +214,19 @@ export default function ClockRecordsPage() {
         .sort((a, b) => b.clock_in_at.localeCompare(a.clock_in_at)),
     [clockRecords, department, employeeFilter, employees, endDate, schedules, startDate]
   )
+  const isDailyRange = startDate === endDate
+  const clockRecordsByDate = useMemo(() => {
+    const grouped = new Map<string, ShiftClock[]>()
+    for (const record of filteredClockRecords) {
+      const recordsForDate = grouped.get(record.session_date) ?? []
+      recordsForDate.push(record)
+      grouped.set(record.session_date, recordsForDate)
+    }
+    return [...grouped.entries()].sort(([left], [right]) => right.localeCompare(left))
+  }, [filteredClockRecords])
+  useEffect(() => {
+    setExpandedDate(null)
+  }, [department, employeeFilter, endDate, startDate])
   const getClockEditState = (record: ShiftClock): ClockEditState => {
     const mealBreak = getMealBreakState(record)
     const regularBreak = getUnpaidBreakState(record)
@@ -252,6 +266,81 @@ export default function ClockRecordsPage() {
   ])
   const addHourEmployee = employees.find(employee => employee.id === addHourForm.employeeId) ?? null
   const addHourWorkDepartmentOptions = getWorkDepartmentOptions(addHourEmployee, department)
+
+  const renderClockRecordRow = (record: ShiftClock, includeDate: boolean) => {
+    const employee = getClockRecordEmployee(record, employees)
+    const employeeName = employee?.name ?? 'Unknown Staff'
+    const workDepartment = getClockWorkDepartment(record, employee, schedules)
+    const missingBreakWarning = shouldWarnMissingMealBreak(record, employee)
+    const mealBreakThresholdHours = getMealBreakThresholdHours(employee)
+    const breakMinutes = getClockBreakMinutes(record)
+    const workedHours = record.clock_out_at ? calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, breakMinutes) : 0
+    const paid = isClockRecordPaid(record)
+    return (
+      <TableRow key={record.id}>
+        {includeDate && <TableCell className="font-medium">{format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>}
+        <TableCell>
+          <button
+            type="button"
+            className="font-medium text-slate-900 underline-offset-4 hover:underline"
+            onClick={() => openClockDetail(record)}
+          >
+            {employeeName}
+          </button>
+        </TableCell>
+        <TableCell className="capitalize text-muted-foreground">{workDepartment}</TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1.5">
+            <Badge variant="outline" className={record.auto_clock_out ? 'border-orange-300 bg-orange-50 text-orange-800' : record.clock_out_at ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>
+              {record.auto_clock_out ? 'Auto Clock-Out' : record.clock_out_at ? 'Closed' : 'Open'}
+            </Badge>
+            {missingBreakWarning && (
+              <Badge
+                variant="outline"
+                className="border-amber-300 bg-amber-50 text-amber-800"
+                title={`${employeeName} worked ${getEffectiveClockHours(record).toFixed(2)} hours with no completed 30 minute meal break. Alert threshold: ${mealBreakThresholdHours?.toFixed(2) ?? 'disabled'} hours.`}
+              >
+                <AlertTriangle className="mr-1 h-3 w-3" /> Break Audit
+              </Badge>
+            )}
+            {paid && (
+              <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Paid</Badge>
+            )}
+          </div>
+        </TableCell>
+        <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
+        <TableCell className="text-right">{record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}</TableCell>
+        <TableCell className="text-right text-muted-foreground">{formatBreakSummary(record)}</TableCell>
+        <TableCell className="text-right text-muted-foreground">{workedHours.toFixed(2)}</TableCell>
+        <TableCell>
+          <span className="inline-block max-w-32 truncate text-sm text-muted-foreground">
+            {getVisibleManagerNote(record.manager_note) || '—'}
+          </span>
+        </TableCell>
+        <TableCell className="align-top">
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => openClockDetail(record)}>View</Button>
+            <Button size="sm" variant="outline" onClick={() => openClockDetail(record, true)} disabled={paid}>Edit</Button>
+          </div>
+        </TableCell>
+      </TableRow>
+    )
+  }
+
+  const renderClockTableHeader = (includeDate: boolean) => (
+    <TableRow>
+      {includeDate && <TableHead>Date</TableHead>}
+      <TableHead>Name</TableHead>
+      <TableHead>Dept</TableHead>
+      <TableHead>Status</TableHead>
+      <TableHead className="text-right">Clock In</TableHead>
+      <TableHead className="text-right">Clock Out</TableHead>
+      <TableHead className="text-right">Break</TableHead>
+      <TableHead className="text-right">Worked Hrs</TableHead>
+      <TableHead className="w-36">Note</TableHead>
+      <TableHead>Action</TableHead>
+    </TableRow>
+  )
 
   const openClockDetail = (record: ShiftClock, edit = false) => {
     setClockEdits(prev => ({ ...prev, [record.id]: prev[record.id] ?? getClockEditState(record) }))
@@ -627,90 +716,73 @@ export default function ClockRecordsPage() {
             )}
           </div>
         )}
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Dept</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Clock In</TableHead>
-              <TableHead className="text-right">Clock Out</TableHead>
-              <TableHead className="text-right">Break</TableHead>
-              <TableHead className="text-right">Worked Hrs</TableHead>
-              <TableHead className="w-36">Note</TableHead>
-              <TableHead>Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredClockRecords.map(record => {
-              const employee = getClockRecordEmployee(record, employees)
-              const employeeName = employee?.name ?? 'Unknown Staff'
-              const workDepartment = getClockWorkDepartment(record, employee, schedules)
-              const missingBreakWarning = shouldWarnMissingMealBreak(record, employee)
-              const mealBreakThresholdHours = getMealBreakThresholdHours(employee)
-              const breakMinutes = getClockBreakMinutes(record)
-              const workedHours = record.clock_out_at ? calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, breakMinutes) : 0
-              const paid = isClockRecordPaid(record)
-              return (
-                <TableRow key={record.id}>
-                  <TableCell className="font-medium">{format(new Date(`${record.session_date}T12:00:00`), 'MMM d, yyyy')}</TableCell>
-                  <TableCell>
-                    <button
-                      type="button"
-                      className="font-medium text-slate-900 underline-offset-4 hover:underline"
-                      onClick={() => openClockDetail(record)}
-                    >
-                      {employeeName}
-                    </button>
-                  </TableCell>
-                  <TableCell className="capitalize text-muted-foreground">{workDepartment}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Badge variant="outline" className={record.auto_clock_out ? 'border-orange-300 bg-orange-50 text-orange-800' : record.clock_out_at ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>
-                        {record.auto_clock_out ? 'Auto Clock-Out' : record.clock_out_at ? 'Closed' : 'Open'}
-                      </Badge>
-                      {missingBreakWarning && (
-                        <Badge
-                          variant="outline"
-                          className="border-amber-300 bg-amber-50 text-amber-800"
-                          title={`${employeeName} worked ${getEffectiveClockHours(record).toFixed(2)} hours with no completed 30 minute meal break. Alert threshold: ${mealBreakThresholdHours?.toFixed(2) ?? 'disabled'} hours.`}
-                        >
-                          <AlertTriangle className="mr-1 h-3 w-3" /> Break Audit
-                        </Badge>
-                      )}
-                      {paid && (
-                        <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Paid</Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">{format(new Date(record.clock_in_at), 'p')}</TableCell>
-                  <TableCell className="text-right">{record.clock_out_at ? format(new Date(record.clock_out_at), 'p') : 'Open'}</TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {formatBreakSummary(record)}
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground">{workedHours.toFixed(2)}</TableCell>
-                  <TableCell>
-                    <span className="inline-block max-w-32 truncate text-sm text-muted-foreground">
-                      {getVisibleManagerNote(record.manager_note) || '—'}
-                    </span>
-                  </TableCell>
-                  <TableCell className="align-top">
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline" onClick={() => openClockDetail(record)}>View</Button>
-                      <Button size="sm" variant="outline" onClick={() => openClockDetail(record, true)} disabled={paid}>Edit</Button>
-                    </div>
-                  </TableCell>
+        {isDailyRange ? (
+          <Table>
+            <TableHeader>{renderClockTableHeader(true)}</TableHeader>
+            <TableBody>
+              {filteredClockRecords.map(record => renderClockRecordRow(record, true))}
+              {filteredClockRecords.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={10} className="py-6 text-center text-muted-foreground">No clock records for this range</TableCell>
                 </TableRow>
-              )
-            })}
-            {filteredClockRecords.length === 0 && (
+              )}
+            </TableBody>
+          </Table>
+        ) : (
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={10} className="py-6 text-center text-muted-foreground">No clock records for this range</TableCell>
+                <TableHead>Date</TableHead>
+                <TableHead className="text-right">People</TableHead>
+                <TableHead className="text-right">Open</TableHead>
+                <TableHead className="text-right">Worked Hrs</TableHead>
+                <TableHead>Details</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {clockRecordsByDate.map(([sessionDate, records]) => {
+                const expanded = expandedDate === sessionDate
+                const workedHours = records.reduce((sum, record) => {
+                  if (!record.clock_out_at) return sum
+                  return sum + calculateClockHoursAfterBreak(record.clock_in_at, record.clock_out_at, getClockBreakMinutes(record))
+                }, 0)
+                const openCount = records.filter(record => isClockPending(record)).length
+                return (
+                  <Fragment key={sessionDate}>
+                    <TableRow key={`${sessionDate}-summary`} className="cursor-pointer hover:bg-muted/40" onClick={() => setExpandedDate(expanded ? null : sessionDate)}>
+                      <TableCell className="font-medium">{format(new Date(`${sessionDate}T12:00:00`), 'MMM d, yyyy')}</TableCell>
+                      <TableCell className="text-right">{records.length}</TableCell>
+                      <TableCell className="text-right">{openCount}</TableCell>
+                      <TableCell className="text-right">{workedHours.toFixed(2)}</TableCell>
+                      <TableCell>
+                        <Button type="button" variant="ghost" size="sm" onClick={event => { event.stopPropagation(); setExpandedDate(expanded ? null : sessionDate) }}>
+                          {expanded ? 'Hide people' : 'View people'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    {expanded && (
+                      <TableRow key={`${sessionDate}-details`}>
+                        <TableCell colSpan={5} className="bg-muted/20 p-0">
+                          <div className="overflow-x-auto p-3">
+                            <Table>
+                              <TableHeader>{renderClockTableHeader(false)}</TableHeader>
+                              <TableBody>{records.map(record => renderClockRecordRow(record, false))}</TableBody>
+                            </Table>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                )
+              })}
+              {clockRecordsByDate.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">No clock records for this range</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        )}
       </div>
 
       <Sheet
