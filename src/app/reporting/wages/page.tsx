@@ -714,12 +714,25 @@ export default function WageReportPage() {
     () => (employeeFilter === 'all' ? rows : rows.filter(row => row.emp.id === employeeFilter)),
     [employeeFilter, rows]
   )
-  const paidEmployeeIds = useMemo(() => new Set(
-    periodPayrollRuns.flatMap(run => (run.payroll_run_items ?? [])
-      .filter(item => Number(item.payout_amount ?? 0) > 0 || Number(item.net_pay ?? 0) > 0)
-      .map(item => item.employee_id)
-      .filter((id): id is string => Boolean(id)))
-  ), [periodPayrollRuns])
+  const payoutGroups = useMemo(() => {
+    const assigned = new Set<string>()
+    const paidGroups = periodPayrollRuns.map(run => {
+      const runEmployeeIds = new Set((run.payroll_run_items ?? []).map(item => item.employee_id).filter((id): id is string => Boolean(id)))
+      const groupRows = displayedRows.filter(row => runEmployeeIds.has(row.emp.id) && !assigned.has(row.emp.id))
+      groupRows.forEach(row => assigned.add(row.emp.id))
+      return {
+        key: run.id,
+        title: `Paid ${run.start_date} – ${run.end_date}`,
+        subtitle: `Pay date ${run.pay_date}`,
+        paid: true,
+        rows: groupRows,
+      }
+    }).filter(group => group.rows.length > 0)
+    const unpaidRows = displayedRows.filter(row => !assigned.has(row.emp.id))
+    return unpaidRows.length > 0
+      ? [{ key: 'unpaid', title: 'Unpaid', subtitle: 'Recent work measured but not included in a saved payout', paid: false, rows: unpaidRows }, ...paidGroups]
+      : paidGroups
+  }, [displayedRows, periodPayrollRuns])
   const displayedPaymentTotals = useMemo(
     () => displayedRows.reduce<Record<ReportPaymentMethod, number>>((totals, row) => {
       totals.cash += row.paymentBreakdown.cash
@@ -949,65 +962,38 @@ export default function WageReportPage() {
           </div>
         </div>
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Payout Summary</TableHead>
-              <TableHead>Clock Status</TableHead>
-              <TableHead className="text-right">Hours</TableHead>
-              <TableHead className="text-right">Tips</TableHead>
-            </TableRow>
-          </TableHeader>
+          <TableHeader><TableRow>
+            <TableHead>Name</TableHead><TableHead>Role</TableHead><TableHead>Paid By</TableHead><TableHead>Clock Status</TableHead>
+            <TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal Break</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Tips / Hr</TableHead>
+            {view === 'earnings' && <><TableHead className="text-right">Base Wages</TableHead><TableHead className="text-right">Guaranteed Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Total Earnings</TableHead></>}
+          </TableRow></TableHeader>
           <TableBody>
-            {displayedRows.map(row => {
-              const isPaid = paidEmployeeIds.has(row.emp.id)
-              const expanded = expandedPayoutEmployeeId === row.emp.id
-              const rowDetails = detailRowsByEmployeeId.get(row.emp.id) ?? []
-              return (
-                <Fragment key={row.emp.id}>
-                  <TableRow>
-                    <TableCell className="font-medium">{row.emp.name}</TableCell>
-                    <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
-                    <TableCell>
-                      <button type="button" className="rounded-md text-left hover:bg-slate-50" onClick={() => setExpandedPayoutEmployeeId(expanded ? null : row.emp.id)}>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className={isPaid ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-amber-300 bg-amber-50 text-amber-800'}>{isPaid ? 'Paid' : 'Unpaid'}</Badge>
-                          <span className="font-semibold">{formatCurrency(row.totalEarnings)}</span>
-                        </div>
-                        <div className="mt-0.5 text-xs text-muted-foreground">{formatPaymentBreakdown(row.paymentBreakdown)} · {expanded ? 'Hide details' : 'View details'}</div>
-                      </button>
-                    </TableCell>
-                    <TableCell>
-                      {row.hasOpenClock ? <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge> : row.hasAutoClockOut ? <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge> : <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>}
-                    </TableCell>
-                    <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell>
-                    <TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell>
-                  </TableRow>
-                  {expanded && (
-                    <TableRow className="bg-slate-50/70">
-                      <TableCell colSpan={6} className="p-4">
-                        <div className="space-y-3">
-                          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                            <div><div className="text-xs text-muted-foreground">Regular wages</div><div className="font-semibold">{formatCurrency(row.baseWages)}</div></div>
-                            <div><div className="text-xs text-muted-foreground">Guaranteed top-up</div><div className="font-semibold">{formatCurrency(row.guaranteeTopUp)}</div></div>
-                            <div><div className="text-xs text-muted-foreground">Commission</div><div className="font-semibold">{formatCurrency(row.commission)}</div></div>
-                            <div><div className="text-xs text-muted-foreground">Deductions</div><div className="font-semibold text-red-700">-{formatCurrency(row.deductions)}</div></div>
-                            <div><div className="text-xs text-muted-foreground">Tips / hour</div><div className="font-semibold">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</div></div>
-                            <div><div className="text-xs text-muted-foreground">Payment method</div><div className="font-semibold">{formatPaymentBreakdown(row.paymentBreakdown)}</div></div>
-                          </div>
-                          {rowDetails.length > 0 && <div className="overflow-x-auto rounded-md border bg-white"><Table className="text-xs"><TableHeader><TableRow><TableHead>Date</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader><TableBody>{rowDetails.map(detail => <TableRow key={detail.date}><TableCell>{detail.date}</TableCell><TableCell className="text-right">{detail.hours.toFixed(2)}</TableCell><TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell></TableRow>)}</TableBody></Table></div>}
-                          <Button variant="outline" size="sm" onClick={() => setDetailEmployeeId(row.emp.id)}>Open full wage detail</Button>
-                        </div>
-                      </TableCell>
+            {payoutGroups.map(group => (
+              <Fragment key={group.key}>
+                <TableRow className={group.paid ? 'bg-emerald-50/60 hover:bg-emerald-50/60' : 'bg-amber-50/70 hover:bg-amber-50/70'}>
+                  <TableCell colSpan={view === 'earnings' ? 13 : 8}>
+                    <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-semibold">{group.title}</div><div className="text-xs text-muted-foreground">{group.subtitle} · {group.rows.length} employee{group.rows.length === 1 ? '' : 's'}</div></div>
+                  </TableCell>
+                </TableRow>
+                {group.rows.map(row => {
+                  const expanded = expandedPayoutEmployeeId === `${group.key}:${row.emp.id}`
+                  const rowDetails = detailRowsByEmployeeId.get(row.emp.id) ?? []
+                  return <Fragment key={`${group.key}:${row.emp.id}`}>
+                    <TableRow>
+                      <TableCell><button type="button" className="font-medium text-left hover:underline" onClick={() => setExpandedPayoutEmployeeId(expanded ? null : `${group.key}:${row.emp.id}`)}>{row.emp.name}</button></TableCell>
+                      <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
+                      <TableCell>{formatPaymentBreakdown(row.paymentBreakdown)}</TableCell>
+                      <TableCell>{row.hasOpenClock ? <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge> : row.hasAutoClockOut ? <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge> : <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>}</TableCell>
+                      <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell><TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(row.mealBreakMinutes)}</TableCell><TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell><TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
+                      {view === 'earnings' && <><TableCell className="text-right">{formatCurrency(row.baseWages)}</TableCell><TableCell className="text-right text-violet-700">{formatCurrency(row.guaranteeTopUp)}</TableCell><TableCell className="text-right">{formatCurrency(row.commission)}</TableCell><TableCell className="text-right text-red-700">{formatCurrency(row.deductions)}</TableCell><TableCell className="text-right font-bold">{formatCurrency(row.totalEarnings)}</TableCell></>}
                     </TableRow>
-                  )}
-                </Fragment>
-              )
-            })}
-            {displayedRows.length === 0 && <TableRow><TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell></TableRow>}
+                    {expanded && <TableRow className="bg-slate-50/70"><TableCell colSpan={view === 'earnings' ? 13 : 8} className="p-4"><div className="space-y-3"><div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6"><div><div className="text-xs text-muted-foreground">Payout status</div><div className="font-semibold">{group.paid ? 'Paid' : 'Unpaid'}</div></div><div><div className="text-xs text-muted-foreground">Payment method</div><div className="font-semibold">{formatPaymentBreakdown(row.paymentBreakdown)}</div></div><div><div className="text-xs text-muted-foreground">Regular wages</div><div className="font-semibold">{formatCurrency(row.baseWages)}</div></div><div><div className="text-xs text-muted-foreground">Top-up</div><div className="font-semibold">{formatCurrency(row.guaranteeTopUp)}</div></div><div><div className="text-xs text-muted-foreground">Commission</div><div className="font-semibold">{formatCurrency(row.commission)}</div></div><div><div className="text-xs text-muted-foreground">Deductions</div><div className="font-semibold text-red-700">-{formatCurrency(row.deductions)}</div></div></div>{rowDetails.length > 0 && <div className="overflow-x-auto rounded-md border bg-white"><Table className="text-xs"><TableHeader><TableRow><TableHead>Date</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal Break</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader><TableBody>{rowDetails.map(detail => <TableRow key={detail.date}><TableCell>{detail.date}</TableCell><TableCell className="text-right">{detail.hours.toFixed(2)}</TableCell><TableCell className="text-right">{formatMealBreakMinutes(detail.mealBreakMinutes)}</TableCell><TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell></TableRow>)}</TableBody></Table></div>}<Button variant="outline" size="sm" onClick={() => setDetailEmployeeId(row.emp.id)}>Open full wage detail</Button></div></TableCell></TableRow>}
+                  </Fragment>
+                })}
+              </Fragment>
+            ))}
+            {displayedRows.length === 0 && <TableRow><TableCell colSpan={view === 'earnings' ? 13 : 8} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell></TableRow>}
           </TableBody>
-          {displayedRows.length > 0 && <tfoot><TableRow><TableCell className="font-semibold">Period Total</TableCell><TableCell /><TableCell className="text-right font-bold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.totalEarnings, 0))}</TableCell><TableCell /><TableCell className="text-right font-semibold">{displayedRows.reduce((sum, row) => sum + row.hours, 0).toFixed(2)}h</TableCell><TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.tips, 0))}</TableCell></TableRow></tfoot>}
         </Table>
       </div>
 
