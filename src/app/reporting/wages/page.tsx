@@ -538,6 +538,7 @@ export default function WageReportPage() {
           commission_payment_method: item.commission_payment_method,
           commission: Number(item.commission ?? 0),
           net_pay: Number(item.net_pay ?? item.payout_amount ?? 0),
+          payment_allocations: item.payment_allocations,
         })
         : null
       const currentBreakdown = paymentBreakdownsByEmployee.get(key) ?? { cash: 0, check: 0, ach: 0, unknown: 0 }

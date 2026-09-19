@@ -1,4 +1,4 @@
-import { EodReport, Employee, PaymentMethod, PayrollRun, PayrollRunItem, Schedule, ShiftClock } from '@/lib/types'
+import { EodReport, Employee, PaymentMethod, PayrollPaymentAllocations, PayrollRun, PayrollRunItem, Schedule, ShiftClock } from '@/lib/types'
 import { clockMatchesWorkDepartment, getClockWorkDepartment, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { calculateTips } from '@/lib/tipCalc'
@@ -11,6 +11,7 @@ export type PayrollDraftRow = {
   department: string
   payment_method: PaymentMethod | ''
   commission_payment_method: PaymentMethod | null
+  payment_allocations: PayrollPaymentAllocations | null
   hours: number
   tips: number
   base_wages: number
@@ -60,6 +61,15 @@ type PayrollPaymentRow = {
   commission_payment_method: PaymentMethod | null | undefined
   commission: number
   net_pay: number
+  payment_allocations?: PayrollPaymentAllocations | null
+}
+
+function normalizePaymentAllocations(value: PayrollPaymentAllocations | null | undefined) {
+  return {
+    cash: normalizeMoney(value?.cash),
+    check: normalizeMoney(value?.check),
+    ach: normalizeMoney(value?.ach),
+  }
 }
 
 export function getPayrollPaymentBreakdown(row: PayrollPaymentRow) {
@@ -67,6 +77,14 @@ export function getPayrollPaymentBreakdown(row: PayrollPaymentRow) {
   const primaryMethod = row.payment_method
   const commissionMethod = row.commission_payment_method
   const netPay = normalizeMoney(row.net_pay)
+
+  if (row.payment_allocations && (row.payment_allocations.cash !== undefined || row.payment_allocations.check !== undefined || row.payment_allocations.ach !== undefined)) {
+    const allocations = normalizePaymentAllocations(row.payment_allocations)
+    const rawCash = allocations.cash
+    allocations.cash = Math.floor(rawCash)
+    const payout = normalizeMoney(allocations.cash + allocations.check + allocations.ach)
+    return { ...allocations, payout, cashRounding: normalizeMoney(netPay - payout) }
+  }
 
   if (!primaryMethod) {
     return { ...breakdown, payout: 0, cashRounding: 0 }
@@ -103,7 +121,7 @@ export function formatPayrollPaymentSummary(row: PayrollPaymentRow) {
   return parts.length > 0 ? parts.join(' + ') : paymentMethodLabel(row.payment_method)
 }
 
-export function calculatePayrollAmounts(row: Pick<PayrollDraftRow, 'hours' | 'tips' | 'base_wages' | 'guarantee_top_up' | 'commission' | 'deductions' | 'payment_method' | 'commission_payment_method'>) {
+export function calculatePayrollAmounts(row: Pick<PayrollDraftRow, 'hours' | 'tips' | 'base_wages' | 'guarantee_top_up' | 'commission' | 'deductions' | 'payment_method' | 'commission_payment_method' | 'payment_allocations'>) {
   const gross = normalizeMoney(row.base_wages + row.guarantee_top_up + row.tips + row.commission)
   const net = normalizeMoney(Math.max(0, gross - row.deductions))
   const breakdown = getPayrollPaymentBreakdown({ ...row, net_pay: net })
@@ -115,7 +133,7 @@ export function calculatePayrollAmounts(row: Pick<PayrollDraftRow, 'hours' | 'ti
   }
 }
 
-export function getPayrollTotals(rows: Array<Pick<PayrollDraftRow, 'payment_method' | 'commission_payment_method' | 'commission' | 'payout_amount' | 'gross_pay' | 'deductions' | 'net_pay'>>) {
+export function getPayrollTotals(rows: Array<Pick<PayrollDraftRow, 'payment_method' | 'commission_payment_method' | 'commission' | 'payment_allocations' | 'payout_amount' | 'gross_pay' | 'deductions' | 'net_pay'>>) {
   return rows.reduce<PayrollTotals>((totals, row) => {
     const breakdown = getPayrollPaymentBreakdown(row)
     totals.cash += breakdown.cash
@@ -283,6 +301,7 @@ export function buildPayrollDraftRows({
         department: department === 'all' ? (getEmployeeScheduleDepartments(employee)[0] ?? employee.primary_department ?? 'all') : department,
         payment_method: paymentMethod,
         commission_payment_method: null,
+        payment_allocations: null,
         hours,
         tips,
         base_wages: baseWages,
@@ -311,6 +330,7 @@ export function payrollItemToDraftRow(item: PayrollRunItem): PayrollDraftRow {
     department: item.department,
     payment_method: item.payment_method ?? '',
     commission_payment_method: item.commission_payment_method ?? null,
+    payment_allocations: item.payment_allocations ?? null,
     hours: Number(item.hours ?? 0),
     tips: Number(item.tips ?? 0),
     base_wages: Number(item.base_wages ?? 0),

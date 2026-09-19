@@ -29,7 +29,7 @@ import {
   payrollItemToDraftRow,
   paymentMethodLabel,
 } from '@/lib/payroll'
-import { CashBalanceEntry, Employee, PaymentMethod, PayrollRun, PayrollRunItem, ShiftClock } from '@/lib/types'
+import { CashBalanceEntry, Employee, PaymentMethod, PayrollPaymentAllocations, PayrollRun, PayrollRunItem, ShiftClock } from '@/lib/types'
 import { DepartmentDefinition } from '@/lib/appSettings'
 
 type Step = 'setup' | 'worksheet'
@@ -158,6 +158,7 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
   const commissionPaymentMethod = commission > 0 && requestedCommissionPaymentMethod !== paymentMethod
     ? requestedCommissionPaymentMethod
     : null
+  const paymentAllocations = patch.payment_allocations === undefined ? item.payment_allocations : patch.payment_allocations
   const deductions = normalizeMoney(patch.deductions ?? item.deductions)
   const grossPay = normalizeMoney(baseWages + topUp + tips + commission)
   const netPay = normalizeMoney(Math.max(0, grossPay - deductions))
@@ -173,6 +174,7 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
     ...patch,
     payment_method: paymentMethod,
     commission_payment_method: commissionPaymentMethod,
+    payment_allocations: paymentAllocations ?? null,
     commission,
     deductions,
     gross_pay: grossPay,
@@ -180,6 +182,22 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
     payout_amount: paymentBreakdown.payout,
     cash_rounding: paymentBreakdown.cashRounding,
   }
+}
+
+function getSuggestedPaymentAllocations(row: Pick<PayrollDraftRow, 'payment_method' | 'commission_payment_method' | 'base_wages' | 'guarantee_top_up' | 'tips' | 'commission' | 'deductions' | 'net_pay'>): PayrollPaymentAllocations {
+  const primaryMethod = row.payment_method || 'cash'
+  const commissionMethod = row.commission_payment_method || primaryMethod
+  let deductions = normalizeMoney(row.deductions)
+  const regularGross = normalizeMoney(row.base_wages + row.guarantee_top_up)
+  const regular = normalizeMoney(Math.max(0, regularGross - deductions))
+  deductions = Math.max(0, deductions - regularGross)
+  const tips = normalizeMoney(Math.max(0, row.tips - deductions))
+  deductions = Math.max(0, deductions - row.tips)
+  const commission = normalizeMoney(Math.max(0, row.commission - deductions))
+  const allocations: Record<PaymentMethod, number> = { cash: 0, check: 0, ach: 0 }
+  allocations[primaryMethod] = normalizeMoney(regular + tips)
+  allocations[commissionMethod] = normalizeMoney(allocations[commissionMethod] + commission)
+  return allocations
 }
 
 function getEmployeeClockRecords({
@@ -226,6 +244,7 @@ function mergeWorksheetRowsWithClockSource(currentRows: PayrollDraftRow[], sourc
       ...sourceRow,
       payment_method: currentRow.payment_method,
       commission_payment_method: currentRow.commission_payment_method,
+      payment_allocations: currentRow.payment_allocations,
       commission: currentRow.commission,
       deductions: currentRow.deductions,
       memo: currentRow.memo,
@@ -245,6 +264,7 @@ function arePayrollRowsEqual(leftRows: PayrollDraftRow[], rightRows: PayrollDraf
     return leftRow.employee_id === rightRow.employee_id &&
       leftRow.payment_method === rightRow.payment_method &&
       leftRow.commission_payment_method === rightRow.commission_payment_method &&
+      JSON.stringify(leftRow.payment_allocations ?? null) === JSON.stringify(rightRow.payment_allocations ?? null) &&
       leftRow.hours === rightRow.hours &&
       leftRow.tips === rightRow.tips &&
       leftRow.base_wages === rightRow.base_wages &&
@@ -726,6 +746,9 @@ export default function WageWorksheetPage() {
         next.commission_payment_method = null
       }
       if (next.commission <= 0 || next.commission_payment_method === next.payment_method) next.commission_payment_method = null
+      if (patch.hours !== undefined || patch.tips !== undefined || patch.base_wages !== undefined || patch.guarantee_top_up !== undefined || patch.commission !== undefined || patch.deductions !== undefined) {
+        next.payment_allocations = null
+      }
 
       if (patch.hours !== undefined && patch.base_wages === undefined) {
         next.base_wages = normalizeMoney(next.hours * hourlyRate)
@@ -741,6 +764,14 @@ export default function WageWorksheetPage() {
 
       return { ...next, ...calculatePayrollAmounts(next) }
     })))
+  }
+
+  const openSplitPayment = (row: PayrollDraftRow) => {
+    if (worksheetMode === 'paid_view') return
+    if (!row.payment_allocations) {
+      updateRow(row.employee_id, { payment_allocations: getSuggestedPaymentAllocations(row) })
+    }
+    setSplitPaymentEmployeeId(row.employee_id)
   }
 
   const refreshWorksheetRow = (employeeId: string, nextClockRecords: ShiftClock[] = clockRecords) => {
@@ -763,6 +794,7 @@ export default function WageWorksheetPage() {
         ...nextRow,
         payment_method: row.payment_method,
         commission_payment_method: row.commission_payment_method,
+        payment_allocations: row.payment_allocations,
         commission: row.commission,
         deductions: row.deductions,
         memo: row.memo,
@@ -842,6 +874,7 @@ export default function WageWorksheetPage() {
         payment_method: item.payment_method ?? '',
         commission_payment_method: item.commission_payment_method ?? null,
         commission: Number(item.commission ?? 0),
+        payment_allocations: item.payment_allocations ?? null,
         payout_amount: Number(item.payout_amount ?? 0),
         gross_pay: Number(item.gross_pay ?? 0),
         deductions: Number(item.deductions ?? 0),
@@ -980,6 +1013,7 @@ export default function WageWorksheetPage() {
       department: department === 'all' ? (getEmployeeScheduleDepartments(employee)[0] ?? employee.primary_department ?? 'all') : department,
       payment_method: employee.payment_method ?? '',
       commission_payment_method: null,
+      payment_allocations: null,
       hours: 0,
       tips: 0,
       base_wages: 0,
@@ -1510,7 +1544,7 @@ export default function WageWorksheetPage() {
                   const hourlyRate = Number(employee?.hourly_wage ?? 0)
                   const commissionAvailable = employee?.commission_enabled === true
                   const breakReviewCount = breakReviewCounts.get(row.employee_id) ?? 0
-                  const hasSplitPayment = Boolean(row.commission_payment_method && row.commission_payment_method !== row.payment_method && row.commission > 0)
+                  const hasSplitPayment = Boolean(row.payment_allocations)
 
                   return (
                   <TableRow key={row.employee_id} className="border-b">
@@ -1526,13 +1560,13 @@ export default function WageWorksheetPage() {
                       {hasSplitPayment && (
                         <div className="mt-1 text-[10px] leading-tight text-blue-700">{formatPayrollPaymentSummary(row)}</div>
                       )}
-                      {worksheetMode !== 'paid_view' && row.commission > 0 && (
+                      {worksheetMode !== 'paid_view' && row.payment_method && (
                         <button
                           type="button"
                           className="mt-1 text-left text-[10px] font-medium text-blue-700 hover:underline"
-                          onClick={() => setSplitPaymentEmployeeId(row.employee_id)}
+                          onClick={() => openSplitPayment(row)}
                         >
-                          {hasSplitPayment ? 'Edit split payment' : 'Pay commission separately'}
+                          {hasSplitPayment ? 'Edit split payment' : 'Split payment'}
                         </button>
                       )}
                     </TableCell>
@@ -1613,52 +1647,55 @@ export default function WageWorksheetPage() {
       )}
 
       <Dialog open={!!splitPaymentRow} onOpenChange={(open) => { if (!open) setSplitPaymentEmployeeId(null) }}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg p-6">
+        <DialogContent className="w-[calc(100vw-2rem)] !max-w-3xl max-h-[90vh] overflow-y-auto p-6">
           <DialogHeader>
             <DialogTitle>Split Payment — {splitPaymentRow?.employee_name}</DialogTitle>
           </DialogHeader>
           {splitPaymentRow && (() => {
             const breakdown = getPayrollPaymentBreakdown(splitPaymentRow)
-            const commissionPayout = Math.min(splitPaymentRow.net_pay, splitPaymentRow.commission)
-            const regularPayout = normalizeMoney(splitPaymentRow.net_pay - commissionPayout)
+            const allocations = splitPaymentRow.payment_allocations ?? getSuggestedPaymentAllocations(splitPaymentRow)
+            const allocationTotal = normalizeMoney(Number(allocations.cash ?? 0) + Number(allocations.check ?? 0) + Number(allocations.ach ?? 0))
+            const allocationDifference = normalizeMoney(splitPaymentRow.net_pay - allocationTotal)
+            const updateAllocation = (method: PaymentMethod, value: string) => updateRow(splitPaymentRow.employee_id, {
+              payment_allocations: { ...allocations, [method]: normalizeMoney(value) },
+            })
             return (
               <div className="space-y-4">
                 <div className="rounded-lg border bg-slate-50 p-3">
                   <div className="text-xs uppercase text-muted-foreground">Net Payroll</div>
                   <div className="mt-1 text-2xl font-bold text-slate-950">{formatCurrency(splitPaymentRow.net_pay)}</div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg border bg-white p-3">
-                    <div className="text-xs font-medium text-muted-foreground">Regular pay after deductions</div>
-                    <div className="mt-1 text-lg font-bold">{formatCurrency(regularPayout)}</div>
-                    <Label className="mt-3 block">Pay by</Label>
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-semibold">Payroll components</div>
+                      <div className="text-xs text-muted-foreground">Suggested amounts are calculated from regular pay, tips, commission, and deductions.</div>
+                    </div>
                     <Select value={splitPaymentRow.payment_method || undefined} onValueChange={(value: string | null) => value && updateRow(splitPaymentRow.employee_id, { payment_method: value as PaymentMethod })}>
-                      <SelectTrigger><span>{paymentMethodLabel(splitPaymentRow.payment_method)}</span></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="cash">Cash</SelectItem>
-                        <SelectItem value="check">Check</SelectItem>
-                        <SelectItem value="ach">ACH</SelectItem>
-                      </SelectContent>
+                      <SelectTrigger className="w-40"><span>Regular: {paymentMethodLabel(splitPaymentRow.payment_method)}</span></SelectTrigger>
+                      <SelectContent><SelectItem value="cash">Regular: Cash</SelectItem><SelectItem value="check">Regular: Check</SelectItem><SelectItem value="ach">Regular: ACH</SelectItem></SelectContent>
                     </Select>
+                </div>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    <div className="rounded-md bg-slate-50 p-2"><div className="text-xs text-muted-foreground">Regular pay</div><div className="font-semibold">{formatCurrency(splitPaymentRow.base_wages + splitPaymentRow.guarantee_top_up)}</div></div>
+                    <div className="rounded-md bg-slate-50 p-2"><div className="text-xs text-muted-foreground">Tips</div><div className="font-semibold">{formatCurrency(splitPaymentRow.tips)}</div></div>
+                    <div className="rounded-md bg-slate-50 p-2"><div className="text-xs text-muted-foreground">Commission</div><div className="font-semibold">{formatCurrency(splitPaymentRow.commission)}</div></div>
+                    <div className="rounded-md bg-red-50 p-2"><div className="text-xs text-red-700">Deductions</div><div className="font-semibold text-red-800">-{formatCurrency(splitPaymentRow.deductions)}</div></div>
                   </div>
-                  <div className="rounded-lg border bg-white p-3">
-                    <div className="text-xs font-medium text-muted-foreground">Commission</div>
-                    <div className="mt-1 text-lg font-bold">{formatCurrency(commissionPayout)}</div>
-                    <Label className="mt-3 block">Pay by</Label>
-                    <Select
-                      value={splitPaymentRow.commission_payment_method ?? 'same'}
-                      onValueChange={(value: string | null) => updateRow(splitPaymentRow.employee_id, {
-                        commission_payment_method: value === 'same' ? null : (value as PaymentMethod),
-                      })}
-                    >
-                      <SelectTrigger><span>{splitPaymentRow.commission_payment_method ? paymentMethodLabel(splitPaymentRow.commission_payment_method) : 'Same as regular pay'}</span></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="same">Same as regular pay</SelectItem>
-                        <SelectItem value="cash">Cash</SelectItem>
-                        <SelectItem value="check">Check</SelectItem>
-                        <SelectItem value="ach">ACH</SelectItem>
-                      </SelectContent>
-                    </Select>
+                </div>
+                <div className="rounded-lg border bg-white p-4">
+                  <div className="mb-3"><div className="font-semibold">Payment allocation</div><div className="text-xs text-muted-foreground">Enter the final amount paid by each method. You can use more than one method.</div></div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {(['cash', 'check', 'ach'] as PaymentMethod[]).map(method => (
+                      <div key={method}>
+                        <Label>{paymentMethodLabel(method)}</Label>
+                        <Input className="mt-1 h-10 text-right" type="number" min="0" step="0.01" value={Number(allocations[method] ?? 0)} onChange={event => updateAllocation(method, event.target.value)} />
+                      </div>
+                    ))}
+                  </div>
+                  <div className={`mt-3 rounded-md px-3 py-2 text-sm ${Math.abs(allocationDifference) < 0.01 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+                    Allocated {formatCurrency(allocationTotal)} of {formatCurrency(splitPaymentRow.net_pay)}
+                    {Math.abs(allocationDifference) >= 0.01 && ` · ${allocationDifference > 0 ? `${formatCurrency(allocationDifference)} still unallocated` : `${formatCurrency(Math.abs(allocationDifference))} overallocated`}`}
                   </div>
                 </div>
                 <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
@@ -1668,8 +1705,8 @@ export default function WageWorksheetPage() {
                   </div>
                   {breakdown.cashRounding > 0 && <div className="mt-1 text-xs text-blue-800">Cash rounding: {formatCurrency(breakdown.cashRounding)}</div>}
                 </div>
-                <p className="text-xs text-muted-foreground">Deductions are applied before the split. Commission is assigned first, and the remaining net payroll uses the regular payment method.</p>
-                <div className="flex justify-end"><Button onClick={() => setSplitPaymentEmployeeId(null)}>Apply Split</Button></div>
+                <p className="text-xs text-muted-foreground">The suggested allocation assigns regular pay and tips to the regular method, then assigns commission separately when configured. Edit any method amount as needed.</p>
+                <div className="flex justify-end"><Button onClick={() => setSplitPaymentEmployeeId(null)} disabled={Math.abs(allocationDifference) >= 0.01}>Apply Split</Button></div>
               </div>
             )
           })()}

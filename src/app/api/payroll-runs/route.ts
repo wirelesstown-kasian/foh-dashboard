@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import type { PaymentMethod } from '@/lib/types'
+import type { PaymentMethod, PayrollPaymentAllocations } from '@/lib/types'
 
 type PayrollRunPayload = {
   run_id?: string
@@ -26,6 +26,7 @@ type PayrollRunPayload = {
     department?: string
     payment_method?: PaymentMethod | ''
     commission_payment_method?: PaymentMethod | null
+    payment_allocations?: PayrollPaymentAllocations | null
     hours?: number
     tips?: number
     base_wages?: number
@@ -78,9 +79,18 @@ function getPaymentBreakdown(
   paymentMethod: PaymentMethod,
   commissionPaymentMethod: PaymentMethod | null,
   commission: number,
-  netPay: number
+  netPay: number,
+  paymentAllocations?: PayrollPaymentAllocations | null,
 ) {
   const breakdown: Record<PaymentMethod, number> = { cash: 0, check: 0, ach: 0 }
+  if (paymentAllocations && (paymentAllocations.cash !== undefined || paymentAllocations.check !== undefined || paymentAllocations.ach !== undefined)) {
+    breakdown.cash = normalizeMoney(paymentAllocations.cash)
+    breakdown.check = normalizeMoney(paymentAllocations.check)
+    breakdown.ach = normalizeMoney(paymentAllocations.ach)
+    breakdown.cash = Math.floor(breakdown.cash)
+    const payout = normalizeMoney(breakdown.cash + breakdown.check + breakdown.ach)
+    return { ...breakdown, payout, cashRounding: normalizeMoney(netPay - payout) }
+  }
   const splitCommission = commissionPaymentMethod && commissionPaymentMethod !== paymentMethod
     ? Math.min(netPay, commission)
     : 0
@@ -108,12 +118,13 @@ function calculatePayrollRow(row: NonNullable<PayrollRunPayload['rows']>[number]
   )
   const deductions = normalizeMoney(row.deductions)
   const netPay = normalizeMoney(Math.max(0, grossPay - deductions))
-  const breakdown = getPaymentBreakdown(paymentMethod, commissionPaymentMethod, commission, netPay)
+  const breakdown = getPaymentBreakdown(paymentMethod, commissionPaymentMethod, commission, netPay, row.payment_allocations)
 
   return {
     ...row,
     payment_method: paymentMethod,
     commission_payment_method: commissionPaymentMethod,
+    payment_allocations: row.payment_allocations ?? null,
     hours: normalizeMoney(row.hours),
     tips: normalizeMoney(row.tips),
     base_wages: normalizeMoney(row.base_wages),
@@ -150,7 +161,8 @@ function getPayrollTotals(rows: NonNullable<PayrollRunPayload['rows']>) {
       row.payment_method,
       isPaymentMethod(row.commission_payment_method) ? row.commission_payment_method : null,
       normalizeMoney(row.commission),
-      normalizeMoney(row.net_pay)
+      normalizeMoney(row.net_pay),
+      row.payment_allocations,
     )
     totals.cash += breakdown.cash
     totals.check += breakdown.check
@@ -252,6 +264,7 @@ export async function POST(req: NextRequest) {
       department: row.department || payload.department,
       payment_method: row.payment_method,
       commission_payment_method: row.commission_payment_method,
+      payment_allocations: row.payment_allocations ?? null,
       hours: row.hours,
       tips: row.tips,
       base_wages: row.base_wages,
@@ -345,6 +358,7 @@ export async function PATCH(req: NextRequest) {
           department: row.department || existingRun.department,
           payment_method: row.payment_method,
           commission_payment_method: row.commission_payment_method,
+          payment_allocations: row.payment_allocations ?? null,
           hours: row.hours,
           tips: row.tips,
           base_wages: row.base_wages,

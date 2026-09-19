@@ -4,6 +4,7 @@ export type SessionPhase = 'register_open' | 'pre_shift' | 'operation' | 'closin
 export type ScheduleDepartment = string
 export type PrimaryDepartment = 'foh' | 'boh' | 'hybrid' | string
 export type PaymentMethod = 'cash' | 'check' | 'ach'
+export type PayrollPaymentAllocations = Partial<Record<PaymentMethod, number>>
 export type TaskCompletionStatus = 'complete' | 'incomplete'
 export type ShiftClockApprovalStatus = 'open' | 'pending_review' | 'approved' | 'adjusted'
 export type ReviewAttributionStatus = 'auto_match' | 'ai_estimate' | 'manual' | 'unassigned'
@@ -219,6 +220,7 @@ export interface PayrollRunItem {
   department: string
   payment_method: PaymentMethod | null
   commission_payment_method: PaymentMethod | null
+  payment_allocations: PayrollPaymentAllocations | null
   hours: number
   tips: number
   base_wages: number

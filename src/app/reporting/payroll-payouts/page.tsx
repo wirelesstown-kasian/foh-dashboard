@@ -140,11 +140,13 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
   const commissionPaymentMethod = commission > 0 && requestedCommissionPaymentMethod !== paymentMethod
     ? requestedCommissionPaymentMethod
     : null
+  const paymentAllocations = patch.payment_allocations === undefined ? item.payment_allocations : patch.payment_allocations
   const updated = {
     ...item,
     ...patch,
     payment_method: paymentMethod,
     commission_payment_method: commissionPaymentMethod === paymentMethod ? null : commissionPaymentMethod,
+    payment_allocations: paymentAllocations ?? null,
     hours,
     base_wages: baseWages,
     guarantee_top_up: topUp,
@@ -161,6 +163,7 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
     deductions: updated.deductions,
     payment_method: updated.payment_method ?? '',
     commission_payment_method: updated.commission_payment_method,
+    payment_allocations: updated.payment_allocations,
   }) }
 }
 
@@ -764,6 +767,7 @@ export default function PayrollPayoutsReportPage() {
           moneyChanged(original.payout_amount, row.payout_amount) ||
           (original.payment_method ?? '') !== (row.payment_method ?? '') ||
           (original.commission_payment_method ?? '') !== (row.commission_payment_method ?? '') ||
+          JSON.stringify(original.payment_allocations ?? null) !== JSON.stringify(row.payment_allocations ?? null) ||
           (original.memo ?? '') !== (row.memo ?? '')
         if (changed) {
           next[row.id] = {
@@ -776,6 +780,7 @@ export default function PayrollPayoutsReportPage() {
             deductions: row.deductions,
             payment_method: row.payment_method,
             commission_payment_method: row.commission_payment_method,
+            payment_allocations: row.payment_allocations,
             memo: row.memo,
           }
         }
@@ -895,6 +900,7 @@ export default function PayrollPayoutsReportPage() {
         payment_method: item.payment_method ?? '',
         commission_payment_method: item.commission_payment_method,
         commission: Number(item.commission ?? 0),
+        payment_allocations: item.payment_allocations,
         payout_amount: Number(item.payout_amount ?? 0),
         gross_pay: Number(item.gross_pay ?? 0),
         deductions: Number(item.deductions ?? 0),

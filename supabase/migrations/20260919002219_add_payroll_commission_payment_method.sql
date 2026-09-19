@@ -2,6 +2,9 @@ alter table public.payroll_run_items
 add column if not exists commission_payment_method text null;
 
 alter table public.payroll_run_items
+add column if not exists payment_allocations jsonb null;
+
+alter table public.payroll_run_items
 drop constraint if exists payroll_run_items_commission_payment_method_check;
 
 alter table public.payroll_run_items
