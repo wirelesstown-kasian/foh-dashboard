@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
@@ -90,6 +90,10 @@ function formatPaymentBreakdown(breakdown: Record<ReportPaymentMethod, number>) 
 
 function formatMealBreakMinutes(minutes: number) {
   return minutes > 0 ? `${minutes}m` : '—'
+}
+
+function formatReportDate(value: string) {
+  return format(new Date(`${value}T00:00:00`), 'M/d/yyyy')
 }
 
 function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
@@ -276,7 +280,7 @@ export default function WageReportPage() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null)
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
-  const [expandedPayoutEmployeeId, setExpandedPayoutEmployeeId] = useState<string | null>(null)
+  const [expandedDetailGroupKey, setExpandedDetailGroupKey] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
 
   const [startDate, endDate] = useMemo(
@@ -714,25 +718,6 @@ export default function WageReportPage() {
     () => (employeeFilter === 'all' ? rows : rows.filter(row => row.emp.id === employeeFilter)),
     [employeeFilter, rows]
   )
-  const payoutGroups = useMemo(() => {
-    const assigned = new Set<string>()
-    const paidGroups = periodPayrollRuns.map(run => {
-      const runEmployeeIds = new Set((run.payroll_run_items ?? []).map(item => item.employee_id).filter((id): id is string => Boolean(id)))
-      const groupRows = displayedRows.filter(row => runEmployeeIds.has(row.emp.id) && !assigned.has(row.emp.id))
-      groupRows.forEach(row => assigned.add(row.emp.id))
-      return {
-        key: run.id,
-        title: `Paid ${run.start_date} – ${run.end_date}`,
-        subtitle: `Pay date ${run.pay_date}`,
-        paid: true,
-        rows: groupRows,
-      }
-    }).filter(group => group.rows.length > 0)
-    const unpaidRows = displayedRows.filter(row => !assigned.has(row.emp.id))
-    return unpaidRows.length > 0
-      ? [{ key: 'unpaid', title: 'Unpaid', subtitle: 'Recent work measured but not included in a saved payout', paid: false, rows: unpaidRows }, ...paidGroups]
-      : paidGroups
-  }, [displayedRows, periodPayrollRuns])
   const displayedPaymentTotals = useMemo(
     () => displayedRows.reduce<Record<ReportPaymentMethod, number>>((totals, row) => {
       totals.cash += row.paymentBreakdown.cash
@@ -758,7 +743,35 @@ export default function WageReportPage() {
     }
   }, [displayedRows, eodReports, endDate, startDate])
   const detailTarget = displayedRows.find(row => row.emp.id === detailEmployeeId) ?? null
-  const detailRows = detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : []
+  const detailRows = useMemo(
+    () => detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : [],
+    [detailRowsByEmployeeId, detailTarget]
+  )
+  const detailPayoutGroups = useMemo(() => {
+    if (!detailTarget) return []
+    const assignedDates = new Set<string>()
+    const paidGroups = [...periodPayrollRuns]
+      .filter(run => (run.payroll_run_items ?? []).some(item => item.employee_id === detailTarget.emp.id))
+      .sort((left, right) => right.pay_date.localeCompare(left.pay_date))
+      .map(run => {
+        const groupRows = detailRows.filter(detail => (
+          (detail.date >= run.start_date && detail.date <= run.end_date) || detail.date === run.pay_date
+        ) && !assignedDates.has(detail.date))
+        groupRows.forEach(detail => assignedDates.add(detail.date))
+        return {
+          key: run.id,
+          title: `Pay date ${formatReportDate(run.pay_date)}`,
+          subtitle: `${formatReportDate(run.start_date)} – ${formatReportDate(run.end_date)}`,
+          paid: true,
+          rows: groupRows,
+        }
+      })
+      .filter(group => group.rows.length > 0)
+    const unpaidRows = detailRows.filter(detail => !assignedDates.has(detail.date))
+    return unpaidRows.length > 0
+      ? [{ key: 'unpaid', title: 'Unpaid', subtitle: 'Calculated work not included in a saved payout', paid: false, rows: unpaidRows }, ...paidGroups]
+      : paidGroups
+  }, [detailRows, detailTarget, periodPayrollRuns])
   const selectedEmployeeName = employeeFilter === 'all'
     ? 'All Staff'
     : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
@@ -968,36 +981,21 @@ export default function WageReportPage() {
             {view === 'earnings' && <><TableHead className="text-right">Base Wages</TableHead><TableHead className="text-right">Guaranteed Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Total Earnings</TableHead></>}
           </TableRow></TableHeader>
           <TableBody>
-            {payoutGroups.map(group => (
-              <Fragment key={group.key}>
-                <TableRow className={group.paid ? 'bg-emerald-50/60 hover:bg-emerald-50/60' : 'bg-amber-50/70 hover:bg-amber-50/70'}>
-                  <TableCell colSpan={view === 'earnings' ? 13 : 8}>
-                    <div className="flex flex-wrap items-center justify-between gap-2"><div className="font-semibold">{group.title}</div><div className="text-xs text-muted-foreground">{group.subtitle} · {group.rows.length} employee{group.rows.length === 1 ? '' : 's'}</div></div>
-                  </TableCell>
-                </TableRow>
-                {group.rows.map(row => {
-                  const expanded = expandedPayoutEmployeeId === `${group.key}:${row.emp.id}`
-                  const rowDetails = detailRowsByEmployeeId.get(row.emp.id) ?? []
-                  return <Fragment key={`${group.key}:${row.emp.id}`}>
-                    <TableRow>
-                      <TableCell><button type="button" className="font-medium text-left hover:underline" onClick={() => setExpandedPayoutEmployeeId(expanded ? null : `${group.key}:${row.emp.id}`)}>{row.emp.name}</button></TableCell>
-                      <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
-                      <TableCell>{formatPaymentBreakdown(row.paymentBreakdown)}</TableCell>
-                      <TableCell>{row.hasOpenClock ? <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge> : row.hasAutoClockOut ? <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge> : <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>}</TableCell>
-                      <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell><TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(row.mealBreakMinutes)}</TableCell><TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell><TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
-                      {view === 'earnings' && <><TableCell className="text-right">{formatCurrency(row.baseWages)}</TableCell><TableCell className="text-right text-violet-700">{formatCurrency(row.guaranteeTopUp)}</TableCell><TableCell className="text-right">{formatCurrency(row.commission)}</TableCell><TableCell className="text-right text-red-700">{formatCurrency(row.deductions)}</TableCell><TableCell className="text-right font-bold">{formatCurrency(row.totalEarnings)}</TableCell></>}
-                    </TableRow>
-                    {expanded && <TableRow className="bg-slate-50/70"><TableCell colSpan={view === 'earnings' ? 13 : 8} className="p-4"><div className="space-y-3"><div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6"><div><div className="text-xs text-muted-foreground">Payout status</div><div className="font-semibold">{group.paid ? 'Paid' : 'Unpaid'}</div></div><div><div className="text-xs text-muted-foreground">Payment method</div><div className="font-semibold">{formatPaymentBreakdown(row.paymentBreakdown)}</div></div><div><div className="text-xs text-muted-foreground">Regular wages</div><div className="font-semibold">{formatCurrency(row.baseWages)}</div></div><div><div className="text-xs text-muted-foreground">Top-up</div><div className="font-semibold">{formatCurrency(row.guaranteeTopUp)}</div></div><div><div className="text-xs text-muted-foreground">Commission</div><div className="font-semibold">{formatCurrency(row.commission)}</div></div><div><div className="text-xs text-muted-foreground">Deductions</div><div className="font-semibold text-red-700">-{formatCurrency(row.deductions)}</div></div></div>{rowDetails.length > 0 && <div className="overflow-x-auto rounded-md border bg-white"><Table className="text-xs"><TableHeader><TableRow><TableHead>Date</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal Break</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader><TableBody>{rowDetails.map(detail => <TableRow key={detail.date}><TableCell>{detail.date}</TableCell><TableCell className="text-right">{detail.hours.toFixed(2)}</TableCell><TableCell className="text-right">{formatMealBreakMinutes(detail.mealBreakMinutes)}</TableCell><TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell></TableRow>)}</TableBody></Table></div>}<Button variant="outline" size="sm" onClick={() => setDetailEmployeeId(row.emp.id)}>Open full wage detail</Button></div></TableCell></TableRow>}
-                  </Fragment>
-                })}
-              </Fragment>
-            ))}
+            {displayedRows.map(row => <TableRow key={row.emp.id}>
+              <TableCell><button type="button" className="font-medium text-left hover:underline" onClick={() => { setExpandedDetailGroupKey(null); setDetailEmployeeId(row.emp.id) }}>{row.emp.name}</button></TableCell>
+              <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
+              <TableCell>{formatPaymentBreakdown(row.paymentBreakdown)}</TableCell>
+              <TableCell>{row.hasOpenClock ? <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge> : row.hasAutoClockOut ? <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge> : <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>}</TableCell>
+              <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell><TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(row.mealBreakMinutes)}</TableCell><TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell><TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
+              {view === 'earnings' && <><TableCell className="text-right">{formatCurrency(row.baseWages)}</TableCell><TableCell className="text-right text-violet-700">{formatCurrency(row.guaranteeTopUp)}</TableCell><TableCell className="text-right">{formatCurrency(row.commission)}</TableCell><TableCell className="text-right text-red-700">{formatCurrency(row.deductions)}</TableCell><TableCell className="text-right font-bold">{formatCurrency(row.totalEarnings)}</TableCell></>}
+            </TableRow>)}
             {displayedRows.length === 0 && <TableRow><TableCell colSpan={view === 'earnings' ? 13 : 8} className="py-6 text-center text-muted-foreground">No wage data for this range</TableCell></TableRow>}
           </TableBody>
+          {displayedRows.length > 0 && <tfoot><TableRow><TableCell className="font-semibold">Period Total</TableCell><TableCell /><TableCell /><TableCell /><TableCell className="text-right font-semibold">{displayedRows.reduce((sum, row) => sum + row.hours, 0).toFixed(2)}h</TableCell><TableCell className="text-right font-semibold">{formatMealBreakMinutes(displayedRows.reduce((sum, row) => sum + row.mealBreakMinutes, 0))}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.tips, 0))}</TableCell><TableCell />{view === 'earnings' && <><TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.baseWages, 0))}</TableCell><TableCell className="text-right font-semibold text-violet-700">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.guaranteeTopUp, 0))}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.commission, 0))}</TableCell><TableCell className="text-right font-semibold text-red-700">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.deductions, 0))}</TableCell><TableCell className="text-right font-bold">{formatCurrency(displayedRows.reduce((sum, row) => sum + row.totalEarnings, 0))}</TableCell></>}</TableRow></tfoot>}
         </Table>
       </div>
 
-      <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) setDetailEmployeeId(null) }}>
+      <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) { setDetailEmployeeId(null); setExpandedDetailGroupKey(null) } }}>
         <DialogContent className="w-[calc(100vw-3rem)] max-w-none sm:max-w-none max-h-[90vh] overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Wage Detail</DialogTitle>
@@ -1062,43 +1060,24 @@ export default function WageReportPage() {
                   {emailingEmployeeId === detailTarget.emp.id ? 'Sending…' : 'Email Report'}
                 </Button>
               </div>
-              <div className="rounded-xl border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-right">Hours</TableHead>
-                      <TableHead className="text-right">Meal Break</TableHead>
-                      <TableHead className="text-right">Tips</TableHead>
-                      {view === 'earnings' && (
-                        <>
-                          <TableHead className="text-right">Base Wages</TableHead>
-                          <TableHead className="text-right">Top-Up</TableHead>
-                          <TableHead className="text-right">Commission</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                        </>
-                      )}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {detailRows.map(detail => (
-                      <TableRow key={detail.date}>
-                        <TableCell>{detail.date}</TableCell>
-                        <TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell>
-                        <TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(detail.mealBreakMinutes)}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell>
-                        {view === 'earnings' && (
-                          <>
-                            <TableCell className="text-right">{formatCurrency(detail.baseWages)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(detail.guaranteeTopUp)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(detail.commission)}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell>
-                          </>
-                        )}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="space-y-3">
+                {detailPayoutGroups.map(group => {
+                  const expanded = expandedDetailGroupKey === group.key
+                  const groupHours = group.rows.reduce((sum, row) => sum + row.hours, 0)
+                  const groupTips = group.rows.reduce((sum, row) => sum + row.tips, 0)
+                  const groupTotal = group.rows.reduce((sum, row) => sum + row.totalEarnings, 0)
+                  return <div key={group.key} className={`rounded-xl border ${group.paid ? 'border-emerald-200' : 'border-amber-300'}`}>
+                    <button type="button" className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 text-left ${group.paid ? 'bg-emerald-50' : 'bg-amber-50'}`} onClick={() => setExpandedDetailGroupKey(expanded ? null : group.key)}>
+                      <div><div className="font-semibold text-slate-950">{group.title}</div><div className="text-xs text-muted-foreground">{group.subtitle}</div></div>
+                      <div className="flex flex-wrap gap-4 text-sm"><span>{groupHours.toFixed(2)}h</span><span>{formatCurrency(groupTips)} tips</span><span className="font-semibold">{formatCurrency(groupTotal)}</span><span className="text-blue-700">{expanded ? 'Collapse' : 'View daily details'}</span></div>
+                    </button>
+                    {expanded && <div className="overflow-x-auto border-t bg-white"><Table>
+                      <TableHeader><TableRow><TableHead>Date</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal Break</TableHead><TableHead className="text-right">Tips</TableHead>{view === 'earnings' && <><TableHead className="text-right">Base Wages</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Total</TableHead></>}</TableRow></TableHeader>
+                      <TableBody>{group.rows.map(detail => <TableRow key={detail.date}><TableCell>{detail.date}</TableCell><TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell><TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(detail.mealBreakMinutes)}</TableCell><TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell>{view === 'earnings' && <><TableCell className="text-right">{formatCurrency(detail.baseWages)}</TableCell><TableCell className="text-right">{formatCurrency(detail.guaranteeTopUp)}</TableCell><TableCell className="text-right">{formatCurrency(detail.commission)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell></>}</TableRow>)}</TableBody>
+                    </Table></div>}
+                  </div>
+                })}
+                {detailPayoutGroups.length === 0 && <div className="rounded-xl border p-4 text-sm text-muted-foreground">No daily wage details for this range.</div>}
               </div>
             </div>
           )})()}
