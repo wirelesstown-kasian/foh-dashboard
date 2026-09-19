@@ -1037,11 +1037,6 @@ export default function WageReportPage() {
                   <div className="mt-0.5 text-xs text-slate-400">this period</div>
                 </div>
                 <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tip Cap</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.emp.tip_pool_hourly_rate !== null ? `${formatCurrency(Number(detailTarget.emp.tip_pool_hourly_rate))}/hr` : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">maximum tips / hr</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>
                   <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
                   <div className="mt-0.5 text-xs text-slate-400">total earnings / hr</div>
