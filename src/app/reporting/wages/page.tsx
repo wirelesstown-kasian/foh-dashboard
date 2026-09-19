@@ -853,6 +853,7 @@ export default function WageReportPage() {
           onRefDateChange={setRefDate}
           onCustomStartChange={setCustomStart}
           onCustomEndChange={setCustomEnd}
+          showYearly
           leftSlot={
             <>
               <Select value={view} onValueChange={(value: string | null) => value && setView(value as TipReportView)}>

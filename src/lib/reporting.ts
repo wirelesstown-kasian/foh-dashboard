@@ -1,8 +1,8 @@
-import { addDays, addMonths, addWeeks, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays, subMonths, subWeeks } from 'date-fns'
+import { addDays, addMonths, addWeeks, addYears, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subDays, subMonths, subWeeks, subYears } from 'date-fns'
 import { Employee } from '@/lib/types'
 import { employeeMatchesScheduleDepartment } from '@/lib/organization'
 
-export type ReportPeriod = 'daily' | 'weekly' | 'monthly' | 'custom'
+export type ReportPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom'
 export type ReportDepartment = string
 
 export function formatCurrency(value: number) {
@@ -35,6 +35,13 @@ export function getReportRange(period: ReportPeriod, refDate: Date, customStart:
     ]
   }
 
+  if (period === 'yearly') {
+    return [
+      format(startOfYear(refDate), 'yyyy-MM-dd'),
+      format(endOfYear(refDate), 'yyyy-MM-dd'),
+    ]
+  }
+
   return [
     format(startOfMonth(refDate), 'yyyy-MM-dd'),
     format(endOfMonth(refDate), 'yyyy-MM-dd'),
@@ -50,6 +57,7 @@ export function getReportLabel(period: ReportPeriod, refDate: Date, customStart:
   if (period === 'weekly') {
     return `Week of ${format(startOfWeek(refDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
   }
+  if (period === 'yearly') return format(refDate, 'yyyy')
   return format(refDate, 'MMMM yyyy')
 }
 
@@ -57,5 +65,6 @@ export function shiftReportDate(period: ReportPeriod, refDate: Date, direction: 
   if (period === 'custom') return refDate
   if (period === 'daily') return direction === 'prev' ? subDays(refDate, 1) : addDays(refDate, 1)
   if (period === 'weekly') return direction === 'prev' ? subWeeks(refDate, 1) : addWeeks(refDate, 1)
+  if (period === 'yearly') return direction === 'prev' ? subYears(refDate, 1) : addYears(refDate, 1)
   return direction === 'prev' ? subMonths(refDate, 1) : addMonths(refDate, 1)
 }

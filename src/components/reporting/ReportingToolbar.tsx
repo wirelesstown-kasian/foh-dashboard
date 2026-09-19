@@ -20,6 +20,7 @@ interface ReportingToolbarProps {
   onRefDateChange: (date: Date) => void
   onCustomStartChange: (value: string) => void
   onCustomEndChange: (value: string) => void
+  showYearly?: boolean
   leftSlot?: React.ReactNode
   rightSlot?: React.ReactNode
 }
@@ -33,6 +34,7 @@ export function ReportingToolbar({
   onRefDateChange,
   onCustomStartChange,
   onCustomEndChange,
+  showYearly = false,
   leftSlot,
   rightSlot,
 }: ReportingToolbarProps) {
@@ -51,6 +53,7 @@ export function ReportingToolbar({
           <SelectItem value="daily">Daily</SelectItem>
           <SelectItem value="weekly">Weekly</SelectItem>
           <SelectItem value="monthly">Monthly</SelectItem>
+          {showYearly && <SelectItem value="yearly">This Year</SelectItem>}
           <SelectItem value="custom">Custom</SelectItem>
         </SelectContent>
       </Select>
