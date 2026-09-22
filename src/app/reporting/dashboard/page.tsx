@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { CashBalanceEntry, Employee, EodReport, PayrollRun, PayrollRunItem, ShiftClock, TipDistribution } from '@/lib/types'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getPayrollPaymentBreakdown } from '@/lib/payroll'
 import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, ReceiptText, Truck, Wallet } from 'lucide-react'
 
 type DashboardPeriod = 'weekly' | 'monthly' | 'yearly' | 'custom'
@@ -138,14 +139,21 @@ function summarizePayrollRuns(runs: Array<PayrollRun & { payroll_run_items?: Pay
       const runTipOut = items.reduce((sum, item) => sum + Number(item.tips ?? 0), 0)
       const runItemPayrollOut = items.reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
       const runTotalPayrollOut = runItemPayrollOut > 0 ? runItemPayrollOut : getPayrollRunTotal(run)
+      const paymentBreakdowns = items.map(item => getPayrollPaymentBreakdown({
+        payment_method: item.payment_method,
+        commission_payment_method: item.commission_payment_method,
+        commission: Number(item.commission ?? 0),
+        net_pay: Number(item.net_pay ?? item.payout_amount ?? 0),
+        payment_allocations: item.payment_allocations,
+      }))
       const cashPayrollOut = items.length > 0
-        ? items.filter(item => item.payment_method === 'cash').reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
+        ? paymentBreakdowns.reduce((sum, breakdown) => sum + breakdown.cash, 0)
         : Number(run.total_cash ?? 0)
       const checkPayrollOut = items.length > 0
-        ? items.filter(item => item.payment_method === 'check').reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
+        ? paymentBreakdowns.reduce((sum, breakdown) => sum + breakdown.check, 0)
         : Number(run.total_check ?? 0)
       const achPayrollOut = items.length > 0
-        ? items.filter(item => item.payment_method === 'ach').reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
+        ? paymentBreakdowns.reduce((sum, breakdown) => sum + breakdown.ach, 0)
         : Number(run.total_ach ?? 0)
       const unknownPayrollOut = items.filter(item => !item.payment_method).reduce((sum, item) => sum + Number(item.payout_amount ?? 0), 0)
 

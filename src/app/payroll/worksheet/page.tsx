@@ -167,6 +167,7 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
     commission_payment_method: commissionPaymentMethod ?? null,
     commission,
     net_pay: netPay,
+    payment_allocations: paymentAllocations,
   })
 
   return {
