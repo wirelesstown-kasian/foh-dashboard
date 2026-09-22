@@ -167,29 +167,11 @@ function getSavedDailyTips(report: EodReport & { tip_distributions?: { employee_
   return savedTips
 }
 
-function employeeHasDepartmentClock(
-  employeeId: string,
-  sessionDate: string,
-  department: string,
-  employees: Employee[],
-  clockRecords: ShiftClock[],
-  schedules: Schedule[] = []
-) {
-  if (department === 'all') return true
-  const employee = employees.find(item => item.id === employeeId)
-  return clockRecords.some(record =>
-    record.employee_id === employeeId &&
-    record.session_date === sessionDate &&
-    clockMatchesWorkDepartment(record, department, employee, schedules)
-  )
-}
-
-function getCalculatedDailyTips(report: EodReport, employees: Employee[], clockRecords: ShiftClock[], schedules: Schedule[] = []) {
+function getCalculatedDailyTipsForRecords(report: EodReport, employees: Employee[], clockRecords: ShiftClock[], schedules: Schedule[] = []) {
   const employeeById = new Map(employees.map(employee => [employee.id, employee]))
   const hoursByEmployee = new Map<string, number>()
 
   for (const record of clockRecords) {
-    if (record.session_date !== report.session_date) continue
     const employee = employeeById.get(record.employee_id)
     if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
 
@@ -237,13 +219,35 @@ export function getSavedTipMap(
   schedules: Schedule[] = []
 ) {
   const tipsByEmployee = new Map<string, number>()
+  const employeeById = new Map(employees.map(employee => [employee.id, employee]))
+  const clockRecordsByDate = new Map<string, ShiftClock[]>()
+  const departmentEmployeeIdsByDate = new Map<string, Set<string>>()
+
+  for (const record of clockRecords) {
+    const employee = employeeById.get(record.employee_id)
+    if (!employee) continue
+    const dateRecords = clockRecordsByDate.get(record.session_date) ?? []
+    dateRecords.push(record)
+    clockRecordsByDate.set(record.session_date, dateRecords)
+    if (department !== 'all' && clockMatchesWorkDepartment(record, department, employee, schedules)) {
+      const employeeIds = departmentEmployeeIdsByDate.get(record.session_date) ?? new Set<string>()
+      employeeIds.add(record.employee_id)
+      departmentEmployeeIdsByDate.set(record.session_date, employeeIds)
+    }
+  }
+
   for (const report of reports) {
     if (report.session_date < startDate || report.session_date > endDate) continue
     const savedTips = getSavedDailyTips(report)
-    const calculatedTips = getCalculatedDailyTips(report, employees, clockRecords, schedules)
+    const calculatedTips = getCalculatedDailyTipsForRecords(
+      report,
+      employees,
+      clockRecordsByDate.get(report.session_date) ?? [],
+      schedules
+    )
     const dailyTips = shouldUseCalculatedDailyTips(savedTips, calculatedTips) ? calculatedTips : savedTips
     for (const [employeeId, tip] of dailyTips) {
-      if (!employeeHasDepartmentClock(employeeId, report.session_date, department, employees, clockRecords, schedules)) continue
+      if (department !== 'all' && !departmentEmployeeIdsByDate.get(report.session_date)?.has(employeeId)) continue
       addTipToMap(tipsByEmployee, employeeId, tip.tips)
     }
   }

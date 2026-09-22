@@ -113,22 +113,6 @@ function recordMatchesDepartment(
   return clockMatchesWorkDepartment(record, department, employee, schedules)
 }
 
-function employeeHasDepartmentClock(
-  employeeId: string,
-  date: string,
-  department: ReportDepartment,
-  employees: Employee[],
-  clockRecords: ShiftClock[],
-  schedules: Schedule[] = []
-) {
-  if (department === 'all') return true
-  return clockRecords.some(record =>
-    record.employee_id === employeeId &&
-    record.session_date === date &&
-    recordMatchesDepartment(record, getClockRecordEmployee(record, employees), department, schedules)
-  )
-}
-
 function calculateDailyTipPreview({
   employees,
   clockRecords,
@@ -203,7 +187,7 @@ function shouldRecalculateTips(
 function getDailyWageDetail({
   emp,
   date,
-  clockRecords,
+  clockRecordsByEmployeeDate,
   employees,
   department,
   schedules,
@@ -214,7 +198,7 @@ function getDailyWageDetail({
 }: {
   emp: Employee
   date: string
-  clockRecords: ReturnType<typeof useClockRecords>['clockRecords']
+  clockRecordsByEmployeeDate: Map<string, ShiftClock[]>
   employees: Employee[]
   department: ReportDepartment
   schedules: Schedule[]
@@ -223,15 +207,11 @@ function getDailyWageDetail({
   savedTip?: SavedDailyTip
   useCalculatedTips: boolean
 }): WageDetailRow | null {
-  const matchingClockRecords = clockRecords
-    .filter(record =>
-      record.employee_id === emp.id &&
-      record.session_date === date &&
-      recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules)
-    )
+  const matchingClockRecords = (clockRecordsByEmployeeDate.get(`${emp.id}:${date}`) ?? [])
+    .filter(record => recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules))
   const clockHours = matchingClockRecords.reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
   const mealBreakMinutes = matchingClockRecords.reduce((sum, record) => sum + getMealBreakState(record).minutes, 0)
-  const hasDepartmentClock = employeeHasDepartmentClock(emp.id, date, department, employees, clockRecords, schedules)
+  const hasDepartmentClock = matchingClockRecords.length > 0
   const calculatedHours = calculatedTip?.hours ?? 0
   const savedHours = savedTip?.hours ?? 0
   const hours = useCalculatedTips
@@ -308,6 +288,15 @@ export default function WageReportPage() {
     }),
     [clockRecords, department, employees, endDate, scheduledDeptIds, schedules, startDate]
   )
+  const clockRecordsByDate = useMemo(() => {
+    const grouped = new Map<string, ShiftClock[]>()
+    for (const record of clockRecords) {
+      const recordsForDate = grouped.get(record.session_date) ?? []
+      recordsForDate.push(record)
+      grouped.set(record.session_date, recordsForDate)
+    }
+    return grouped
+  }, [clockRecords])
 
   const monthStart = format(new Date(`${startDate}T12:00:00`), 'yyyy-MM-01')
   const monthEnd = format(new Date(new Date(`${endDate}T12:00:00`).getFullYear(), new Date(`${endDate}T12:00:00`).getMonth() + 1, 0), 'yyyy-MM-dd')
@@ -321,20 +310,24 @@ export default function WageReportPage() {
     )
     const monthHoursByEmp = new Map<string, number>()
     const monthTipsByEmp = new Map<string, number>()
+    const departmentEmployeeIdsByDate = new Map<string, Set<string>>()
     for (const r of clockRecords) {
       if (!filteredEmpIds.has(r.employee_id) || r.session_date < monthStart || r.session_date > monthEnd) continue
       if (!recordMatchesDepartment(r, getClockRecordEmployee(r, employees), department, monthSchedules)) continue
       monthHoursByEmp.set(r.employee_id, (monthHoursByEmp.get(r.employee_id) ?? 0) + getEffectiveClockHours(r))
+      const employeeIds = departmentEmployeeIdsByDate.get(r.session_date) ?? new Set<string>()
+      employeeIds.add(r.employee_id)
+      departmentEmployeeIdsByDate.set(r.session_date, employeeIds)
     }
     for (const eod of eodReports) {
       if (eod.session_date < monthStart || eod.session_date > monthEnd) continue
-      const calculatedTips = calculateDailyTipPreview({ employees, clockRecords, schedules: monthSchedules, report: eod })
+      const calculatedTips = calculateDailyTipPreview({ employees, clockRecords: clockRecordsByDate.get(eod.session_date) ?? [], schedules: monthSchedules, report: eod })
       const savedTips = getSavedDailyTips(eod)
       const useCalculatedTips = shouldRecalculateTips(savedTips, calculatedTips)
       const dailyTips = useCalculatedTips ? calculatedTips : savedTips
       for (const [employeeId, tip] of dailyTips) {
         if (!filteredEmpIds.has(employeeId)) continue
-        if (!employeeHasDepartmentClock(employeeId, eod.session_date, department, employees, clockRecords, monthSchedules)) continue
+        if (department !== 'all' && !departmentEmployeeIdsByDate.get(eod.session_date)?.has(employeeId)) continue
         monthTipsByEmp.set(employeeId, (monthTipsByEmp.get(employeeId) ?? 0) + tip.tips)
       }
     }
@@ -389,7 +382,7 @@ export default function WageReportPage() {
     }).sort((a, b) => b.score - a.score || b.tasks - a.tasks)
 
     return new Map(scored.map((item, idx) => [item.empId, { ...item, overallRank: idx + 1, staffCount: scored.length }]))
-  }, [clockRecords, completions, department, employees, eodReports, filteredEmployees, monthEnd, monthSchedules, monthStart])
+  }, [clockRecords, clockRecordsByDate, completions, department, employees, eodReports, filteredEmployees, monthEnd, monthSchedules, monthStart])
 
   const matchingPayrollRun = useMemo(() => {
     const exactDepartment = payrollRuns.find(run => (
@@ -455,7 +448,7 @@ export default function WageReportPage() {
     const calculatedTipsByDate = new Map(
       rangeReports.map(report => [report.session_date, calculateDailyTipPreview({
         employees,
-        clockRecords,
+        clockRecords: clockRecordsByDate.get(report.session_date) ?? [],
         schedules,
         report,
       })])
@@ -469,30 +462,52 @@ export default function WageReportPage() {
         .map(report => report.session_date)
     )
 
+    const clockRecordsByEmployeeDate = new Map<string, ShiftClock[]>()
+    for (const record of clockRecords) {
+      const key = `${record.employee_id}:${record.session_date}`
+      const recordsForEmployeeDate = clockRecordsByEmployeeDate.get(key) ?? []
+      recordsForEmployeeDate.push(record)
+      clockRecordsByEmployeeDate.set(key, recordsForEmployeeDate)
+    }
+    const savedTipDatesByEmployee = new Map<string, Set<string>>()
+    const calculatedTipDatesByEmployee = new Map<string, Set<string>>()
+    for (const [date, tips] of savedTipsByDate) {
+      for (const employeeId of tips.keys()) {
+        const dates = savedTipDatesByEmployee.get(employeeId) ?? new Set<string>()
+        dates.add(date)
+        savedTipDatesByEmployee.set(employeeId, dates)
+      }
+    }
+    for (const [date, tips] of calculatedTipsByDate) {
+      for (const employeeId of tips.keys()) {
+        const dates = calculatedTipDatesByEmployee.get(employeeId) ?? new Set<string>()
+        dates.add(date)
+        calculatedTipDatesByEmployee.set(employeeId, dates)
+      }
+    }
+    const clockDatesByEmployee = new Map<string, Set<string>>()
+    for (const record of clockRecords) {
+      if (record.session_date < startDate || record.session_date > endDate) continue
+      const employee = getClockRecordEmployee(record, employees)
+      if (!employee || !recordMatchesDepartment(record, employee, department, schedules)) continue
+      const dates = clockDatesByEmployee.get(record.employee_id) ?? new Set<string>()
+      dates.add(record.session_date)
+      clockDatesByEmployee.set(record.employee_id, dates)
+    }
+
     const detailMap = new Map(
       filteredEmployees.map(emp => {
-        const employeeDates = Array.from(new Set([
-          ...rangeReports
-            .filter(report => savedTipsByDate.get(report.session_date)?.has(emp.id))
-            .map(report => report.session_date),
-          ...rangeReports
-            .filter(report => calculatedTipsByDate.get(report.session_date)?.has(emp.id))
-            .map(report => report.session_date),
-          ...clockRecords
-            .filter(record =>
-              record.employee_id === emp.id &&
-              record.session_date >= startDate &&
-              record.session_date <= endDate &&
-              recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules)
-            )
-            .map(record => record.session_date),
-        ]))
+        const employeeDates = new Set<string>([
+          ...(savedTipDatesByEmployee.get(emp.id) ?? []),
+          ...(calculatedTipDatesByEmployee.get(emp.id) ?? []),
+          ...(clockDatesByEmployee.get(emp.id) ?? []),
+        ])
 
-        const detailRows = employeeDates
+        const detailRows = [...employeeDates]
           .map(date => getDailyWageDetail({
             emp,
             date,
-            clockRecords,
+            clockRecordsByEmployeeDate,
             employees,
             department,
             schedules,
@@ -529,7 +544,7 @@ export default function WageReportPage() {
     }
 
     return detailMap
-  }, [clockRecords, completedPayrollRuns, department, employees, eodReports, filteredEmployees, endDate, schedules, startDate])
+  }, [clockRecords, clockRecordsByDate, completedPayrollRuns, department, employees, eodReports, filteredEmployees, endDate, schedules, startDate])
 
   const rows = useMemo(() => {
     const savedItems = completedPayrollRuns.flatMap(run => (run.payroll_run_items ?? [])
