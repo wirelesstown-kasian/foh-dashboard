@@ -3,14 +3,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
-import { useClockRecords, useEmployees, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
-import { CashBalanceEntry, Employee, EodReport, PayrollRun, PayrollRunItem, ShiftClock, TipDistribution } from '@/lib/types'
-import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { CashBalanceEntry, EodReport, PayrollRun, PayrollRunItem, TipDistribution } from '@/lib/types'
 import { getPayrollPaymentBreakdown } from '@/lib/payroll'
 import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, ReceiptText, Truck, Wallet } from 'lucide-react'
 
@@ -232,26 +231,16 @@ function getPayrollRunTotal(run: Pick<PayrollRun, 'total_cash' | 'total_check' |
   return Number(run.total_cash ?? 0) + Number(run.total_check ?? 0) + Number(run.total_ach ?? 0)
 }
 
+function isPaidPayrollRun(run: PayrollRun & { payroll_run_items?: PayrollRunItem[] }) {
+  return getPayrollRunTotal(run) > 0 || (run.payroll_run_items ?? []).some(item => Number(item.payout_amount ?? 0) > 0)
+}
+
 function getPayrollDepartmentGroup(department: string | null | undefined) {
   const value = (department ?? '').toLowerCase()
   if (value.includes('kitchen') || value.includes('cook')) return 'kitchen'
   if (value.includes('server')) return 'server'
   if (value.includes('manager')) return 'manager'
   return 'other'
-}
-
-function getEstimatedWageSpendForRange(
-  records: ShiftClock[],
-  employeeById: Map<string, Employee>,
-  startDate: string,
-  endDate: string
-) {
-  return records
-    .filter(record => record.session_date >= startDate && record.session_date <= endDate)
-    .reduce((sum, record) => {
-      const employee = employeeById.get(record.employee_id)
-      return sum + getEffectiveClockHours(record) * Number(employee?.hourly_wage ?? 0)
-    }, 0)
 }
 
 function getMetricChange(current: number, previous: number) {
@@ -504,7 +493,6 @@ export default function ReportingDashboardPage() {
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
   const { payrollRuns } = usePayrollRuns()
-  const employees = useEmployees({ includeArchived: true })
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
@@ -546,7 +534,6 @@ export default function ReportingDashboardPage() {
     }
   }, [endDate, previousStartDate])
 
-  const employeeById = useMemo(() => new Map(employees.map(employee => [employee.id, employee])), [employees])
   const currentReports = useMemo(
     () => eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate),
     [eodReports, endDate, startDate]
@@ -563,26 +550,18 @@ export default function ReportingDashboardPage() {
     () => cashEntries.filter(entry => entry.entry_date >= previousStartDate && entry.entry_date <= previousEndDate),
     [cashEntries, previousEndDate, previousStartDate]
   )
+  // A dashboard payroll number must represent a payout that was actually recorded.
+  // Clock-based estimates and worksheet rows with no payout are intentionally excluded.
   const currentPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate),
+    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate && isPaidPayrollRun(run)),
     [endDate, payrollRuns, startDate]
   )
   const previousPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate),
+    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate && isPaidPayrollRun(run)),
     [payrollRuns, previousEndDate, previousStartDate]
   )
   const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
-  const hasPreviousSavedPayroll = previousPayrollRuns.length > 0
 
-  const estimatedCurrentWageSpend = useMemo(
-    () => getEstimatedWageSpendForRange(clockRecords, employeeById, startDate, endDate),
-    [clockRecords, employeeById, endDate, startDate]
-  )
-
-  const estimatedPreviousWageSpend = useMemo(
-    () => getEstimatedWageSpendForRange(clockRecords, employeeById, previousStartDate, previousEndDate),
-    [clockRecords, employeeById, previousEndDate, previousStartDate]
-  )
   const currentPayrollSummary = useMemo(() => summarizePayrollRuns(currentPayrollRuns), [currentPayrollRuns])
   const previousPayrollSummary = useMemo(() => summarizePayrollRuns(previousPayrollRuns), [previousPayrollRuns])
   const yearlyMonthlyOverview = useMemo(() => {
@@ -593,11 +572,10 @@ export default function ReportingDashboardPage() {
       const monthStart = toDateKey(startOfMonth(monthDate))
       const monthEnd = toDateKey(endOfMonth(monthDate))
       const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
-      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd)
+      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd && isPaidPayrollRun(run))
       const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
       const monthPayrollSummary = summarizePayrollRuns(monthPayrollRuns)
       const savedPayroll = monthPayrollSummary.totalPayrollOut
-      const estimatedPayroll = getEstimatedWageSpendForRange(clockRecords, employeeById, monthStart, monthEnd)
       const revenue = monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0)
 
       return {
@@ -605,11 +583,11 @@ export default function ReportingDashboardPage() {
         label: format(monthDate, 'MMM'),
         hasData: monthReports.length > 0 || monthPayrollRuns.length > 0 || monthClockRecords.length > 0,
         revenue,
-        payroll: monthPayrollRuns.length > 0 ? savedPayroll : estimatedPayroll,
-        source: monthPayrollRuns.length > 0 ? 'Worksheet' : 'Estimate',
+        payroll: savedPayroll,
+        source: 'Paid out',
       }
     }).filter(month => month.hasData)
-  }, [clockRecords, employeeById, eodReports, payrollRuns])
+  }, [clockRecords, eodReports, payrollRuns])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
@@ -646,35 +624,20 @@ export default function ReportingDashboardPage() {
       }
     }
 
-    if (currentPayrollRuns.length === 0) {
-      totals.payroll = estimatedCurrentWageSpend
-      totals.payrollWithTip = estimatedCurrentWageSpend + sumTipDistributions(currentReports)
-      totals.tipOut = sumTipDistributions(currentReports)
-    }
-
     return totals
-  }, [currentPayrollRuns, currentReports, estimatedCurrentWageSpend])
+  }, [currentPayrollRuns])
 
   const currentTotals = useMemo(
-    () => {
-      const totals = sumReports(currentReports, currentCashEntries, currentPayrollSummary, estimatedCurrentWageSpend, hasCurrentSavedPayroll)
-      if (!hasCurrentSavedPayroll) return totals
-      return {
-        ...totals,
-        tipOut: payrollPanel.tipOut,
-        payrollOut: payrollPanel.payroll,
-        totalPayrollOut: payrollPanel.payrollWithTip,
-      }
-    },
-    [currentCashEntries, currentPayrollSummary, currentReports, estimatedCurrentWageSpend, hasCurrentSavedPayroll, payrollPanel]
+    () => sumReports(currentReports, currentCashEntries, currentPayrollSummary, 0, true),
+    [currentCashEntries, currentPayrollSummary, currentReports]
   )
   const currentGrossRevenue = useMemo(
     () => currentReports.reduce((sum, report) => sum + Number(report.revenue_total ?? 0), 0),
     [currentReports]
   )
   const previousTotals = useMemo(
-    () => sumReports(previousReports, previousCashEntries, previousPayrollSummary, estimatedPreviousWageSpend, hasPreviousSavedPayroll),
-    [estimatedPreviousWageSpend, hasPreviousSavedPayroll, previousCashEntries, previousPayrollSummary, previousReports]
+    () => sumReports(previousReports, previousCashEntries, previousPayrollSummary, 0, true),
+    [previousCashEntries, previousPayrollSummary, previousReports]
   )
   const reportsByDate = useMemo(
     () => new Map(currentReports.map(report => [report.session_date, report])),
@@ -705,10 +668,8 @@ export default function ReportingDashboardPage() {
     [closedDays, currentDates, period, reportsByDate]
   )
   const tipOutSeries = useMemo(
-    () => hasCurrentSavedPayroll
-      ? buildPayrollRunSeries(currentPayrollRuns, summary => summary.tipOut)
-      : buildSeries(currentDates, reportsByDate, closedDays, period, report => sumTipDistributions([report])),
-    [closedDays, currentDates, currentPayrollRuns, hasCurrentSavedPayroll, period, reportsByDate]
+    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.tipOut),
+    [currentPayrollRuns]
   )
   const taxSeries = useMemo(
     () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.sales_tax ?? 0)),
@@ -727,43 +688,11 @@ export default function ReportingDashboardPage() {
     [closedDays, currentDates, period, reportsByDate]
   )
   const payrollOutSeries = useMemo(() => {
-    if (hasCurrentSavedPayroll) {
-      return buildPayrollRunSeries(currentPayrollRuns, summary => summary.payrollOut)
-    }
-    const rangeLength = currentDates.length
-    const bucketMap = new Map<string, SeriesPoint>()
-    for (const date of currentDates) {
-      const bucketKey = getBucketKey(date, period, rangeLength)
-      const current = bucketMap.get(bucketKey) ?? {
-        label: getBucketLabel(bucketKey, period, rangeLength),
-        date: bucketKey,
-        value: 0,
-        closed: true,
-      }
-      const daySpend = clockRecords
-        .filter(record => record.session_date === date)
-        .reduce((sum, record) => {
-          const employee = employeeById.get(record.employee_id)
-          return sum + getEffectiveClockHours(record) * Number(employee?.hourly_wage ?? 0)
-        }, 0)
-      current.value += daySpend
-      current.closed = current.closed && closedDays.includes(toDate(date).getDay())
-      bucketMap.set(bucketKey, current)
-    }
-    return [...bucketMap.values()]
-  }, [clockRecords, closedDays, currentDates, currentPayrollRuns, employeeById, hasCurrentSavedPayroll, period])
+    return buildPayrollRunSeries(currentPayrollRuns, summary => summary.payrollOut)
+  }, [currentPayrollRuns])
   const totalPayrollOutSeries = useMemo(() => {
-    if (hasCurrentSavedPayroll) {
-      return buildPayrollRunSeries(currentPayrollRuns, summary => summary.totalPayrollOut)
-    }
-    const tipOutByDate = new Map(
-      currentReports.map(report => [report.session_date, sumTipDistributions([report])])
-    )
-    return payrollOutSeries.map(point => ({
-      ...point,
-      value: point.value + (tipOutByDate.get(point.date) ?? 0),
-    }))
-  }, [currentPayrollRuns, currentReports, hasCurrentSavedPayroll, payrollOutSeries])
+    return buildPayrollRunSeries(currentPayrollRuns, summary => summary.totalPayrollOut)
+  }, [currentPayrollRuns])
   const cashPayrollOutSeries = useMemo(
     () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.cashPayrollOut),
     [currentPayrollRuns]
@@ -978,10 +907,10 @@ export default function ReportingDashboardPage() {
               ['Total Tips Collected (gross)', currentTotals.collectedTip, `EOD business dates: ${dateLabel}`],
               ['House Tip (15%)', houseCollectedTip],
               ['Tips Paid Out (by pay date)', currentTotals.tipOut, `Payroll pay dates: ${dateLabel}`],
-              ['Kitchen Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.kitchen : null],
-              ['Server Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.server : null],
-              ['Manager Payroll (excl. tips)', hasCurrentSavedPayroll ? payrollPanel.manager : null],
-              ['Commission Paid', hasCurrentSavedPayroll ? payrollPanel.commission : null],
+              ['Kitchen Payroll (excl. tips)', payrollPanel.kitchen],
+              ['Server Payroll (excl. tips)', payrollPanel.server],
+              ['Manager Payroll (excl. tips)', payrollPanel.manager],
+              ['Commission Paid', payrollPanel.commission],
               ['Total Payroll (excl. tips)', currentTotals.payrollOut],
               ['Total Payroll (incl. tips)', currentTotals.totalPayrollOut],
             ].map(([label, value, note]) => (
@@ -1007,8 +936,9 @@ export default function ReportingDashboardPage() {
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
             <p>Collected tips use EOD business dates. Tips paid out use payroll pay dates, so a payout can include a prior work period when months overlap.</p>
             <p>{hasCurrentSavedPayroll
-              ? 'Saved payroll by pay date. Department amounts, including server payroll, exclude tips and reflect payouts after deductions and rounding.'
-              : 'Estimated payroll from clock hours and hourly wages, plus EOD tip distributions. Save a wage worksheet to see payroll by department.'}</p>
+              ? 'Paid payroll summary by pay date. Department amounts exclude tips and reflect the payout recorded after deductions and rounding.'
+              : 'No payroll payout has been recorded for this range. Payroll cards show $0 until a payout summary is saved.'}</p>
+            <p>Payroll cards use payout summary amounts only; clocked hours and unpaid worksheet estimates are excluded.</p>
             {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}
             {netSalesWithTips <= 0 && <p>Total Payroll / (Net Sales + Total Tips) is unavailable when net sales plus collected tips are zero or negative.</p>}
           </div>
@@ -1042,9 +972,9 @@ export default function ReportingDashboardPage() {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-xs font-medium uppercase text-muted-foreground">Payroll By Department</p>
-            <h2 className="text-lg font-semibold text-slate-950">{hasCurrentSavedPayroll ? 'Saved payroll payouts (including tips)' : 'Estimated from approved clock hours'}</h2>
+            <h2 className="text-lg font-semibold text-slate-950">{hasCurrentSavedPayroll ? 'Paid payroll by department (including tips)' : 'Paid payroll by department'}</h2>
           </div>
-          <Badge variant="outline">{hasCurrentSavedPayroll ? 'Worksheet' : 'Estimate'}</Badge>
+          <Badge variant="outline">Payout summary</Badge>
         </div>
         {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-4">
@@ -1057,7 +987,7 @@ export default function ReportingDashboardPage() {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Save a wage worksheet in this date range to show exact cash, check, and ACH payroll by department.
+            No payout summary is recorded in this pay-date range.
           </p>
         )}
       </div>
