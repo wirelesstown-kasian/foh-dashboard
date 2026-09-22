@@ -769,23 +769,28 @@ export default function EodHistoryPage() {
           onCustomEndChange={setCustomEnd}
         />
         <div className="mb-5 rounded-2xl border bg-slate-50/70 p-3">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-left hover:bg-white/70"
-            onClick={() => setCashEntriesExpanded(current => !current)}
-            aria-expanded={cashEntriesExpanded}
-          >
-            <span>
-              <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash In / Cash Out</span>
-              <span className="mt-1 block text-xs text-muted-foreground">
-                {cashEntriesExpanded ? 'Hide cash movement details' : `${filteredCashEntries.length} cash movement${filteredCashEntries.length === 1 ? '' : 's'} in this range`}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 items-center justify-between rounded-lg px-1 py-1 text-left hover:bg-white/70"
+              onClick={() => setCashEntriesExpanded(current => !current)}
+              aria-expanded={cashEntriesExpanded}
+            >
+              <span>
+                <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash In / Cash Out</span>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  {cashEntriesExpanded ? 'Hide cash movement details' : `${filteredCashEntries.length} cash movement${filteredCashEntries.length === 1 ? '' : 's'} in this range`}
+                </span>
               </span>
-            </span>
-            {cashEntriesExpanded ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
-          </button>
+              {cashEntriesExpanded ? <ChevronUp className="h-4 w-4 text-slate-500" /> : <ChevronDown className="h-4 w-4 text-slate-500" />}
+            </button>
+            <div className="shrink-0 rounded-xl border bg-white px-4 py-2 text-right">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Current Cash On Hand</div>
+              <div className="text-xl font-bold text-slate-950">{formatCurrency(currentCarryingCash)}</div>
+            </div>
+          </div>
           {cashEntriesExpanded && <div className="mt-3">
-          <div className="grid gap-3 xl:grid-cols-[1.55fr_0.45fr]">
-            <div>
+          <div>
               <div className="mt-2 grid gap-2 md:grid-cols-[140px_120px_120px_110px]">
                 <div>
                   <Label className="text-xs text-muted-foreground">Date</Label>
@@ -833,14 +838,6 @@ export default function EodHistoryPage() {
                   placeholder="Why cash was added or taken out"
                 />
               </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-xl border bg-white p-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current Cash On Hand</div>
-                <div className="mt-1 text-2xl font-bold text-slate-950">{formatCurrency(currentCarryingCash)}</div>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">Read-only review value.</p>
-              </div>
-            </div>
           </div>
           <div className="mt-3 rounded-xl border bg-white">
             <Table>

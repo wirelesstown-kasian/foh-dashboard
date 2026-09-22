@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { APP_SESSION_COOKIE, parseAppSessionValue } from '@/lib/appAuth'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import type { PaymentMethod, PayrollPaymentAllocations } from '@/lib/types'
 
@@ -56,6 +57,13 @@ function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message
   return fallback
+}
+
+async function hasPayrollAccess() {
+  const cookieStore = await cookies()
+  if (isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) return true
+  const appSession = parseAppSessionValue(cookieStore.get(APP_SESSION_COOKIE)?.value)
+  return appSession?.role.toLowerCase() === 'manager'
 }
 
 function normalizeNumber(value: unknown) {
@@ -149,8 +157,7 @@ function calculatePayrollRow(row: NonNullable<PayrollRunPayload['rows']>[number]
 }
 
 export async function GET(req: NextRequest) {
-  const cookieStore = await cookies()
-  if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
+  if (!await hasPayrollAccess()) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -196,8 +203,7 @@ function getPayrollTotals(rows: NonNullable<PayrollRunPayload['rows']>) {
 }
 
 export async function POST(req: NextRequest) {
-  const cookieStore = await cookies()
-  if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
+  if (!await hasPayrollAccess()) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -319,8 +325,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const cookieStore = await cookies()
-  if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
+  if (!await hasPayrollAccess()) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
