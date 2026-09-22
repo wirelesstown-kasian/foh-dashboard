@@ -148,20 +148,31 @@ function calculatePayrollRow(row: NonNullable<PayrollRunPayload['rows']>[number]
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const cookieStore = await cookies()
   if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { data, error } = await supabaseAdmin
+  const startDate = req.nextUrl.searchParams.get('start_date')
+  const endDate = req.nextUrl.searchParams.get('end_date')
+  const isDateKey = (value: string | null): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value))
+
+  let query = supabaseAdmin
     .from('payroll_runs')
     .select('*, payroll_run_items(*)')
-    .order('pay_date', { ascending: false })
+
+  if (isDateKey(startDate)) query = query.gte('pay_date', startDate)
+  if (isDateKey(endDate)) query = query.lte('pay_date', endDate)
+
+  const { data, error } = await query.order('pay_date', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ payroll_runs: data ?? [] })
+  return NextResponse.json(
+    { payroll_runs: data ?? [] },
+    { headers: { 'Cache-Control': 'private, no-store, max-age=0' } }
+  )
 }
 
 function getPayrollTotals(rows: NonNullable<PayrollRunPayload['rows']>) {

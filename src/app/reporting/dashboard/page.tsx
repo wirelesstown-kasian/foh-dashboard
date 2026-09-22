@@ -492,7 +492,6 @@ function MixBar({ label, value, total, color }: { label: string; value: number; 
 export default function ReportingDashboardPage() {
   const { eodReports } = useEodReports()
   const { clockRecords } = useClockRecords()
-  const { payrollRuns } = usePayrollRuns()
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
   const [customStart, setCustomStart] = useState('')
@@ -512,6 +511,12 @@ export default function ReportingDashboardPage() {
     () => getDashboardLabel(period, refDate, startDate, endDate),
     [endDate, period, refDate, startDate]
   )
+  const todayKey = toDateKey(new Date())
+  const currentYearStart = toDateKey(startOfYear(new Date()))
+  const currentYearEnd = toDateKey(endOfYear(new Date()))
+  const payrollFetchStart = previousStartDate < currentYearStart ? previousStartDate : currentYearStart
+  const payrollFetchEnd = endDate > currentYearEnd ? endDate : currentYearEnd
+  const { payrollRuns, loading: payrollLoading, error: payrollError } = usePayrollRuns({ startDate: payrollFetchStart, endDate: payrollFetchEnd })
 
   useEffect(() => {
     window.localStorage.setItem(CLOSED_DAYS_STORAGE_KEY, JSON.stringify(closedDays))
@@ -553,12 +558,12 @@ export default function ReportingDashboardPage() {
   // A dashboard payroll number must represent a payout that was actually recorded.
   // Clock-based estimates and worksheet rows with no payout are intentionally excluded.
   const currentPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate && isPaidPayrollRun(run)),
-    [endDate, payrollRuns, startDate]
+    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate && run.pay_date <= todayKey && isPaidPayrollRun(run)),
+    [endDate, payrollRuns, startDate, todayKey]
   )
   const previousPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate && isPaidPayrollRun(run)),
-    [payrollRuns, previousEndDate, previousStartDate]
+    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate && run.pay_date <= todayKey && isPaidPayrollRun(run)),
+    [payrollRuns, previousEndDate, previousStartDate, todayKey]
   )
   const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
 
@@ -572,7 +577,7 @@ export default function ReportingDashboardPage() {
       const monthStart = toDateKey(startOfMonth(monthDate))
       const monthEnd = toDateKey(endOfMonth(monthDate))
       const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
-      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd && isPaidPayrollRun(run))
+      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd && run.pay_date <= todayKey && isPaidPayrollRun(run))
       const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
       const monthPayrollSummary = summarizePayrollRuns(monthPayrollRuns)
       const savedPayroll = monthPayrollSummary.totalPayrollOut
@@ -587,7 +592,7 @@ export default function ReportingDashboardPage() {
         source: 'Paid out',
       }
     }).filter(month => month.hasData)
-  }, [clockRecords, eodReports, payrollRuns])
+  }, [clockRecords, eodReports, payrollRuns, todayKey])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
@@ -644,7 +649,6 @@ export default function ReportingDashboardPage() {
     [currentReports]
   )
   const currentDates = useMemo(() => getDatesBetween(startDate, endDate), [endDate, startDate])
-  const todayKey = toDateKey(new Date())
   const openDates = useMemo(
     () => currentDates.filter(date => !closedDays.includes(toDate(date).getDay())),
     [closedDays, currentDates]
@@ -935,9 +939,13 @@ export default function ReportingDashboardPage() {
           </div>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
             <p>Collected tips use EOD business dates. Tips paid out use payroll pay dates, so a payout can include a prior work period when months overlap.</p>
-            <p>{hasCurrentSavedPayroll
-              ? 'Paid payroll summary by pay date. Department amounts exclude tips and reflect the payout recorded after deductions and rounding.'
-              : 'No payroll payout has been recorded for this range. Payroll cards show $0 until a payout summary is saved.'}</p>
+            <p>{payrollLoading
+              ? 'Loading paid payroll summaries...'
+              : payrollError
+                ? `Payroll payout data could not be loaded: ${payrollError}`
+                : hasCurrentSavedPayroll
+                  ? 'Paid payroll summary by pay date. Department amounts exclude tips and reflect the payout recorded after deductions and rounding.'
+                  : 'No payroll payout has been recorded for this range. Payroll cards show $0 until a payout summary is saved.'}</p>
             <p>Payroll cards use payout summary amounts only; clocked hours and unpaid worksheet estimates are excluded.</p>
             {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}
             {netSalesWithTips <= 0 && <p>Total Payroll / (Net Sales + Total Tips) is unavailable when net sales plus collected tips are zero or negative.</p>}

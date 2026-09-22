@@ -225,19 +225,39 @@ export function useClockRecords({
   return { clockRecords, setClockRecords }
 }
 
-export function usePayrollRuns() {
+export function usePayrollRuns({ startDate, endDate }: { startDate?: string; endDate?: string } = {}) {
   const [payrollRuns, setPayrollRuns] = useState<(PayrollRun & { payroll_run_items?: PayrollRunItem[] })[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
 
     const load = async () => {
-      const res = await fetch('/api/payroll-runs', { cache: 'no-store' })
-      const payload = (await res.json().catch(() => ({}))) as {
-        payroll_runs?: (PayrollRun & { payroll_run_items?: PayrollRunItem[] })[]
+      setLoading(true)
+      try {
+        const params = new URLSearchParams()
+        if (startDate) params.set('start_date', startDate)
+        if (endDate) params.set('end_date', endDate)
+        const query = params.toString()
+        const res = await fetch(`/api/payroll-runs${query ? `?${query}` : ''}`, { cache: 'no-store' })
+        const payload = (await res.json().catch(() => ({}))) as {
+          payroll_runs?: (PayrollRun & { payroll_run_items?: PayrollRunItem[] })[]
+          error?: string
+        }
+        if (!mounted) return
+        if (res.ok) {
+          setPayrollRuns(payload.payroll_runs ?? [])
+          setError(null)
+        } else {
+          setError(payload.error ?? 'Unable to load payroll payouts.')
+        }
+      } catch (loadError) {
+        if (!mounted) return
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load payroll payouts.')
+      } finally {
+        if (mounted) setLoading(false)
       }
-      if (!mounted) return
-      setPayrollRuns(res.ok ? (payload.payroll_runs ?? []) : [])
     }
 
     void load()
@@ -249,7 +269,7 @@ export function usePayrollRuns() {
       mounted = false
       window.removeEventListener(REPORTING_REFRESH_EVENT, handleRefresh)
     }
-  }, [])
+  }, [endDate, startDate])
 
-  return { payrollRuns, setPayrollRuns }
+  return { payrollRuns, setPayrollRuns, loading, error }
 }
