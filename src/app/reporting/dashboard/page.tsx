@@ -555,15 +555,15 @@ export default function ReportingDashboardPage() {
     () => cashEntries.filter(entry => entry.entry_date >= previousStartDate && entry.entry_date <= previousEndDate),
     [cashEntries, previousEndDate, previousStartDate]
   )
-  // A dashboard payroll number must represent a payout that was actually recorded.
-  // Clock-based estimates and worksheet rows with no payout are intentionally excluded.
+  // Payout Summary is the source of truth. Include every saved paid payout in the
+  // selected pay-date range, including a paid run whose pay date is still upcoming.
   const currentPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate && run.pay_date <= todayKey && isPaidPayrollRun(run)),
-    [endDate, payrollRuns, startDate, todayKey]
+    () => payrollRuns.filter(run => run.pay_date >= startDate && run.pay_date <= endDate && isPaidPayrollRun(run)),
+    [endDate, payrollRuns, startDate]
   )
   const previousPayrollRuns = useMemo(
-    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate && run.pay_date <= todayKey && isPaidPayrollRun(run)),
-    [payrollRuns, previousEndDate, previousStartDate, todayKey]
+    () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate && isPaidPayrollRun(run)),
+    [payrollRuns, previousEndDate, previousStartDate]
   )
   const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
 
@@ -577,7 +577,7 @@ export default function ReportingDashboardPage() {
       const monthStart = toDateKey(startOfMonth(monthDate))
       const monthEnd = toDateKey(endOfMonth(monthDate))
       const monthReports = eodReports.filter(report => report.session_date >= monthStart && report.session_date <= monthEnd)
-      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd && run.pay_date <= todayKey && isPaidPayrollRun(run))
+      const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd && isPaidPayrollRun(run))
       const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
       const monthPayrollSummary = summarizePayrollRuns(monthPayrollRuns)
       const savedPayroll = monthPayrollSummary.totalPayrollOut
@@ -592,7 +592,7 @@ export default function ReportingDashboardPage() {
         source: 'Paid out',
       }
     }).filter(month => month.hasData)
-  }, [clockRecords, eodReports, payrollRuns, todayKey])
+  }, [clockRecords, eodReports, payrollRuns])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
@@ -944,7 +944,7 @@ export default function ReportingDashboardPage() {
               : payrollError
                 ? `Payroll payout data could not be loaded: ${payrollError}`
                 : hasCurrentSavedPayroll
-                  ? 'Paid payroll summary by pay date. Department amounts exclude tips and reflect the payout recorded after deductions and rounding.'
+                  ? 'Paid payout summaries by pay date. All runs marked paid in this range are included, including scheduled pay dates.'
                   : 'No payroll payout has been recorded for this range. Payroll cards show $0 until a payout summary is saved.'}</p>
             <p>Payroll cards use payout summary amounts only; clocked hours and unpaid worksheet estimates are excluded.</p>
             {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}

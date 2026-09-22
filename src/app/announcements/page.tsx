@@ -230,13 +230,14 @@ export default function AnnouncementsPage() {
     setSelectedDateKey(nextEvent.date)
     setDraftEvent({ ...EMPTY_EVENT, id: 'draft-event', date: nextEvent.date })
     setError(null)
+    setEventPanelOpen(false)
   }
 
   const selectCalendarDate = (dateKey: string) => {
     setSelectedDateKey(dateKey)
     setCalendarMonth(new Date(`${dateKey}T12:00:00`))
     resetDraftEvent(dateKey)
-    setEventPanelOpen(true)
+    setEventPanelOpen(false)
   }
 
   const save = async () => {
@@ -380,17 +381,23 @@ export default function AnnouncementsPage() {
         </label>
         <div className="flex flex-wrap gap-2">
           {isEditingExistingEvent ? (
-            <Button
-              type="button"
-              variant="ghost"
-              className="text-red-600 hover:text-red-700"
-              onClick={() => {
-                setEvents(current => current.filter(item => item.id !== creatorEvent.id))
-                resetDraftEvent(selectedDateKey)
-              }}
-            >
-              <Trash2 className="h-4 w-4" /> Remove
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-red-600 hover:text-red-700"
+                onClick={() => {
+                  setEvents(current => current.filter(item => item.id !== creatorEvent.id))
+                  resetDraftEvent(selectedDateKey)
+                  setEventPanelOpen(false)
+                }}
+              >
+                <Trash2 className="h-4 w-4" /> Remove
+              </Button>
+              <Button type="button" onClick={() => setEventPanelOpen(false)}>
+                Done Editing
+              </Button>
+            </>
           ) : (
             <Button type="button" onClick={addDraftEvent}>
               <Plus className="h-4 w-4" /> Add Event
@@ -436,7 +443,7 @@ export default function AnnouncementsPage() {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-semibold">Calendar</h2>
-                  <p className="text-sm text-muted-foreground">Click a date to load it into Event Creator.</p>
+                  <p className="text-sm text-muted-foreground">Click a date to view its events. Select an event to edit it.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -508,8 +515,21 @@ export default function AnnouncementsPage() {
                 })}
               </div>
               <div className="mt-4 rounded-lg border bg-slate-50 p-3">
-                <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-                  {formatDisplayDate(selectedDateKey)}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                    {formatDisplayDate(selectedDateKey)}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      resetDraftEvent(selectedDateKey)
+                      setEventPanelOpen(true)
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add Event
+                  </Button>
                 </div>
                 {selectedCalendarEvents.length > 0 ? (
                   <div className="mt-2 grid gap-2">
@@ -531,7 +551,12 @@ export default function AnnouncementsPage() {
                           }
                         }}
                       >
-                        <div className="font-semibold">{event.title}</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-semibold">{event.title}</div>
+                          {!isBirthdayCalendarEvent(event) && (
+                            <span className="text-xs font-semibold text-blue-700">Edit</span>
+                          )}
+                        </div>
                         <div className="mt-0.5 text-xs text-muted-foreground">{getEventDetailLine(event)}</div>
                       </button>
                     ))}
@@ -604,7 +629,7 @@ export default function AnnouncementsPage() {
               )}
             </div>
             <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-              Birthdays from Staffing appear automatically on the employee birthday date.
+              Birthdays from Staffing appear automatically starting 5 days before the birthday through the birthday date.
             </div>
             {(error || message) && (
               <div className={`mt-4 rounded-lg border px-3 py-2 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
@@ -627,6 +652,7 @@ export default function AnnouncementsPage() {
           </SheetHeader>
           <div className="px-4 pb-4">
             {eventCreatorPanel}
+            <p className="mt-4 text-xs text-muted-foreground">Use Save Announcement Board after adding or editing events to publish the changes.</p>
           </div>
         </SheetContent>
       </Sheet>

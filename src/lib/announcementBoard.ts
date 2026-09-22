@@ -94,9 +94,23 @@ function formatEventDetail(event: AnnouncementEvent) {
   ].filter(Boolean).join(' ')
 }
 
-function isBirthdayOnDate(birthDate: string | null | undefined, today: string) {
-  if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return false
-  return birthDate.slice(5) === today.slice(5)
+function getUpcomingBirthday(birthDate: string | null | undefined, today: string) {
+  if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number)
+  const [, birthMonth, birthDay] = birthDate.split('-').map(Number)
+  const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay)
+  let occurrenceUtc = Date.UTC(todayYear, birthMonth - 1, birthDay)
+  let occurrenceYear = todayYear
+  if (occurrenceUtc < todayUtc) {
+    occurrenceYear += 1
+    occurrenceUtc = Date.UTC(occurrenceYear, birthMonth - 1, birthDay)
+  }
+  const daysUntil = Math.round((occurrenceUtc - todayUtc) / 86_400_000)
+  if (daysUntil > 5) return null
+  return {
+    daysUntil,
+    date: `${occurrenceYear}-${String(birthMonth).padStart(2, '0')}-${String(birthDay).padStart(2, '0')}`,
+  }
 }
 
 export function buildAnnouncementItems({
@@ -129,12 +143,17 @@ export function buildAnnouncementItems({
   }
 
   for (const employee of employees) {
-    if (!isBirthdayOnDate(employee.birth_date, today)) continue
+    const birthday = getUpcomingBirthday(employee.birth_date, today)
+    if (!birthday) continue
     items.push({
       id: `birthday-${employee.id}`,
       type: 'birthday',
-      title: `Happy birthday, ${employee.name}!`,
-      detail: 'Today',
+      title: birthday.daysUntil === 0
+        ? `Happy birthday, ${employee.name}!`
+        : `${employee.name}'s birthday is coming up!`,
+      detail: birthday.daysUntil === 0
+        ? 'Today'
+        : `In ${birthday.daysUntil} day${birthday.daysUntil === 1 ? '' : 's'} - ${birthday.date}`,
     })
   }
 
