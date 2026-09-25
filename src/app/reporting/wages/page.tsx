@@ -874,7 +874,7 @@ export default function WageReportPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="relative left-1/2 w-[calc(100vw-1rem)] max-w-[1800px] -translate-x-1/2 p-4 sm:w-[calc(100vw-2rem)] sm:p-6">
       <AdminSubpageHeader
         title="Wage Report"
         subtitle={payoutStatus === 'created' ? 'Saved payroll worksheet payout is driving this range.' : 'Preview wages before creating payroll payout.'}
@@ -1045,7 +1045,7 @@ export default function WageReportPage() {
             <p className="mt-0.5 text-[11px] text-amber-700">Calculated wages waiting for a pay date</p>
           </div>
         </div>
-        <Table>
+        <Table className={view === 'earnings' ? 'min-w-[1560px]' : 'min-w-[920px]'}>
           <TableHeader><TableRow>
             <TableHead>Name</TableHead><TableHead>Role</TableHead><TableHead>Paid By</TableHead><TableHead>Clock Status</TableHead>
             <TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal Break</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Tips / Hr</TableHead>
