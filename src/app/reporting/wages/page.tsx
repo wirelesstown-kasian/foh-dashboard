@@ -833,7 +833,7 @@ export default function WageReportPage() {
       ? [{ key: 'legacy-paid', title: 'Legacy paid', subtitle: 'Recorded before payroll worksheet tracking began', paid: true, rows: legacyRows }]
       : []
     return currentUnpaidRows.length > 0
-      ? [{ key: 'unpaid', title: 'Unpaid', subtitle: 'Calculated work not included in a saved payout', paid: false, rows: currentUnpaidRows }, ...legacyGroup, ...paidGroups]
+      ? [{ key: 'unpaid', title: 'Pending Payroll', subtitle: 'Calculated earnings not yet included in a saved payout', paid: false, rows: currentUnpaidRows }, ...legacyGroup, ...paidGroups]
       : [...legacyGroup, ...paidGroups]
   }, [completedPayrollRuns, detailRows, detailTarget, legacyWageCutoffDate])
   const selectedEmployeeName = employeeFilter === 'all'
@@ -977,7 +977,7 @@ export default function WageReportPage() {
                   Saved runs in this range: {completedPayrollRuns.map(run => `${run.department} ${formatCurrency(Number(run.total_net ?? 0))}`).join(', ')}
                 </p>
               ) : periodPayrollRuns.length > 0 ? (
-                <p className="mt-1 text-xs text-slate-600">Payroll runs are pending their pay date. Daily wages remain unpaid until payday.</p>
+                <p className="mt-1 text-xs text-slate-600">Payroll runs are pending their pay date. Daily earnings remain pending until payday.</p>
               ) : (
                 <p className="mt-1 text-xs text-slate-600">Save from Wage Worksheet when payroll is actually paid or ready to record.</p>
               )}
@@ -1040,9 +1040,9 @@ export default function WageReportPage() {
             <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(displayedPaymentTotals.ach)}</p>
           </div>
           <div className="rounded-lg border bg-amber-50 p-3">
-            <p className="text-xs font-medium uppercase text-amber-700">Unpaid Total</p>
+            <p className="text-xs font-medium uppercase text-amber-700">Pending Payroll Total</p>
             <p className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(unpaidTotal)}</p>
-            <p className="mt-0.5 text-[11px] text-amber-700">Calculated wages waiting for a pay date</p>
+            <p className="mt-0.5 text-[11px] text-amber-700">Calculated earnings not yet included in a saved payout</p>
           </div>
         </div>
         <Table className={view === 'earnings' ? 'min-w-[1560px]' : 'min-w-[920px]'}>
