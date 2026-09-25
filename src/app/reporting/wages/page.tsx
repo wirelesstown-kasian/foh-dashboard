@@ -400,8 +400,7 @@ export default function WageReportPage() {
 
   const periodPayrollRuns = useMemo(() => payrollRuns.filter(run => {
     const periodOverlaps = run.start_date <= endDate && run.end_date >= startDate
-    const payDateInRange = run.pay_date >= startDate && run.pay_date <= endDate
-    if (!periodOverlaps && !payDateInRange) return false
+    if (!periodOverlaps) return false
     if (department === 'all') return true
     return run.department === department || run.department === 'all'
   }), [department, endDate, payrollRuns, startDate])
@@ -538,7 +537,7 @@ export default function WageReportPage() {
           guaranteeTopUp: Number(item.guarantee_top_up ?? 0),
           commission: Number(item.commission ?? 0),
           deductions: Number(item.deductions ?? 0),
-          totalEarnings: Number(item.payout_amount ?? item.net_pay ?? 0),
+          totalEarnings: Number(item.net_pay ?? item.payout_amount ?? 0),
         }])
       }
     }
@@ -624,9 +623,9 @@ export default function WageReportPage() {
             guaranteeTopUp: Number(item.guarantee_top_up ?? 0),
             commission: Number(item.commission ?? 0),
             deductions: Number(item.deductions ?? 0),
-            totalEarnings: Number(item.payout_amount ?? item.net_pay ?? 0),
+            totalEarnings: Number(item.net_pay ?? item.payout_amount ?? 0),
             tipRate: Number(item.hours ?? 0) > 0 ? Number(item.tips ?? 0) / Number(item.hours ?? 0) : null,
-            effectiveRate: Number(item.hours ?? 0) > 0 ? Number(item.payout_amount ?? item.net_pay ?? 0) / Number(item.hours ?? 0) : null,
+            effectiveRate: Number(item.hours ?? 0) > 0 ? Number(item.net_pay ?? item.payout_amount ?? 0) / Number(item.hours ?? 0) : null,
             paymentMethod: getReportPaymentMethod(item.payment_method),
             paymentBreakdown: paymentBreakdownsByEmployee.get(item.employee_id ?? item.employee_name) ?? { cash: 0, check: 0, ach: 0, unknown: Number(item.payout_amount ?? 0) },
             hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
@@ -938,6 +937,9 @@ export default function WageReportPage() {
             </>
           }
         />
+        <p className="mb-4 text-xs text-muted-foreground">
+          Report totals follow the selected work-period dates. Pay dates group the daily history; Paid By shows actual cash, check, and ACH payouts after cash rounding.
+        </p>
         <div className={[
           'mb-4 rounded-xl border px-4 py-3',
           payoutStatus === 'created' ? 'border-emerald-200 bg-emerald-50' : payoutStatus === 'partial' ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50',
@@ -1117,7 +1119,7 @@ export default function WageReportPage() {
                 <div className="rounded-2xl border bg-white p-5">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total Earnings</div>
                   <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.totalEarnings)}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">wages + tips + top-up</div>
+                  <div className="mt-0.5 text-xs text-slate-400">net earnings for this work period</div>
                 </div>
               </div>
 
