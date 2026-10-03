@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { useClockRecords, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
@@ -547,6 +547,11 @@ export default function ReportingDashboardPage() {
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
   const [selectedYearlyChart, setSelectedYearlyChart] = useState<YearlyChartKey>('net')
+  const yearlyChartRef = useRef<HTMLDivElement>(null)
+  const selectYearlyChart = (key: YearlyChartKey) => {
+    setSelectedYearlyChart(key)
+    window.requestAnimationFrame(() => yearlyChartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  }
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [closedDays, setClosedDays] = useState<number[]>(loadClosedDays)
@@ -1143,14 +1148,14 @@ export default function ReportingDashboardPage() {
       <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]">
         <div>
           <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('net')}
+            <button type="button" disabled={period !== 'yearly'} onClick={() => selectYearlyChart('net')}
               aria-pressed={period === 'yearly' && selectedYearlyChart === 'net'}
               className={`rounded-xl border bg-white p-4 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'net' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
               <p className="text-xs font-medium uppercase text-muted-foreground">Actual Net Revenue</p>
               <p className="mt-1 text-3xl font-semibold text-slate-950">{formatCurrency(currentTotals.net)}</p>
               <p className="mt-2 text-xs text-muted-foreground">{currentReports.length} EOD reports + {currentImportedSales.length} imported period totals</p>
             </button>
-            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('gross')}
+            <button type="button" disabled={period !== 'yearly'} onClick={() => selectYearlyChart('gross')}
               aria-pressed={period === 'yearly' && selectedYearlyChart === 'gross'}
               className={`rounded-xl border bg-white p-4 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'gross' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
               <p className="text-xs font-medium uppercase text-muted-foreground">Gross Revenue</p>
@@ -1168,14 +1173,16 @@ export default function ReportingDashboardPage() {
               <p className="mt-2 text-xs text-muted-foreground">{reportedOpenDates.length} reported / {openDates.length} open days</p>
             </div>
           </div>
-          <MainTrendChart
-            points={activeChart.points}
-            average={trendAverage}
-            monthly={period === 'yearly'}
-            label={activeChart.label}
-            color={activeChart.color}
-            formatValue={activeChart.formatValue}
-          />
+          <div ref={yearlyChartRef}>
+            <MainTrendChart
+              points={activeChart.points}
+              average={trendAverage}
+              monthly={period === 'yearly'}
+              label={activeChart.label}
+              color={activeChart.color}
+              formatValue={activeChart.formatValue}
+            />
+          </div>
         </div>
 
         <div className="rounded-xl border bg-white p-4">
@@ -1190,13 +1197,13 @@ export default function ReportingDashboardPage() {
           </div>
           <div className="space-y-5">
             <MixBar label="Cash" value={currentTotals.cash} total={mixTotal} color="#0f766e"
-              onSelect={period === 'yearly' ? () => setSelectedYearlyChart('cash') : undefined}
+              onSelect={period === 'yearly' ? () => selectYearlyChart('cash') : undefined}
               selected={period === 'yearly' && selectedYearlyChart === 'cash'} />
             <MixBar label="Credit Card" value={currentTotals.card} total={mixTotal} color="#2563eb"
-              onSelect={period === 'yearly' ? () => setSelectedYearlyChart('card') : undefined}
+              onSelect={period === 'yearly' ? () => selectYearlyChart('card') : undefined}
               selected={period === 'yearly' && selectedYearlyChart === 'card'} />
             <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316"
-              onSelect={period === 'yearly' ? () => setSelectedYearlyChart('delivery') : undefined}
+              onSelect={period === 'yearly' ? () => selectYearlyChart('delivery') : undefined}
               selected={period === 'yearly' && selectedYearlyChart === 'delivery'} />
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
@@ -1211,7 +1218,7 @@ export default function ReportingDashboardPage() {
               { label: 'Total Payroll (excl. tips)', value: currentTotals.payrollOut, chartKey: 'payrollOut' },
               { label: 'Total Payroll (incl. tips)', value: currentTotals.totalPayrollOut, chartKey: 'totalPayrollOut' },
             ] as Array<{ label: string; value: number; note?: string; chartKey: YearlyChartKey }>).map(({ label, value, note, chartKey }) => (
-              <button key={label} type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart(chartKey)}
+              <button key={label} type="button" disabled={period !== 'yearly'} onClick={() => selectYearlyChart(chartKey)}
                 aria-pressed={period === 'yearly' && selectedYearlyChart === chartKey}
                 className={`rounded-lg border bg-white px-3 py-2 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === chartKey ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
                 <div className="text-[10px] font-medium uppercase text-muted-foreground">{label}</div>
@@ -1219,7 +1226,7 @@ export default function ReportingDashboardPage() {
                 {note && <div className="mt-0.5 text-[10px] text-muted-foreground">{note}</div>}
               </button>
             ))}
-            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('payrollRatio')}
+            <button type="button" disabled={period !== 'yearly'} onClick={() => selectYearlyChart('payrollRatio')}
               aria-pressed={period === 'yearly' && selectedYearlyChart === 'payrollRatio'}
               className={`rounded-lg border bg-slate-950 px-3 py-2 text-left text-white enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'payrollRatio' ? 'border-blue-400 ring-2 ring-blue-200' : ''}`}>
               <div className="text-xs font-medium text-slate-300">Payroll / Net Sales</div>
@@ -1227,7 +1234,7 @@ export default function ReportingDashboardPage() {
               <div className="mt-1 text-2xl font-bold">{payrollRatio === null ? '—' : `${payrollRatio.toFixed(1)}%`}</div>
               <div className="mt-1 text-xs text-slate-300">{formatCurrency(currentTotals.payrollOut)} ÷ {formatCurrency(currentTotals.net)}</div>
             </button>
-            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('totalPayrollRatio')}
+            <button type="button" disabled={period !== 'yearly'} onClick={() => selectYearlyChart('totalPayrollRatio')}
               aria-pressed={period === 'yearly' && selectedYearlyChart === 'totalPayrollRatio'}
               className={`rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-left text-blue-950 enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'totalPayrollRatio' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
               <div className="text-xs font-medium">Total Payroll (including tips) / (Net Sales + Total Tips)</div>
@@ -1271,7 +1278,7 @@ export default function ReportingDashboardPage() {
             points={card.points}
             color={card.color}
             icon={card.icon}
-            onSelect={period === 'yearly' ? () => setSelectedYearlyChart(card.key) : undefined}
+            onSelect={period === 'yearly' ? () => selectYearlyChart(card.key) : undefined}
             selected={period === 'yearly' && selectedYearlyChart === card.key}
           />
         ))}
