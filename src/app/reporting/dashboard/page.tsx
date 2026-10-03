@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { useClockRecords, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
+import { HistoricalAdjustmentsPanel } from '@/components/reporting/HistoricalAdjustmentsPanel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -762,6 +763,8 @@ export default function ReportingDashboardPage() {
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
+
+      <HistoricalAdjustmentsPanel />
 
       <div className="mb-5 rounded-xl border bg-white p-4">
         <div className="flex flex-wrap items-center gap-3">
