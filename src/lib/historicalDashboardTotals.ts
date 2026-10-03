@@ -33,6 +33,26 @@ export function periodRows<T extends HistoricalPeriod>(rows: T[], startDate: str
   return rows.filter(row => startDate <= row.start_date && row.end_date <= endDate)
 }
 
+export function monthlyTrendValues(
+  dated: Array<{ date: string; value: number }>,
+  imported: Array<{ start_date: string; end_date: string; value: number }>,
+) {
+  const totals = new Map<string, number>()
+  for (const point of dated) {
+    const month = point.date.slice(0, 7)
+    totals.set(month, (totals.get(month) ?? 0) + point.value)
+  }
+  for (const period of imported) {
+    // The workbook supplies period totals, so only place a period in a month
+    // when it lies wholly inside that month. Never split it into invented days.
+    const month = period.start_date.slice(0, 7)
+    if (month !== period.end_date.slice(0, 7)) continue
+    totals.set(month, (totals.get(month) ?? 0) + period.value)
+  }
+  return [...totals.entries()].sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ date, value }))
+}
+
 export function nonOverlappingSales(
   rows: HistoricalSale[],
   reports: Array<{ session_date: string; revenue_total?: number | null; tip_total?: number | null }>,

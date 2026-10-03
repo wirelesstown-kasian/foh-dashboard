@@ -18,6 +18,26 @@ test('monthly totals include a full source period while a partial week does not'
   assert.equal(totals.periodRows(april, '2026-04-01', '2026-04-06').length, 1)
 })
 
+test('yearly chart months reconcile with imported sales and additive payroll totals', () => {
+  const sales = totals.monthlyTrendValues(
+    [{ date: '2026-04-07', value: 146632.72 }],
+    [
+      { start_date: '2026-01-01', end_date: '2026-01-31', value: 179728.02 },
+      { start_date: '2026-04-01', end_date: '2026-04-06', value: 37878.32 },
+    ],
+  )
+  assert.deepEqual(JSON.parse(JSON.stringify(sales)), [
+    { date: '2026-01', value: 179728.02 },
+    { date: '2026-04', value: 184511.04 },
+  ])
+
+  const payroll = totals.monthlyTrendValues(
+    [{ date: '2026-09-16', value: 21266.04 }],
+    [{ start_date: '2026-09-01', end_date: '2026-09-15', value: 20008 }],
+  )
+  assert.equal(Math.round(payroll[0].value * 100), 4127404)
+})
+
 test('missing sales are added once and overlapping payroll requires an explicit additive marker', () => {
   const sales = [{
     start_date: '2026-04-01', end_date: '2026-04-06', period_kind: 'partial',

@@ -5,7 +5,7 @@ import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startO
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { useClockRecords, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
 import {
-  historicalPayroll, historicalRevenue, nonOverlappingPayroll, nonOverlappingSales, periodRows,
+  historicalPayroll, historicalRevenue, monthlyTrendValues, nonOverlappingPayroll, nonOverlappingSales, periodRows,
   type HistoricalAdjustments,
 } from '@/lib/historicalDashboardTotals'
 import { Badge } from '@/components/ui/badge'
@@ -316,6 +316,14 @@ function buildPayrollRunSeries(
   }))
 }
 
+function toMonthlySeries(points: Array<{ date: string; value: number }>): SeriesPoint[] {
+  return points.map(point => ({
+    ...point,
+    label: format(toDate(`${point.date}-01`), 'MMM'),
+    closed: false,
+  }))
+}
+
 function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color?: string }) {
   const visible = points.filter(p => !(p.closed && p.value === 0))
   const values = visible.map(p => p.value)
@@ -365,10 +373,10 @@ function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color
   )
 }
 
-function MainTrendChart({ points, dailyAverage }: { points: SeriesPoint[]; dailyAverage: number }) {
+function MainTrendChart({ points, average, monthly }: { points: SeriesPoint[]; average: number; monthly: boolean }) {
   const visible = points.filter(p => !(p.closed && p.value === 0))
   const values = visible.map(point => point.value)
-  const max = Math.max(...values, dailyAverage, 1)
+  const max = Math.max(...values, average, 1)
   const width = 720
   const height = 260
   const padLeft = 54
@@ -385,12 +393,12 @@ function MainTrendChart({ points, dailyAverage }: { points: SeriesPoint[]; daily
   const areaPath = coords.length > 0
     ? `${path} L ${coords[coords.length - 1].x.toFixed(1)} ${height - padY} L ${coords[0].x.toFixed(1)} ${height - padY} Z`
     : ''
-  const avgY = padY + innerHeight - (dailyAverage / max) * innerHeight
+  const avgY = padY + innerHeight - (average / max) * innerHeight
   const fmtK = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`
 
   return (
     <div className="rounded-xl border bg-white p-4">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-72 w-full" role="img" aria-label="Daily net revenue chart">
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-72 w-full" role="img" aria-label={monthly ? 'Monthly net revenue chart' : 'Daily net revenue chart'}>
         <defs>
           <linearGradient id="netTrendFill" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#2563eb" stopOpacity="0.22" />
@@ -426,8 +434,8 @@ function MainTrendChart({ points, dailyAverage }: { points: SeriesPoint[]; daily
         })}
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-2"><span className="h-2 w-8 rounded-full bg-blue-600" />Daily net revenue</span>
-        <span className="inline-flex items-center gap-2"><span className="h-0.5 w-8 border-t-2 border-dashed border-amber-500" />Daily average</span>
+        <span className="inline-flex items-center gap-2"><span className="h-2 w-8 rounded-full bg-blue-600" />{monthly ? 'Monthly' : 'Daily'} net revenue</span>
+        <span className="inline-flex items-center gap-2"><span className="h-0.5 w-8 border-t-2 border-dashed border-amber-500" />{monthly ? 'Monthly' : 'Daily'} average</span>
       </div>
     </div>
   )
@@ -757,57 +765,108 @@ export default function ReportingDashboardPage() {
   const projectedNetRevenue = shouldProject ? dailyAverage * openDates.length : currentTotals.net
   const projectionLift = projectedNetRevenue - currentTotals.net
 
+  const yearlySalesSeries = useMemo(() => {
+    if (period !== 'yearly') return null
+    const saved = currentReports.map(report => ({
+      date: report.session_date,
+      net: getNetRevenue(report),
+      collectedTip: Number(report.tip_total ?? 0),
+      tax: Number(report.sales_tax ?? 0),
+      cash: Number(report.cash_total ?? 0),
+      card: getCardRevenue(report),
+      delivery: Number(report.delivery_order_amount ?? 0),
+    }))
+    const imported = currentImportedSales.map(row => ({ ...row, totals: historicalRevenue([row]) }))
+    type SaleMetric = 'net' | 'collectedTip' | 'tax' | 'cash' | 'card' | 'delivery'
+    const seriesFor = (key: SaleMetric) => toMonthlySeries(monthlyTrendValues(
+      saved.map(point => ({ date: point.date, value: point[key] })),
+      imported.map(row => ({ start_date: row.start_date, end_date: row.end_date, value: row.totals[key] })),
+    ))
+    return {
+      net: seriesFor('net'), collectedTip: seriesFor('collectedTip'), tax: seriesFor('tax'),
+      cash: seriesFor('cash'), card: seriesFor('card'), delivery: seriesFor('delivery'),
+    }
+  }, [currentImportedSales, currentReports, period])
+
+  const yearlyPayrollSeries = useMemo(() => {
+    if (period !== 'yearly') return null
+    const saved = currentPayrollRuns.map(run => ({ date: run.pay_date, totals: summarizePayrollRuns([run]) }))
+    const imported = currentImportedPayroll.map(row => ({
+      ...row,
+      totals: { ...historicalPayroll([row]), achPayrollOut: 0, unknownPayrollOut: 0 },
+    }))
+    type PayrollMetric = 'tipOut' | 'payrollOut' | 'totalPayrollOut' | 'cashPayrollOut'
+      | 'checkPayrollOut' | 'achPayrollOut' | 'unknownPayrollOut'
+    const seriesFor = (key: PayrollMetric) => toMonthlySeries(monthlyTrendValues(
+      saved.map(run => ({ date: run.date, value: run.totals[key] })),
+      imported.map(row => ({ start_date: row.start_date, end_date: row.end_date, value: row.totals[key] })),
+    ))
+    return {
+      tipOut: seriesFor('tipOut'), payrollOut: seriesFor('payrollOut'),
+      totalPayrollOut: seriesFor('totalPayrollOut'), cashPayrollOut: seriesFor('cashPayrollOut'),
+      checkPayrollOut: seriesFor('checkPayrollOut'), achPayrollOut: seriesFor('achPayrollOut'),
+      unknownPayrollOut: seriesFor('unknownPayrollOut'),
+    }
+  }, [currentImportedPayroll, currentPayrollRuns, period])
+
   const netSeries = useMemo(
-    () => buildSeries(currentDates, reportsByDate, closedDays, period, getNetRevenue),
-    [closedDays, currentDates, period, reportsByDate]
+    () => yearlySalesSeries?.net ?? buildSeries(currentDates, reportsByDate, closedDays, period, getNetRevenue),
+    [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const collectedTipSeries = useMemo(
-    () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.tip_total ?? 0)),
-    [closedDays, currentDates, period, reportsByDate]
+    () => yearlySalesSeries?.collectedTip ?? buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.tip_total ?? 0)),
+    [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const tipOutSeries = useMemo(
-    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.tipOut),
-    [currentPayrollRuns]
+    () => yearlyPayrollSeries?.tipOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.tipOut),
+    [currentPayrollRuns, yearlyPayrollSeries]
   )
   const taxSeries = useMemo(
-    () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.sales_tax ?? 0)),
-    [closedDays, currentDates, period, reportsByDate]
+    () => yearlySalesSeries?.tax ?? buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.sales_tax ?? 0)),
+    [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const cashSeries = useMemo(
-    () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.cash_total ?? 0)),
-    [closedDays, currentDates, period, reportsByDate]
+    () => yearlySalesSeries?.cash ?? buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.cash_total ?? 0)),
+    [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const cardSeries = useMemo(
-    () => buildSeries(currentDates, reportsByDate, closedDays, period, getCardRevenue),
-    [closedDays, currentDates, period, reportsByDate]
+    () => yearlySalesSeries?.card ?? buildSeries(currentDates, reportsByDate, closedDays, period, getCardRevenue),
+    [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const deliverySeries = useMemo(
-    () => buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.delivery_order_amount ?? 0)),
-    [closedDays, currentDates, period, reportsByDate]
+    () => yearlySalesSeries?.delivery ?? buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.delivery_order_amount ?? 0)),
+    [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const payrollOutSeries = useMemo(() => {
-    return buildPayrollRunSeries(currentPayrollRuns, summary => summary.payrollOut)
-  }, [currentPayrollRuns])
+    return yearlyPayrollSeries?.payrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.payrollOut)
+  }, [currentPayrollRuns, yearlyPayrollSeries])
   const totalPayrollOutSeries = useMemo(() => {
-    return buildPayrollRunSeries(currentPayrollRuns, summary => summary.totalPayrollOut)
-  }, [currentPayrollRuns])
+    return yearlyPayrollSeries?.totalPayrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.totalPayrollOut)
+  }, [currentPayrollRuns, yearlyPayrollSeries])
   const cashPayrollOutSeries = useMemo(
-    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.cashPayrollOut),
-    [currentPayrollRuns]
+    () => yearlyPayrollSeries?.cashPayrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.cashPayrollOut),
+    [currentPayrollRuns, yearlyPayrollSeries]
   )
   const checkPayrollOutSeries = useMemo(
-    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.checkPayrollOut),
-    [currentPayrollRuns]
+    () => yearlyPayrollSeries?.checkPayrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.checkPayrollOut),
+    [currentPayrollRuns, yearlyPayrollSeries]
   )
   const achPayrollOutSeries = useMemo(
-    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.achPayrollOut),
-    [currentPayrollRuns]
+    () => yearlyPayrollSeries?.achPayrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.achPayrollOut),
+    [currentPayrollRuns, yearlyPayrollSeries]
   )
   const unknownPayrollOutSeries = useMemo(
-    () => buildPayrollRunSeries(currentPayrollRuns, summary => summary.unknownPayrollOut),
-    [currentPayrollRuns]
+    () => yearlyPayrollSeries?.unknownPayrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.unknownPayrollOut),
+    [currentPayrollRuns, yearlyPayrollSeries]
   )
   const cashFlowSeries = useMemo(() => {
+    if (period === 'yearly') return toMonthlySeries(monthlyTrendValues(
+      currentCashEntries.map(entry => ({
+        date: entry.entry_date,
+        value: entry.entry_type === 'cash_in' ? Number(entry.amount ?? 0) : -Number(entry.amount ?? 0),
+      })),
+      [],
+    ))
     const rangeLength = currentDates.length
     const bucketMap = new Map<string, SeriesPoint>()
     for (const date of currentDates) {
@@ -826,6 +885,10 @@ export default function ReportingDashboardPage() {
     }
     return [...bucketMap.values()]
   }, [closedDays, currentCashEntries, currentDates, period])
+
+  const trendAverage = period === 'yearly' && netSeries.length > 0
+    ? netSeries.reduce((sum, point) => sum + point.value, 0) / netSeries.length
+    : dailyAverage
 
   const metricCards = [
     { key: 'cash' as const, label: 'Cash Sales', value: currentTotals.cash, previous: previousTotals.cash, points: cashSeries, color: '#0f766e', icon: Banknote },
@@ -923,7 +986,7 @@ export default function ReportingDashboardPage() {
         </div>
         {historical && <p className="mt-3 text-xs text-muted-foreground">
           2026 totals include the imported missing-period sales and payroll amounts when the selected range covers their full source period.
-          Daily charts still show only dated EOD and payout records.
+          Yearly charts use the same monthly imported totals. Day and week charts show only dated EOD and payout records.
           {importedPayrollConflicts > 0 && ` ${importedPayrollConflicts} overlapping payroll period is excluded pending reconciliation.`}
         </p>}
       </div>
@@ -988,7 +1051,7 @@ export default function ReportingDashboardPage() {
               <p className="mt-2 text-xs text-muted-foreground">{reportedOpenDates.length} reported / {openDates.length} open days</p>
             </div>
           </div>
-          <MainTrendChart points={netSeries} dailyAverage={dailyAverage} />
+          <MainTrendChart points={netSeries} average={trendAverage} monthly={period === 'yearly'} />
         </div>
 
         <div className="rounded-xl border bg-white p-4">
