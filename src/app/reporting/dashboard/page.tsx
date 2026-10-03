@@ -37,6 +37,9 @@ type MetricKey =
 
 type MetricTotals = Record<MetricKey, number>
 
+type YearlyChartKey = MetricKey | 'gross' | 'houseTip' | 'kitchenPayroll'
+  | 'serverPayroll' | 'managerPayroll' | 'commission' | 'payrollRatio' | 'totalPayrollRatio'
+
 type SeriesPoint = {
   label: string
   date: string
@@ -324,6 +327,14 @@ function toMonthlySeries(points: Array<{ date: string; value: number }>): Series
   }))
 }
 
+function monthlyRatioSeries(numerator: SeriesPoint[], denominator: SeriesPoint[]): SeriesPoint[] {
+  const amounts = new Map(numerator.map(point => [point.date, point.value]))
+  return denominator.filter(point => point.value > 0).map(point => ({
+    ...point,
+    value: ((amounts.get(point.date) ?? 0) / point.value) * 100,
+  }))
+}
+
 function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color?: string }) {
   const visible = points.filter(p => !(p.closed && p.value === 0))
   const values = visible.map(p => p.value)
@@ -373,10 +384,19 @@ function Sparkline({ points, color = '#2563eb' }: { points: SeriesPoint[]; color
   )
 }
 
-function MainTrendChart({ points, average, monthly }: { points: SeriesPoint[]; average: number; monthly: boolean }) {
+function MainTrendChart({ points, average, monthly, label, color, formatValue = 'currency' }: {
+  points: SeriesPoint[]
+  average: number
+  monthly: boolean
+  label: string
+  color: string
+  formatValue?: 'currency' | 'percent'
+}) {
   const visible = points.filter(p => !(p.closed && p.value === 0))
   const values = visible.map(point => point.value)
   const max = Math.max(...values, average, 1)
+  const min = Math.min(0, ...values, average)
+  const range = max - min || 1
   const width = 720
   const height = 260
   const padLeft = 54
@@ -386,23 +406,30 @@ function MainTrendChart({ points, average, monthly }: { points: SeriesPoint[]; a
   const innerHeight = height - padY * 2
   const coords = values.map((value, index) => {
     const x = padLeft + (values.length <= 1 ? 0 : (index / (values.length - 1)) * innerWidth)
-    const y = padY + innerHeight - (value / max) * innerHeight
+    const y = padY + innerHeight - ((value - min) / range) * innerHeight
     return { x, y }
   })
   const path = coords.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ')
+  const zeroY = padY + innerHeight - ((0 - min) / range) * innerHeight
   const areaPath = coords.length > 0
-    ? `${path} L ${coords[coords.length - 1].x.toFixed(1)} ${height - padY} L ${coords[0].x.toFixed(1)} ${height - padY} Z`
+    ? `${path} L ${coords[coords.length - 1].x.toFixed(1)} ${zeroY.toFixed(1)} L ${coords[0].x.toFixed(1)} ${zeroY.toFixed(1)} Z`
     : ''
-  const avgY = padY + innerHeight - (average / max) * innerHeight
-  const fmtK = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`
+  const avgY = padY + innerHeight - ((average - min) / range) * innerHeight
+  const fmtK = (v: number) => formatValue === 'percent'
+    ? `${v.toFixed(0)}%`
+    : Math.abs(v) >= 1000 ? `${v < 0 ? '-' : ''}$${(Math.abs(v) / 1000).toFixed(1)}k` : `${v < 0 ? '-' : ''}$${Math.round(Math.abs(v))}`
 
   return (
     <div className="rounded-xl border bg-white p-4">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-72 w-full" role="img" aria-label={monthly ? 'Monthly net revenue chart' : 'Daily net revenue chart'}>
+      {monthly && <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-slate-900">{label} by month</p>
+        <p className="text-xs text-muted-foreground">Select a data card to change this chart</p>
+      </div>}
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-72 w-full" role="img" aria-label={`${monthly ? 'Monthly' : 'Daily'} ${label} chart`}>
         <defs>
           <linearGradient id="netTrendFill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.22" />
-            <stop offset="100%" stopColor="#2563eb" stopOpacity="0.03" />
+            <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.03" />
           </linearGradient>
         </defs>
         {[0, 0.25, 0.5, 0.75, 1].map(tick => {
@@ -410,15 +437,15 @@ function MainTrendChart({ points, average, monthly }: { points: SeriesPoint[]; a
           return (
             <g key={tick}>
               <line x1={padLeft} x2={width - padRight} y1={y} y2={y} stroke="#e5e7eb" strokeWidth="1" />
-              <text x={padLeft - 6} y={y + 4} textAnchor="end" fontSize="11" fill="#94a3b8">{fmtK(max * (1 - tick))}</text>
+              <text x={padLeft - 6} y={y + 4} textAnchor="end" fontSize="11" fill="#94a3b8">{fmtK(max - range * tick)}</text>
             </g>
           )
         })}
         {areaPath && <path d={areaPath} fill="url(#netTrendFill)" />}
-        {path && <path d={path} fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
+        {path && <path d={path} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
         <line x1={padLeft} x2={width - padRight} y1={avgY} y2={avgY} stroke="#f59e0b" strokeDasharray="8 8" strokeWidth="3" />
         {coords.map((point, index) => (
-          <circle key={`${visible[index]?.date}-${index}`} cx={point.x} cy={point.y} r="4" fill="#2563eb" />
+          <circle key={`${visible[index]?.date}-${index}`} cx={point.x} cy={point.y} r="4" fill={color} />
         ))}
         {visible.map((point, index) => {
           if (visible.length > 18 && index % Math.ceil(visible.length / 18) !== 0) return null
@@ -434,7 +461,7 @@ function MainTrendChart({ points, average, monthly }: { points: SeriesPoint[]; a
         })}
       </svg>
       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-2"><span className="h-2 w-8 rounded-full bg-blue-600" />{monthly ? 'Monthly' : 'Daily'} net revenue</span>
+        <span className="inline-flex items-center gap-2"><span className="h-2 w-8 rounded-full" style={{ backgroundColor: color }} />{monthly ? 'Monthly' : 'Daily'} {label}</span>
         <span className="inline-flex items-center gap-2"><span className="h-0.5 w-8 border-t-2 border-dashed border-amber-500" />{monthly ? 'Monthly' : 'Daily'} average</span>
       </div>
     </div>
@@ -448,6 +475,8 @@ function MetricCard({
   points,
   color,
   icon: Icon,
+  onSelect,
+  selected = false,
 }: {
   label: string
   value: number
@@ -455,12 +484,13 @@ function MetricCard({
   points: SeriesPoint[]
   color: string
   icon: React.ComponentType<{ className?: string }>
+  onSelect?: () => void
+  selected?: boolean
 }) {
   const isPositive = change !== null && change > 0
   const isNegative = change !== null && change < 0
-
-  return (
-    <div className="rounded-xl border bg-white p-4">
+  const content = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
@@ -481,15 +511,22 @@ function MetricCard({
           {formatPercent(change)}
         </span>
       </div>
-    </div>
+    </>
   )
+  const className = `w-full rounded-xl border bg-white p-4 text-left ${onSelect
+    ? `cursor-pointer transition-colors hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${selected ? 'border-blue-500 ring-2 ring-blue-200' : ''}`
+    : ''}`
+  return onSelect
+    ? <button type="button" onClick={onSelect} aria-pressed={selected} className={className}>{content}</button>
+    : <div className={className}>{content}</div>
 }
 
-function MixBar({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
+function MixBar({ label, value, total, color, onSelect, selected = false }: {
+  label: string; value: number; total: number; color: string; onSelect?: () => void; selected?: boolean
+}) {
   const percent = total > 0 ? Math.max(3, (value / total) * 100) : 0
-
-  return (
-    <div>
+  const content = (
+    <>
       <div className="mb-1 flex items-center justify-between text-sm">
         <span className="font-medium text-slate-800">{label}</span>
         <span className="text-muted-foreground">{formatCurrency(value)}</span>
@@ -497,8 +534,11 @@ function MixBar({ label, value, total, color }: { label: string; value: number; 
       <div className="h-3 overflow-hidden rounded-full bg-slate-100">
         <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: color }} />
       </div>
-    </div>
+    </>
   )
+  return onSelect
+    ? <button type="button" onClick={onSelect} aria-pressed={selected} className={`w-full rounded-md p-1 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${selected ? 'bg-blue-50 ring-1 ring-blue-300' : ''}`}>{content}</button>
+    : <div>{content}</div>
 }
 
 export default function ReportingDashboardPage() {
@@ -506,6 +546,7 @@ export default function ReportingDashboardPage() {
   const { clockRecords } = useClockRecords()
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
+  const [selectedYearlyChart, setSelectedYearlyChart] = useState<YearlyChartKey>('net')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [closedDays, setClosedDays] = useState<number[]>(loadClosedDays)
@@ -634,8 +675,12 @@ export default function ReportingDashboardPage() {
       checkPayrollOut: saved.checkPayrollOut + previousImportedPayrollTotals.checkPayrollOut,
     }
   }, [previousImportedPayrollTotals, previousPayrollRuns])
+  const overviewYearDate = useMemo(
+    () => period === 'custom' && customStart ? toDate(customStart) : refDate,
+    [customStart, period, refDate],
+  )
   const yearlyMonthlyOverview = useMemo(() => {
-    const yearStart = startOfYear(new Date())
+    const yearStart = startOfYear(overviewYearDate)
 
     return Array.from({ length: 12 }, (_, index) => {
       const monthDate = addMonths(yearStart, index)
@@ -663,7 +708,7 @@ export default function ReportingDashboardPage() {
           : 'Paid out',
       }
     }).filter(month => month.hasData)
-  }, [clockRecords, eodReports, importedPayroll, importedSales, payrollRuns])
+  }, [clockRecords, eodReports, importedPayroll, importedSales, overviewYearDate, payrollRuns])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
@@ -770,6 +815,7 @@ export default function ReportingDashboardPage() {
     const saved = currentReports.map(report => ({
       date: report.session_date,
       net: getNetRevenue(report),
+      gross: Number(report.revenue_total ?? 0),
       collectedTip: Number(report.tip_total ?? 0),
       tax: Number(report.sales_tax ?? 0),
       cash: Number(report.cash_total ?? 0),
@@ -777,13 +823,13 @@ export default function ReportingDashboardPage() {
       delivery: Number(report.delivery_order_amount ?? 0),
     }))
     const imported = currentImportedSales.map(row => ({ ...row, totals: historicalRevenue([row]) }))
-    type SaleMetric = 'net' | 'collectedTip' | 'tax' | 'cash' | 'card' | 'delivery'
+    type SaleMetric = 'net' | 'gross' | 'collectedTip' | 'tax' | 'cash' | 'card' | 'delivery'
     const seriesFor = (key: SaleMetric) => toMonthlySeries(monthlyTrendValues(
       saved.map(point => ({ date: point.date, value: point[key] })),
       imported.map(row => ({ start_date: row.start_date, end_date: row.end_date, value: row.totals[key] })),
     ))
     return {
-      net: seriesFor('net'), collectedTip: seriesFor('collectedTip'), tax: seriesFor('tax'),
+      net: seriesFor('net'), gross: seriesFor('gross'), collectedTip: seriesFor('collectedTip'), tax: seriesFor('tax'),
       cash: seriesFor('cash'), card: seriesFor('card'), delivery: seriesFor('delivery'),
     }
   }, [currentImportedSales, currentReports, period])
@@ -801,11 +847,35 @@ export default function ReportingDashboardPage() {
       saved.map(run => ({ date: run.date, value: run.totals[key] })),
       imported.map(row => ({ start_date: row.start_date, end_date: row.end_date, value: row.totals[key] })),
     ))
+    const savedDepartments = currentPayrollRuns.flatMap(run => (run.payroll_run_items ?? []).map(item => {
+      const payout = Number(item.payout_amount ?? 0)
+      const tips = Number(item.tips ?? 0)
+      const commission = Number(item.commission ?? 0)
+      const wages = Math.max(0, Math.max(0, payout - tips) - commission)
+      const department = getPayrollDepartmentGroup(item.department)
+      return {
+        date: run.pay_date,
+        kitchen: department === 'kitchen' ? wages : 0,
+        server: department === 'server' ? wages : 0,
+        manager: department === 'manager' ? wages : 0,
+        commission,
+      }
+    }))
+    const departmentSeriesFor = (key: 'kitchen' | 'server' | 'manager' | 'commission') => toMonthlySeries(monthlyTrendValues(
+      savedDepartments.map(item => ({ date: item.date, value: item[key] })),
+      imported.map(row => ({
+        start_date: row.start_date,
+        end_date: row.end_date,
+        value: key === 'server' ? row.totals.serverWages : key === 'commission' ? 0 : row.totals[key],
+      })),
+    ))
     return {
       tipOut: seriesFor('tipOut'), payrollOut: seriesFor('payrollOut'),
       totalPayrollOut: seriesFor('totalPayrollOut'), cashPayrollOut: seriesFor('cashPayrollOut'),
       checkPayrollOut: seriesFor('checkPayrollOut'), achPayrollOut: seriesFor('achPayrollOut'),
       unknownPayrollOut: seriesFor('unknownPayrollOut'),
+      kitchenPayroll: departmentSeriesFor('kitchen'), serverPayroll: departmentSeriesFor('server'),
+      managerPayroll: departmentSeriesFor('manager'), commission: departmentSeriesFor('commission'),
     }
   }, [currentImportedPayroll, currentPayrollRuns, period])
 
@@ -886,10 +956,6 @@ export default function ReportingDashboardPage() {
     return [...bucketMap.values()]
   }, [closedDays, currentCashEntries, currentDates, period])
 
-  const trendAverage = period === 'yearly' && netSeries.length > 0
-    ? netSeries.reduce((sum, point) => sum + point.value, 0) / netSeries.length
-    : dailyAverage
-
   const metricCards = [
     { key: 'cash' as const, label: 'Cash Sales', value: currentTotals.cash, previous: previousTotals.cash, points: cashSeries, color: '#0f766e', icon: Banknote },
     { key: 'card' as const, label: 'Credit Card', value: currentTotals.card, previous: previousTotals.card, points: cardSeries, color: '#2563eb', icon: CreditCard },
@@ -910,6 +976,45 @@ export default function ReportingDashboardPage() {
   const netSalesWithTips = currentTotals.net + currentTotals.collectedTip
   const totalPayrollRatio = netSalesWithTips > 0 ? (currentTotals.totalPayrollOut / netSalesWithTips) * 100 : null
   const houseCollectedTip = currentTotals.collectedTip * 0.15
+
+  const chartOptions: Record<YearlyChartKey, {
+    label: string; points: SeriesPoint[]; color: string; formatValue?: 'currency' | 'percent'
+  }> = {
+    net: { label: 'Net Revenue', points: netSeries, color: '#2563eb' },
+    gross: { label: 'Gross Revenue', points: yearlySalesSeries?.gross ?? [], color: '#059669' },
+    cash: { label: 'Cash Sales', points: cashSeries, color: '#0f766e' },
+    card: { label: 'Credit Card', points: cardSeries, color: '#2563eb' },
+    delivery: { label: 'Delivery', points: deliverySeries, color: '#f97316' },
+    tax: { label: 'Tax', points: taxSeries, color: '#dc2626' },
+    collectedTip: { label: 'Collected Tips', points: collectedTipSeries, color: '#16a34a' },
+    houseTip: { label: 'House Tip (15%)', points: collectedTipSeries.map(point => ({ ...point, value: point.value * 0.15 })), color: '#65a30d' },
+    tipOut: { label: 'Tips Paid Out', points: tipOutSeries, color: '#059669' },
+    kitchenPayroll: { label: 'Kitchen Payroll', points: yearlyPayrollSeries?.kitchenPayroll ?? [], color: '#7c3aed' },
+    serverPayroll: { label: 'Server Payroll', points: yearlyPayrollSeries?.serverPayroll ?? [], color: '#8b5cf6' },
+    managerPayroll: { label: 'Manager Payroll', points: yearlyPayrollSeries?.managerPayroll ?? [], color: '#a855f7' },
+    commission: { label: 'Commission Paid', points: yearlyPayrollSeries?.commission ?? [], color: '#9333ea' },
+    payrollOut: { label: 'Payroll Out', points: payrollOutSeries, color: '#7c3aed' },
+    totalPayrollOut: { label: 'Total Payroll Out', points: totalPayrollOutSeries, color: '#6d28d9' },
+    cashPayrollOut: { label: 'Cash Payroll Out', points: cashPayrollOutSeries, color: '#0f766e' },
+    checkPayrollOut: { label: 'Check Payroll Out', points: checkPayrollOutSeries, color: '#475569' },
+    achPayrollOut: { label: 'ACH Payroll', points: achPayrollOutSeries, color: '#2563eb' },
+    unknownPayrollOut: { label: 'Unknown Payroll', points: unknownPayrollOutSeries, color: '#b45309' },
+    cashFlow: { label: 'Cash In / Out', points: cashFlowSeries, color: '#0891b2' },
+    payrollRatio: { label: 'Payroll / Net Sales', points: monthlyRatioSeries(payrollOutSeries, netSeries), color: '#0f172a', formatValue: 'percent' },
+    totalPayrollRatio: {
+      label: 'Total Payroll / (Net Sales + Tips)',
+      points: monthlyRatioSeries(totalPayrollOutSeries, netSeries.map(point => ({
+        ...point,
+        value: point.value + (collectedTipSeries.find(tip => tip.date === point.date)?.value ?? 0),
+      }))),
+      color: '#1d4ed8',
+      formatValue: 'percent',
+    },
+  }
+  const activeChart = period === 'yearly' ? chartOptions[selectedYearlyChart] : chartOptions.net
+  const trendAverage = period === 'yearly' && activeChart.points.length > 0
+    ? activeChart.points.reduce((sum, point) => sum + point.value, 0) / activeChart.points.length
+    : dailyAverage
 
   return (
     <div className="p-6">
@@ -994,15 +1099,23 @@ export default function ReportingDashboardPage() {
       <div className="mb-5 rounded-xl border bg-white p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-medium uppercase text-muted-foreground">Current Year Monthly Overview</p>
-            <h2 className="text-lg font-semibold text-slate-950">{format(new Date(), 'yyyy')} revenue and payroll</h2>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Monthly Overview</p>
+            <h2 className="text-lg font-semibold text-slate-950">{format(overviewYearDate, 'yyyy')} revenue and payroll</h2>
           </div>
           <Badge variant="outline">Rev / Payroll</Badge>
         </div>
+        {period === 'yearly' && <p className="mb-3 text-xs text-muted-foreground">Select a month to open its monthly dashboard.</p>}
         {yearlyMonthlyOverview.length > 0 ? (
           <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {yearlyMonthlyOverview.map(month => (
-              <div key={month.key} className="rounded-lg border bg-slate-50 px-2.5 py-2">
+              <button
+                key={month.key}
+                type="button"
+                disabled={period !== 'yearly'}
+                onClick={() => { setRefDate(toDate(`${month.key}-01`)); setPeriod('monthly') }}
+                aria-label={`Open ${format(toDate(`${month.key}-01`), 'MMMM yyyy')} monthly dashboard`}
+                className="rounded-lg border bg-slate-50 px-2.5 py-2 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:hover:bg-blue-50 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500"
+              >
                 <div className="flex items-center justify-between gap-2 leading-none">
                   <span className="text-xs font-semibold text-slate-900">{month.label}</span>
                   <span className="text-[9px] uppercase text-slate-400">{month.source}</span>
@@ -1017,12 +1130,12 @@ export default function ReportingDashboardPage() {
                     <div className="font-semibold text-violet-700">{formatCurrency(month.payroll)}</div>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         ) : (
           <div className="rounded-lg border bg-slate-50 px-3 py-3 text-sm text-muted-foreground">
-            No current-year dashboard data is available yet.
+            No dashboard data is available for this year yet.
           </div>
         )}
       </div>
@@ -1030,16 +1143,20 @@ export default function ReportingDashboardPage() {
       <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]">
         <div>
           <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border bg-white p-4">
+            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('net')}
+              aria-pressed={period === 'yearly' && selectedYearlyChart === 'net'}
+              className={`rounded-xl border bg-white p-4 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'net' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
               <p className="text-xs font-medium uppercase text-muted-foreground">Actual Net Revenue</p>
               <p className="mt-1 text-3xl font-semibold text-slate-950">{formatCurrency(currentTotals.net)}</p>
               <p className="mt-2 text-xs text-muted-foreground">{currentReports.length} EOD reports + {currentImportedSales.length} imported period totals</p>
-            </div>
-            <div className="rounded-xl border bg-white p-4">
+            </button>
+            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('gross')}
+              aria-pressed={period === 'yearly' && selectedYearlyChart === 'gross'}
+              className={`rounded-xl border bg-white p-4 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'gross' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
               <p className="text-xs font-medium uppercase text-muted-foreground">Gross Revenue</p>
               <p className="mt-1 text-3xl font-semibold text-emerald-700">{formatCurrency(currentGrossRevenue)}</p>
               <p className="mt-2 text-xs text-muted-foreground">Cash + credit + tax + tips collected</p>
-            </div>
+            </button>
             <div className="rounded-xl border bg-white p-4">
               <p className="text-xs font-medium uppercase text-muted-foreground">Projected Close</p>
               <p className="mt-1 text-3xl font-semibold text-blue-700">{formatCurrency(projectedNetRevenue)}</p>
@@ -1051,7 +1168,14 @@ export default function ReportingDashboardPage() {
               <p className="mt-2 text-xs text-muted-foreground">{reportedOpenDates.length} reported / {openDates.length} open days</p>
             </div>
           </div>
-          <MainTrendChart points={netSeries} average={trendAverage} monthly={period === 'yearly'} />
+          <MainTrendChart
+            points={activeChart.points}
+            average={trendAverage}
+            monthly={period === 'yearly'}
+            label={activeChart.label}
+            color={activeChart.color}
+            formatValue={activeChart.formatValue}
+          />
         </div>
 
         <div className="rounded-xl border bg-white p-4">
@@ -1065,40 +1189,52 @@ export default function ReportingDashboardPage() {
             </Badge>
           </div>
           <div className="space-y-5">
-            <MixBar label="Cash" value={currentTotals.cash} total={mixTotal} color="#0f766e" />
-            <MixBar label="Credit Card" value={currentTotals.card} total={mixTotal} color="#2563eb" />
-            <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316" />
+            <MixBar label="Cash" value={currentTotals.cash} total={mixTotal} color="#0f766e"
+              onSelect={period === 'yearly' ? () => setSelectedYearlyChart('cash') : undefined}
+              selected={period === 'yearly' && selectedYearlyChart === 'cash'} />
+            <MixBar label="Credit Card" value={currentTotals.card} total={mixTotal} color="#2563eb"
+              onSelect={period === 'yearly' ? () => setSelectedYearlyChart('card') : undefined}
+              selected={period === 'yearly' && selectedYearlyChart === 'card'} />
+            <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316"
+              onSelect={period === 'yearly' ? () => setSelectedYearlyChart('delivery') : undefined}
+              selected={period === 'yearly' && selectedYearlyChart === 'delivery'} />
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
-            {[
-              ['Total Tips Collected (gross)', currentTotals.collectedTip, `EOD and imported business periods: ${dateLabel}`],
-              ['House Tip (15%)', houseCollectedTip],
-              ['Tips Paid Out', currentTotals.tipOut, `Saved pay dates and imported business periods: ${dateLabel}`],
-              ['Kitchen Payroll (excl. tips)', payrollPanel.kitchen],
-              ['Server Payroll (excl. tips)', payrollPanel.server],
-              ['Manager Payroll (excl. tips)', payrollPanel.manager],
-              ['Commission Paid', payrollPanel.commission],
-              ['Total Payroll (excl. tips)', currentTotals.payrollOut],
-              ['Total Payroll (incl. tips)', currentTotals.totalPayrollOut],
-            ].map(([label, value, note]) => (
-              <div key={label} className="rounded-lg border bg-white px-3 py-2">
+            {([
+              { label: 'Total Tips Collected (gross)', value: currentTotals.collectedTip, note: `EOD and imported business periods: ${dateLabel}`, chartKey: 'collectedTip' },
+              { label: 'House Tip (15%)', value: houseCollectedTip, chartKey: 'houseTip' },
+              { label: 'Tips Paid Out', value: currentTotals.tipOut, note: `Saved pay dates and imported business periods: ${dateLabel}`, chartKey: 'tipOut' },
+              { label: 'Kitchen Payroll (excl. tips)', value: payrollPanel.kitchen, chartKey: 'kitchenPayroll' },
+              { label: 'Server Payroll (excl. tips)', value: payrollPanel.server, chartKey: 'serverPayroll' },
+              { label: 'Manager Payroll (excl. tips)', value: payrollPanel.manager, chartKey: 'managerPayroll' },
+              { label: 'Commission Paid', value: payrollPanel.commission, chartKey: 'commission' },
+              { label: 'Total Payroll (excl. tips)', value: currentTotals.payrollOut, chartKey: 'payrollOut' },
+              { label: 'Total Payroll (incl. tips)', value: currentTotals.totalPayrollOut, chartKey: 'totalPayrollOut' },
+            ] as Array<{ label: string; value: number; note?: string; chartKey: YearlyChartKey }>).map(({ label, value, note, chartKey }) => (
+              <button key={label} type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart(chartKey)}
+                aria-pressed={period === 'yearly' && selectedYearlyChart === chartKey}
+                className={`rounded-lg border bg-white px-3 py-2 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === chartKey ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
                 <div className="text-[10px] font-medium uppercase text-muted-foreground">{label}</div>
-                <div className="mt-0.5 text-lg font-bold text-slate-950">{value === null ? '—' : formatCurrency(Number(value))}</div>
+                <div className="mt-0.5 text-lg font-bold text-slate-950">{formatCurrency(value)}</div>
                 {note && <div className="mt-0.5 text-[10px] text-muted-foreground">{note}</div>}
-              </div>
+              </button>
             ))}
-            <div className="rounded-lg border bg-slate-950 px-3 py-2 text-white">
+            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('payrollRatio')}
+              aria-pressed={period === 'yearly' && selectedYearlyChart === 'payrollRatio'}
+              className={`rounded-lg border bg-slate-950 px-3 py-2 text-left text-white enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'payrollRatio' ? 'border-blue-400 ring-2 ring-blue-200' : ''}`}>
               <div className="text-xs font-medium text-slate-300">Payroll / Net Sales</div>
               <div className="text-xs text-slate-300">Excluding tips</div>
               <div className="mt-1 text-2xl font-bold">{payrollRatio === null ? '—' : `${payrollRatio.toFixed(1)}%`}</div>
               <div className="mt-1 text-xs text-slate-300">{formatCurrency(currentTotals.payrollOut)} ÷ {formatCurrency(currentTotals.net)}</div>
-            </div>
-            <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-blue-950">
+            </button>
+            <button type="button" disabled={period !== 'yearly'} onClick={() => setSelectedYearlyChart('totalPayrollRatio')}
+              aria-pressed={period === 'yearly' && selectedYearlyChart === 'totalPayrollRatio'}
+              className={`rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-left text-blue-950 enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'totalPayrollRatio' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
               <div className="text-xs font-medium">Total Payroll (including tips) / (Net Sales + Total Tips)</div>
               <div className="text-xs text-blue-800">Payroll includes tips paid out; sales include tips collected</div>
               <div className="mt-1 text-2xl font-bold">{totalPayrollRatio === null ? '—' : `${totalPayrollRatio.toFixed(1)}%`}</div>
               <div className="mt-1 text-xs text-blue-800">{formatCurrency(currentTotals.totalPayrollOut)} ÷ ({formatCurrency(currentTotals.net)} + {formatCurrency(currentTotals.collectedTip)}) × 100</div>
-            </div>
+            </button>
           </div>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
             <p>Collected tips use EOD and imported business periods. Saved tip payouts use pay dates; imported tip payouts use the sheet period.</p>
@@ -1135,6 +1271,8 @@ export default function ReportingDashboardPage() {
             points={card.points}
             color={card.color}
             icon={card.icon}
+            onSelect={period === 'yearly' ? () => setSelectedYearlyChart(card.key) : undefined}
+            selected={period === 'yearly' && selectedYearlyChart === card.key}
           />
         ))}
       </div>
