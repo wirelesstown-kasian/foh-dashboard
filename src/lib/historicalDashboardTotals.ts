@@ -89,17 +89,18 @@ export function historicalPayroll(rows: HistoricalPayroll[]) {
     }
     const cash = Number(row.cash ?? 0)
     const check = Number(row.check ?? 0)
+    const department = row.category === 'owner' ? 'manager' : row.category
     return {
       ...sum,
       payrollOut: sum.payrollOut + cash + check,
       totalPayrollOut: sum.totalPayrollOut + cash + check,
       cashPayrollOut: sum.cashPayrollOut + cash,
       checkPayrollOut: sum.checkPayrollOut + check,
-      [row.category]: sum[row.category] + cash + check,
+      [department]: sum[department] + cash + check,
     }
   }, {
     tipOut: 0, payrollOut: 0, totalPayrollOut: 0,
     cashPayrollOut: 0, checkPayrollOut: 0,
-    server: 0, serverWages: 0, kitchen: 0, owner: 0,
+    server: 0, serverWages: 0, kitchen: 0, manager: 0,
   })
 }

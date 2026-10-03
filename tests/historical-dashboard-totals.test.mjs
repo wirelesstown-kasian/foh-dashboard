@@ -56,7 +56,7 @@ test('imported sales preserve the EOD net, revenue-mix, and tip relationships', 
   assert.equal(result.collectedTip, 6243.99)
 })
 
-test('server tip payouts and base wages remain distinct from kitchen and owner wages', () => {
+test('imported owner wages join manager payroll and the payroll to net sales numerator', () => {
   const result = totals.historicalPayroll([
     { category: 'server', cash_tip: 2053, check_tip: 4830.84, base: 970.2 },
     { category: 'kitchen', cash: 29584, check: 2602.55 },
@@ -67,5 +67,6 @@ test('server tip payouts and base wages remain distinct from kitchen and owner w
   assert.equal(Math.round(result.totalPayrollOut * 100), 5337393)
   assert.equal(result.serverWages, 970.2)
   assert.equal(result.kitchen, 32186.55)
-  assert.equal(result.owner, 13333.34)
+  assert.equal(result.manager, 13333.34)
+  assert.equal(result.payrollOut, result.serverWages + result.kitchen + result.manager)
 })

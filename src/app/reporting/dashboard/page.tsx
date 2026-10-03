@@ -243,7 +243,7 @@ function getPayrollDepartmentGroup(department: string | null | undefined) {
   const value = (department ?? '').toLowerCase()
   if (value.includes('kitchen') || value.includes('cook')) return 'kitchen'
   if (value.includes('server')) return 'server'
-  if (value.includes('manager')) return 'manager'
+  if (value.includes('manager') || value.includes('owner')) return 'manager'
   return 'other'
 }
 
@@ -660,13 +660,14 @@ export default function ReportingDashboardPage() {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
       for (const item of run.payroll_run_items ?? []) {
-        map.set(item.department, (map.get(item.department) ?? 0) + Number(item.payout_amount ?? 0))
+        const department = getPayrollDepartmentGroup(item.department)
+        map.set(department, (map.get(department) ?? 0) + Number(item.payout_amount ?? 0))
       }
     }
     for (const [department, amount] of Object.entries({
       server: currentImportedPayrollTotals.server,
       kitchen: currentImportedPayrollTotals.kitchen,
-      owner: currentImportedPayrollTotals.owner,
+      manager: currentImportedPayrollTotals.manager,
     })) {
       if (amount > 0) map.set(department, (map.get(department) ?? 0) + amount)
     }
@@ -677,7 +678,6 @@ export default function ReportingDashboardPage() {
       kitchen: 0,
       server: 0,
       manager: 0,
-      owner: 0,
       other: 0,
       tipOut: 0,
       commission: 0,
@@ -702,7 +702,7 @@ export default function ReportingDashboardPage() {
 
     totals.server += currentImportedPayrollTotals.serverWages
     totals.kitchen += currentImportedPayrollTotals.kitchen
-    totals.owner += currentImportedPayrollTotals.owner
+    totals.manager += currentImportedPayrollTotals.manager
     totals.tipOut += currentImportedPayrollTotals.tipOut
     totals.payroll += currentImportedPayrollTotals.payrollOut
     totals.payrollWithTip += currentImportedPayrollTotals.totalPayrollOut
@@ -1014,7 +1014,6 @@ export default function ReportingDashboardPage() {
               ['Kitchen Payroll (excl. tips)', payrollPanel.kitchen],
               ['Server Payroll (excl. tips)', payrollPanel.server],
               ['Manager Payroll (excl. tips)', payrollPanel.manager],
-              ['Owner Payroll (excl. tips)', payrollPanel.owner],
               ['Commission Paid', payrollPanel.commission],
               ['Total Payroll (excl. tips)', currentTotals.payrollOut],
               ['Total Payroll (incl. tips)', currentTotals.totalPayrollOut],
