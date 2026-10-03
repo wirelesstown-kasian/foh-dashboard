@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { useClockRecords, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
-import { HistoricalAdjustmentsPanel } from '@/components/reporting/HistoricalAdjustmentsPanel'
+import {
+  historicalPayroll, historicalRevenue, nonOverlappingPayroll, nonOverlappingSales, periodRows,
+  type HistoricalAdjustments,
+} from '@/lib/historicalDashboardTotals'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -499,6 +502,25 @@ export default function ReportingDashboardPage() {
   const [customEnd, setCustomEnd] = useState('')
   const [closedDays, setClosedDays] = useState<number[]>(loadClosedDays)
   const [cashEntries, setCashEntries] = useState<CashBalanceEntry[]>([])
+  const [historical, setHistorical] = useState<HistoricalAdjustments | null>(null)
+  const [historicalError, setHistoricalError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let mounted = true
+    void fetch('/api/historical-adjustments', { cache: 'no-store' })
+      .then(async response => {
+        if (!response.ok) throw new Error(response.status === 401
+          ? 'Sign in with a manager email account to include the imported 2026 totals.'
+          : 'Imported 2026 totals could not be loaded.')
+        return response.json() as Promise<{ data: HistoricalAdjustments | null }>
+      })
+      .then(result => {
+        if (!result.data) throw new Error('Imported 2026 totals are missing.')
+        if (mounted) setHistorical(result.data)
+      })
+      .catch((error: unknown) => { if (mounted) setHistoricalError(error instanceof Error ? error.message : 'Imported totals could not be loaded.') })
+    return () => { mounted = false }
+  }, [])
 
   const [startDate, endDate] = useMemo(
     () => getDashboardRange(period, refDate, customStart, customEnd),
@@ -518,6 +540,12 @@ export default function ReportingDashboardPage() {
   const payrollFetchStart = previousStartDate < currentYearStart ? previousStartDate : currentYearStart
   const payrollFetchEnd = endDate > currentYearEnd ? endDate : currentYearEnd
   const { payrollRuns, loading: payrollLoading, error: payrollError } = usePayrollRuns({ startDate: payrollFetchStart, endDate: payrollFetchEnd })
+
+  const importedSales = useMemo(() => nonOverlappingSales(historical?.sales ?? [], eodReports), [eodReports, historical])
+  const importedPayroll = useMemo(() => nonOverlappingPayroll(
+    historical?.payroll ?? [], payrollRuns.filter(isPaidPayrollRun),
+  ), [historical, payrollRuns])
+  const importedPayrollConflicts = (historical?.payroll.length ?? 0) - importedPayroll.length
 
   useEffect(() => {
     window.localStorage.setItem(CLOSED_DAYS_STORAGE_KEY, JSON.stringify(closedDays))
@@ -566,10 +594,38 @@ export default function ReportingDashboardPage() {
     () => payrollRuns.filter(run => run.pay_date >= previousStartDate && run.pay_date <= previousEndDate && isPaidPayrollRun(run)),
     [payrollRuns, previousEndDate, previousStartDate]
   )
-  const hasCurrentSavedPayroll = currentPayrollRuns.length > 0
+  const currentImportedSales = useMemo(() => periodRows(importedSales, startDate, endDate), [endDate, importedSales, startDate])
+  const previousImportedSales = useMemo(() => periodRows(importedSales, previousStartDate, previousEndDate), [importedSales, previousEndDate, previousStartDate])
+  const currentImportedPayroll = useMemo(() => periodRows(importedPayroll, startDate, endDate), [endDate, importedPayroll, startDate])
+  const previousImportedPayroll = useMemo(() => periodRows(importedPayroll, previousStartDate, previousEndDate), [importedPayroll, previousEndDate, previousStartDate])
+  const hasCurrentSavedPayroll = currentPayrollRuns.length > 0 || currentImportedPayroll.length > 0
+  const currentImportedRevenueTotals = useMemo(() => historicalRevenue(currentImportedSales), [currentImportedSales])
+  const previousImportedRevenueTotals = useMemo(() => historicalRevenue(previousImportedSales), [previousImportedSales])
+  const currentImportedPayrollTotals = useMemo(() => historicalPayroll(currentImportedPayroll), [currentImportedPayroll])
+  const previousImportedPayrollTotals = useMemo(() => historicalPayroll(previousImportedPayroll), [previousImportedPayroll])
 
-  const currentPayrollSummary = useMemo(() => summarizePayrollRuns(currentPayrollRuns), [currentPayrollRuns])
-  const previousPayrollSummary = useMemo(() => summarizePayrollRuns(previousPayrollRuns), [previousPayrollRuns])
+  const currentPayrollSummary = useMemo(() => {
+    const saved = summarizePayrollRuns(currentPayrollRuns)
+    return {
+      ...saved,
+      tipOut: saved.tipOut + currentImportedPayrollTotals.tipOut,
+      payrollOut: saved.payrollOut + currentImportedPayrollTotals.payrollOut,
+      totalPayrollOut: saved.totalPayrollOut + currentImportedPayrollTotals.totalPayrollOut,
+      cashPayrollOut: saved.cashPayrollOut + currentImportedPayrollTotals.cashPayrollOut,
+      checkPayrollOut: saved.checkPayrollOut + currentImportedPayrollTotals.checkPayrollOut,
+    }
+  }, [currentImportedPayrollTotals, currentPayrollRuns])
+  const previousPayrollSummary = useMemo(() => {
+    const saved = summarizePayrollRuns(previousPayrollRuns)
+    return {
+      ...saved,
+      tipOut: saved.tipOut + previousImportedPayrollTotals.tipOut,
+      payrollOut: saved.payrollOut + previousImportedPayrollTotals.payrollOut,
+      totalPayrollOut: saved.totalPayrollOut + previousImportedPayrollTotals.totalPayrollOut,
+      cashPayrollOut: saved.cashPayrollOut + previousImportedPayrollTotals.cashPayrollOut,
+      checkPayrollOut: saved.checkPayrollOut + previousImportedPayrollTotals.checkPayrollOut,
+    }
+  }, [previousImportedPayrollTotals, previousPayrollRuns])
   const yearlyMonthlyOverview = useMemo(() => {
     const yearStart = startOfYear(new Date())
 
@@ -581,19 +637,25 @@ export default function ReportingDashboardPage() {
       const monthPayrollRuns = payrollRuns.filter(run => run.pay_date >= monthStart && run.pay_date <= monthEnd && isPaidPayrollRun(run))
       const monthClockRecords = clockRecords.filter(record => record.session_date >= monthStart && record.session_date <= monthEnd)
       const monthPayrollSummary = summarizePayrollRuns(monthPayrollRuns)
-      const savedPayroll = monthPayrollSummary.totalPayrollOut
-      const revenue = monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0)
+      const monthImportedSales = periodRows(importedSales, monthStart, monthEnd)
+      const monthImportedPayroll = periodRows(importedPayroll, monthStart, monthEnd)
+      const importedRevenue = historicalRevenue(monthImportedSales)
+      const importedPay = historicalPayroll(monthImportedPayroll)
+      const revenue = monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0) + importedRevenue.net
 
       return {
         key: format(monthDate, 'yyyy-MM'),
         label: format(monthDate, 'MMM'),
-        hasData: monthReports.length > 0 || monthPayrollRuns.length > 0 || monthClockRecords.length > 0,
+        hasData: monthReports.length > 0 || monthPayrollRuns.length > 0 || monthClockRecords.length > 0
+          || monthImportedSales.length > 0 || monthImportedPayroll.length > 0,
         revenue,
-        payroll: savedPayroll,
-        source: 'Paid out',
+        payroll: monthPayrollSummary.totalPayrollOut + importedPay.totalPayrollOut,
+        source: monthImportedSales.length + monthImportedPayroll.length > 0
+          ? monthReports.length + monthPayrollRuns.length > 0 ? 'Saved + import' : 'Imported'
+          : 'Paid out',
       }
     }).filter(month => month.hasData)
-  }, [clockRecords, eodReports, payrollRuns])
+  }, [clockRecords, eodReports, importedPayroll, importedSales, payrollRuns])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
@@ -601,13 +663,21 @@ export default function ReportingDashboardPage() {
         map.set(item.department, (map.get(item.department) ?? 0) + Number(item.payout_amount ?? 0))
       }
     }
+    for (const [department, amount] of Object.entries({
+      server: currentImportedPayrollTotals.server,
+      kitchen: currentImportedPayrollTotals.kitchen,
+      owner: currentImportedPayrollTotals.owner,
+    })) {
+      if (amount > 0) map.set(department, (map.get(department) ?? 0) + amount)
+    }
     return [...map.entries()].sort((a, b) => b[1] - a[1])
-  }, [currentPayrollRuns])
+  }, [currentImportedPayrollTotals, currentPayrollRuns])
   const payrollPanel = useMemo(() => {
     const totals = {
       kitchen: 0,
       server: 0,
       manager: 0,
+      owner: 0,
       other: 0,
       tipOut: 0,
       commission: 0,
@@ -630,21 +700,44 @@ export default function ReportingDashboardPage() {
       }
     }
 
-    return totals
-  }, [currentPayrollRuns])
+    totals.server += currentImportedPayrollTotals.serverWages
+    totals.kitchen += currentImportedPayrollTotals.kitchen
+    totals.owner += currentImportedPayrollTotals.owner
+    totals.tipOut += currentImportedPayrollTotals.tipOut
+    totals.payroll += currentImportedPayrollTotals.payrollOut
+    totals.payrollWithTip += currentImportedPayrollTotals.totalPayrollOut
 
-  const currentTotals = useMemo(
-    () => sumReports(currentReports, currentCashEntries, currentPayrollSummary, 0, true),
-    [currentCashEntries, currentPayrollSummary, currentReports]
-  )
+    return totals
+  }, [currentImportedPayrollTotals, currentPayrollRuns])
+
+  const currentTotals = useMemo(() => {
+    const saved = sumReports(currentReports, currentCashEntries, currentPayrollSummary, 0, true)
+    return {
+      ...saved,
+      net: saved.net + currentImportedRevenueTotals.net,
+      collectedTip: saved.collectedTip + currentImportedRevenueTotals.collectedTip,
+      tax: saved.tax + currentImportedRevenueTotals.tax,
+      cash: saved.cash + currentImportedRevenueTotals.cash,
+      card: saved.card + currentImportedRevenueTotals.card,
+      delivery: saved.delivery + currentImportedRevenueTotals.delivery,
+    }
+  }, [currentCashEntries, currentImportedRevenueTotals, currentPayrollSummary, currentReports])
   const currentGrossRevenue = useMemo(
-    () => currentReports.reduce((sum, report) => sum + Number(report.revenue_total ?? 0), 0),
-    [currentReports]
+    () => currentReports.reduce((sum, report) => sum + Number(report.revenue_total ?? 0), 0) + currentImportedRevenueTotals.gross,
+    [currentImportedRevenueTotals, currentReports]
   )
-  const previousTotals = useMemo(
-    () => sumReports(previousReports, previousCashEntries, previousPayrollSummary, 0, true),
-    [previousCashEntries, previousPayrollSummary, previousReports]
-  )
+  const previousTotals = useMemo(() => {
+    const saved = sumReports(previousReports, previousCashEntries, previousPayrollSummary, 0, true)
+    return {
+      ...saved,
+      net: saved.net + previousImportedRevenueTotals.net,
+      collectedTip: saved.collectedTip + previousImportedRevenueTotals.collectedTip,
+      tax: saved.tax + previousImportedRevenueTotals.tax,
+      cash: saved.cash + previousImportedRevenueTotals.cash,
+      card: saved.card + previousImportedRevenueTotals.card,
+      delivery: saved.delivery + previousImportedRevenueTotals.delivery,
+    }
+  }, [previousCashEntries, previousImportedRevenueTotals, previousPayrollSummary, previousReports])
   const reportsByDate = useMemo(
     () => new Map(currentReports.map(report => [report.session_date, report])),
     [currentReports]
@@ -764,8 +857,7 @@ export default function ReportingDashboardPage() {
         backLabel="Back to Admin Board"
       />
 
-      <HistoricalAdjustmentsPanel />
-
+      {historicalError && <p className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{historicalError} Dashboard totals below are incomplete.</p>}
       <div className="mb-5 rounded-xl border bg-white p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex h-9 overflow-hidden rounded-lg border bg-background">
@@ -829,6 +921,11 @@ export default function ReportingDashboardPage() {
             )
           })}
         </div>
+        {historical && <p className="mt-3 text-xs text-muted-foreground">
+          2026 totals include the imported missing-period sales and payroll amounts when the selected range covers their full source period.
+          Daily charts still show only dated EOD and payout records.
+          {importedPayrollConflicts > 0 && ` ${importedPayrollConflicts} overlapping payroll period is excluded pending reconciliation.`}
+        </p>}
       </div>
 
       <div className="mb-5 rounded-xl border bg-white p-4">
@@ -873,7 +970,7 @@ export default function ReportingDashboardPage() {
             <div className="rounded-xl border bg-white p-4">
               <p className="text-xs font-medium uppercase text-muted-foreground">Actual Net Revenue</p>
               <p className="mt-1 text-3xl font-semibold text-slate-950">{formatCurrency(currentTotals.net)}</p>
-              <p className="mt-2 text-xs text-muted-foreground">{currentReports.length} EOD reports in range</p>
+              <p className="mt-2 text-xs text-muted-foreground">{currentReports.length} EOD reports + {currentImportedSales.length} imported period totals</p>
             </div>
             <div className="rounded-xl border bg-white p-4">
               <p className="text-xs font-medium uppercase text-muted-foreground">Gross Revenue</p>
@@ -887,7 +984,7 @@ export default function ReportingDashboardPage() {
             </div>
             <div className="rounded-xl border bg-white p-4">
               <p className="text-xs font-medium uppercase text-muted-foreground">Average Reported Day</p>
-              <p className="mt-1 text-3xl font-semibold text-slate-950">{formatCurrency(dailyAverage)}</p>
+              <p className="mt-1 text-3xl font-semibold text-slate-950">{reportedOpenDates.length > 0 ? formatCurrency(dailyAverage) : '—'}</p>
               <p className="mt-2 text-xs text-muted-foreground">{reportedOpenDates.length} reported / {openDates.length} open days</p>
             </div>
           </div>
@@ -911,12 +1008,13 @@ export default function ReportingDashboardPage() {
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2">
             {[
-              ['Total Tips Collected (gross)', currentTotals.collectedTip, `EOD business dates: ${dateLabel}`],
+              ['Total Tips Collected (gross)', currentTotals.collectedTip, `EOD and imported business periods: ${dateLabel}`],
               ['House Tip (15%)', houseCollectedTip],
-              ['Tips Paid Out (by pay date)', currentTotals.tipOut, `Payroll pay dates: ${dateLabel}`],
+              ['Tips Paid Out', currentTotals.tipOut, `Saved pay dates and imported business periods: ${dateLabel}`],
               ['Kitchen Payroll (excl. tips)', payrollPanel.kitchen],
               ['Server Payroll (excl. tips)', payrollPanel.server],
               ['Manager Payroll (excl. tips)', payrollPanel.manager],
+              ['Owner Payroll (excl. tips)', payrollPanel.owner],
               ['Commission Paid', payrollPanel.commission],
               ['Total Payroll (excl. tips)', currentTotals.payrollOut],
               ['Total Payroll (incl. tips)', currentTotals.totalPayrollOut],
@@ -941,15 +1039,15 @@ export default function ReportingDashboardPage() {
             </div>
           </div>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-            <p>Collected tips use EOD business dates. Tips paid out use payroll pay dates, so a payout can include a prior work period when months overlap.</p>
+            <p>Collected tips use EOD and imported business periods. Saved tip payouts use pay dates; imported tip payouts use the sheet period.</p>
             <p>{payrollLoading
               ? 'Loading paid payroll summaries...'
               : payrollError
                 ? `Payroll payout data could not be loaded: ${payrollError}`
                 : hasCurrentSavedPayroll
-                  ? 'Paid payout summaries by pay date. All runs marked paid in this range are included, including scheduled pay dates.'
-                  : 'No payroll payout has been recorded for this range. Payroll cards show $0 until a payout summary is saved.'}</p>
-            <p>Payroll cards use payout summary amounts only; clocked hours and unpaid worksheet estimates are excluded.</p>
+                  ? 'Saved paid payouts use pay dates; imported missing-period totals use the sheet dates.'
+                  : 'No saved payout or imported payroll total is recorded for this range.'}</p>
+            <p>Payroll cards include saved payouts and non-overlapping imported totals. Clocked hours and unpaid worksheet estimates are excluded.</p>
             {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}
             {netSalesWithTips <= 0 && <p>Total Payroll / (Net Sales + Total Tips) is unavailable when net sales plus collected tips are zero or negative.</p>}
           </div>
@@ -983,9 +1081,9 @@ export default function ReportingDashboardPage() {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-xs font-medium uppercase text-muted-foreground">Payroll By Department</p>
-            <h2 className="text-lg font-semibold text-slate-950">{hasCurrentSavedPayroll ? 'Paid payroll by department (including tips)' : 'Paid payroll by department'}</h2>
+            <h2 className="text-lg font-semibold text-slate-950">Payroll by department (including tips)</h2>
           </div>
-          <Badge variant="outline">Payout summary</Badge>
+          <Badge variant="outline">Saved + imported</Badge>
         </div>
         {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-4">
@@ -998,7 +1096,7 @@ export default function ReportingDashboardPage() {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            No payout summary is recorded in this pay-date range.
+            No saved payout or imported payroll total is recorded in this range.
           </p>
         )}
       </div>
