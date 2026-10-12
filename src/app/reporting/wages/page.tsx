@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
 import { clockMatchesWorkDepartment, getClockWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
-import { getRoleLabel } from '@/lib/organization'
+import { getDepartmentLabel, getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
+import { exportReportToExcel, type ExcelColumn, type ExcelReportSheet } from '@/lib/reportExcel'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleForWork } from '@/lib/tipEligibility'
 import { getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
@@ -246,7 +247,7 @@ export default function WageReportPage() {
   const { clockRecords } = useClockRecords()
   const { payrollRuns } = usePayrollRuns()
   const { completions } = useTaskCompletions()
-  const { roleDefinitions } = useAppSettings()
+  const { roleDefinitions, departmentDefinitions } = useAppSettings()
 
   const [department, setDepartment] = useState<ReportDepartment>('all')
   const [period, setPeriod] = useState<ReportPeriod>('weekly')
@@ -257,6 +258,7 @@ export default function WageReportPage() {
   const [employeeFilter, setEmployeeFilter] = useState('all')
   const [refreshing, setRefreshing] = useState(false)
   const [sheetSyncing, setSheetSyncing] = useState(false)
+  const [exportingExcel, setExportingExcel] = useState(false)
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null)
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
@@ -840,6 +842,56 @@ export default function WageReportPage() {
     ? 'All Staff'
     : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
 
+  const handleExcelExport = async (exportRows = displayedRows, staff = selectedEmployeeName) => {
+    setExportingExcel(true)
+    setRefreshMessage(null)
+    try {
+      const earningsColumns: ExcelColumn[] = view === 'earnings' ? [
+        { label: 'Base Wages', format: 'money' }, { label: 'Guaranteed Top-Up', format: 'money' },
+        { label: 'Commission', format: 'money' }, { label: 'Deductions', format: 'money' },
+        { label: 'Total Earnings', format: 'money' },
+      ] : []
+      const metadata: ExcelReportSheet['metadata'] = [
+        ['Work Period', `${startDate} to ${endDate}`],
+        ['Department', getDepartmentLabel(department, departmentDefinitions)], ['Staff', staff],
+        ['View', view === 'earnings' ? 'Earnings' : 'Tip Only'],
+        ['Payout Status', payoutStatus === 'created' ? 'Payout Created' : payoutStatus === 'partial' ? 'Partial Payout Created' : 'Preview Only'],
+      ]
+      await exportReportToExcel(`wage_report_${view}_${department}_${staff}_${startDate}_${endDate}`, [
+        {
+          name: 'Wage Summary', title: 'Wage Report', metadata,
+          columns: [
+            { label: 'Name' }, { label: 'Role' }, { label: 'Paid By' }, { label: 'Clock Status' },
+            { label: 'Hours', format: 'decimal' }, { label: 'Meal Break (minutes)', format: 'integer' },
+            { label: 'Tips', format: 'money' }, { label: 'Tips / Hr', format: 'money', total: false },
+            ...earningsColumns,
+          ],
+          rows: exportRows.map(row => [
+            row.emp.name, getRoleLabel(row.emp.role, roleDefinitions), formatPaymentBreakdown(row.paymentBreakdown),
+            row.hasOpenClock ? 'Clock Out Needed' : row.hasAutoClockOut ? 'Auto Clock-Out' : 'Verified',
+            row.hours, row.mealBreakMinutes, row.tips, row.tipRate,
+            ...(view === 'earnings' ? [row.baseWages, row.guaranteeTopUp, row.commission, row.deductions, row.totalEarnings] : []),
+          ]),
+        },
+        {
+          name: 'Daily Details', title: 'Wage Report — Daily Details', metadata,
+          columns: [
+            { label: 'Name' }, { label: 'Date' }, { label: 'Hours', format: 'decimal' },
+            { label: 'Meal Break (minutes)', format: 'integer' }, { label: 'Tips', format: 'money' }, ...earningsColumns,
+          ],
+          rows: exportRows.flatMap(row => (detailRowsByEmployeeId.get(row.emp.id) ?? []).map(detail => [
+            row.emp.name, detail.date, detail.hours, detail.mealBreakMinutes, detail.tips,
+            ...(view === 'earnings' ? [detail.baseWages, detail.guaranteeTopUp, detail.commission, detail.deductions, detail.totalEarnings] : []),
+          ])),
+        },
+      ])
+    } catch (error) {
+      setRefreshMessage(error instanceof Error ? error.message : 'Failed to export wage report to Excel.')
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   const handleRefresh = async () => {
     setRefreshing(true)
     setRefreshMessage(null)
@@ -923,6 +975,9 @@ export default function WageReportPage() {
           }
           rightSlot={
             <>
+              <Button variant="outline" size="sm" onClick={() => void handleExcelExport()} disabled={exportingExcel || displayedRows.length === 0}>
+                {exportingExcel ? 'Exporting…' : 'Export Excel'}
+              </Button>
               {lastRefreshedAt && (
                 <span className="text-xs text-muted-foreground">
                   Updated {formatDistanceToNow(lastRefreshedAt, { addSuffix: true })}
@@ -1124,6 +1179,9 @@ export default function WageReportPage() {
               </div>
 
               <div className="flex gap-2">
+                <Button variant="outline" onClick={() => void handleExcelExport([detailTarget], detailTarget.emp.name)} disabled={exportingExcel}>
+                  {exportingExcel ? 'Exporting…' : 'Export Excel'}
+                </Button>
                 <Button variant="outline" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Wage Report`, buildWageReportHtml(detailTarget))}>
                   PDF Export
                 </Button>

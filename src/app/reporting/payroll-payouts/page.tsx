@@ -19,6 +19,7 @@ import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBrea
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
 import { calculatePayrollAmounts, formatPayrollPaymentSummary, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
 import { formatCurrency } from '@/lib/reporting'
+import { exportReportToExcel, type ExcelReportSheet } from '@/lib/reportExcel'
 import { supabase } from '@/lib/supabase'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
@@ -530,6 +531,7 @@ export default function PayrollPayoutsReportPage() {
   const [calculatedTipDates, setCalculatedTipDates] = useState<string[]>([])
   const [adjustmentOriginalItems, setAdjustmentOriginalItems] = useState<Record<string, PayrollRunItem>>({})
   const [saving, setSaving] = useState(false)
+  const [exportingExcel, setExportingExcel] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null)
   const [tipImpactEmployeeIds, setTipImpactEmployeeIds] = useState<Set<string>>(new Set())
@@ -545,14 +547,62 @@ export default function PayrollPayoutsReportPage() {
   ), [payrollRuns])
   const sortedRuns = useMemo(() => [...paidPayrollRuns].sort((left, right) => right.pay_date.localeCompare(left.pay_date) || right.created_at.localeCompare(left.created_at)), [paidPayrollRuns])
   const [rangeStart, rangeEnd] = useMemo(() => getPayoutRange(period, refDate, customStart, customEnd), [customEnd, customStart, period, refDate])
-  const filteredRuns = useMemo(() => {
+  const matchingRuns = useMemo(() => {
     return sortedRuns.filter(run => {
       if (department !== 'all' && run.department !== department) return false
       if (rangeStart && run.pay_date < rangeStart) return false
       if (rangeEnd && run.pay_date > rangeEnd) return false
       return true
-    }).slice(0, 50)
+    })
   }, [department, rangeEnd, rangeStart, sortedRuns])
+  const filteredRuns = matchingRuns.slice(0, 50)
+  const handleExcelExport = async () => {
+    setExportingExcel(true)
+    setMessage(null)
+    try {
+      const departmentLabel = (key: string) => departmentOptions.find(option => option.key === key)?.label ?? key
+      const metadata: ExcelReportSheet['metadata'] = [
+        ['Pay Date Range', `${rangeStart} to ${rangeEnd}`], ['Department', departmentLabel(department)],
+        ['Source', 'Saved payroll payouts'], ['Payout Count', matchingRuns.length],
+      ]
+      await exportReportToExcel(`payroll_payouts_${department}_${rangeStart}_${rangeEnd}`, [
+        {
+          name: 'Payout Summary', title: 'Payroll Payouts', metadata,
+          columns: [
+            { label: 'Status' }, { label: 'Department' }, { label: 'Pay Date' }, { label: 'Period Start' }, { label: 'Period End' },
+            { label: 'Cash', format: 'money' }, { label: 'Check', format: 'money' }, { label: 'ACH', format: 'money' },
+            { label: 'Total', format: 'money' }, { label: 'Updated' }, { label: 'Memo' },
+          ],
+          rows: matchingRuns.map(run => [
+            'Paid', departmentLabel(run.department), run.pay_date, run.start_date, run.end_date,
+            Number(run.total_cash ?? 0), Number(run.total_check ?? 0), Number(run.total_ach ?? 0), Number(run.total_net ?? 0),
+            format(new Date(run.updated_at ?? run.created_at), 'yyyy-MM-dd HH:mm'), run.memo ?? '',
+          ]),
+        },
+        {
+          name: 'Employee Details', title: 'Payroll Payouts — Employee Details', metadata,
+          columns: [
+            { label: 'Pay Date' }, { label: 'Period Start' }, { label: 'Period End' }, { label: 'Paid By' },
+            { label: 'Name' }, { label: 'Department' }, { label: 'Hours', format: 'decimal' },
+            { label: 'Tips', format: 'money' }, { label: 'Base Wages', format: 'money' },
+            { label: 'Guaranteed Top-Up', format: 'money' }, { label: 'Commission', format: 'money' },
+            { label: 'Deductions', format: 'money' }, { label: 'Payout', format: 'money' }, { label: 'Memo' },
+          ],
+          rows: matchingRuns.flatMap(run => [...(run.payroll_run_items ?? [])]
+            .sort((left, right) => left.display_order - right.display_order || left.employee_name.localeCompare(right.employee_name))
+            .map(item => [
+              run.pay_date, run.start_date, run.end_date, formatPayrollPaymentSummary(item), item.employee_name, departmentLabel(item.department),
+              Number(item.hours ?? 0), Number(item.tips ?? 0), Number(item.base_wages ?? 0), Number(item.guarantee_top_up ?? 0),
+              Number(item.commission ?? 0), Number(item.deductions ?? 0), Number(item.payout_amount ?? 0), item.memo ?? '',
+            ])),
+        },
+      ])
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Failed to export payroll payouts to Excel.')
+    } finally {
+      setExportingExcel(false)
+    }
+  }
   const selectedRun = payrollRuns.find(run => run.id === selectedRunId) ?? null
   const selectedRunIndex = selectedRun ? sortedRuns.findIndex(run => run.id === selectedRun.id) : -1
   const editedItems = useMemo(() => [...(selectedRun?.payroll_run_items ?? [])]
@@ -1054,6 +1104,12 @@ export default function PayrollPayoutsReportPage() {
     <div className="p-6">
       <AdminSubpageHeader title="Payroll Payouts" subtitle="Review, reprint, and edit saved payroll payouts." backHref="/admin" backLabel="Back to Admin Board" />
       <ReportingNav />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">Excel export includes all saved payouts matching the selected department and pay-date range.</p>
+        <Button variant="outline" size="sm" onClick={() => void handleExcelExport()} disabled={exportingExcel || matchingRuns.length === 0}>
+          {exportingExcel ? 'Exporting…' : 'Export Excel'}
+        </Button>
+      </div>
       {message && <div className="mb-4 rounded-lg border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">{message}</div>}
       <div className="rounded-xl border bg-white">
         <div className="grid gap-3 border-b p-4 lg:grid-cols-[180px_170px_1fr]">
