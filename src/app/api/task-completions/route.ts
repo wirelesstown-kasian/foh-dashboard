@@ -3,11 +3,11 @@ import { cookies } from 'next/headers'
 import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 
 async function requireAdmin() {
   const cookieStore = await cookies()
-  return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+  return await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
 async function getCompletionById(id: string) {

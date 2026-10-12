@@ -1,15 +1,60 @@
-export const ADMIN_SESSION_COOKIE = 'foh_admin_session'
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
+import { getSessionSecret } from '@/lib/appAuth'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
-// 32-byte random hex token — not guessable unlike Date.now()
-export function createAdminSessionValue() {
-  const bytes = new Uint8Array(32)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+export const ADMIN_SESSION_COOKIE = 'foh_admin_session'
+const ADMIN_SESSION_DURATION_MS = 8 * 60 * 60 * 1000
+
+type ManagerSession = {
+  employeeId: string
+  expiresAt: number
+  nonce: string
 }
 
-// Accepts both legacy timestamp tokens (13-digit Date.now()) and new 64-char hex tokens.
-// Cookie maxAge (8h) enforces expiry at the browser/server level.
+function sign(body: string) {
+  return createHmac('sha256', getSessionSecret()).update(`admin:${body}`).digest('base64url')
+}
+
+export function createAdminSessionValue(employeeId: string) {
+  const body = Buffer.from(JSON.stringify({
+    employeeId,
+    expiresAt: Date.now() + ADMIN_SESSION_DURATION_MS,
+    nonce: randomBytes(16).toString('base64url'),
+  } satisfies ManagerSession)).toString('base64url')
+  return `${body}.${sign(body)}`
+}
+
+export function getAdminSessionEmployeeId(value: string | undefined | null): string | null {
+  if (!value) return null
+  const parts = value.split('.')
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null
+  const [body, signature] = parts
+  const expected = sign(body)
+  try {
+    if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null
+    const session = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as ManagerSession
+    if (!session.employeeId || !session.nonce || !Number.isFinite(session.expiresAt)) return null
+    if (session.expiresAt <= Date.now() || session.expiresAt > Date.now() + ADMIN_SESSION_DURATION_MS) return null
+    return session.employeeId
+  } catch {
+    return null
+  }
+}
+
+// Proxy uses this only for navigation. API handlers also check the current role.
 export function isValidAdminSession(value: string | undefined | null) {
-  if (!value) return false
-  return /^[0-9a-f]{64}$/.test(value) || /^\d{13}$/.test(value)
+  return getAdminSessionEmployeeId(value) !== null
+}
+
+export async function hasManagerAccess(value: string | undefined | null) {
+  const employeeId = getAdminSessionEmployeeId(value)
+  if (!employeeId) return false
+  const { data, error } = await supabaseAdmin
+    .from('employees')
+    .select('id')
+    .eq('id', employeeId)
+    .eq('role', 'manager')
+    .eq('is_active', true)
+    .maybeSingle()
+  return !error && !!data
 }

@@ -250,10 +250,10 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
 
   const handlePhaseResetConfirm = async (pin: string) => {
     setPhaseResetError(null)
-    const res = await fetch('/api/manager-pin', {
+    const res = await fetch('/api/manager-actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ pin, action: 'reset_task_phase', category_id: currentCategory?.id }),
     })
 
     if (!res.ok) {
@@ -262,22 +262,16 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
       throw new Error(data.error ?? 'Manager PIN required')
     }
 
-    if (currentCategory) {
-      const taskIds = visibleTasks.filter(task => task.category_id === currentCategory.id).map(task => task.id)
-      if (taskIds.length > 0) {
-        await supabase.from('task_completions').delete().eq('session_date', today).in('task_id', taskIds)
-      }
-    }
     setShowPhaseResetPin(false)
     onRefresh()
   }
 
   const handleResetConfirm = async (pin: string) => {
     setResetError(null)
-    const res = await fetch('/api/manager-pin', {
+    const res = await fetch('/api/manager-actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ pin, action: 'reset_all_tasks' }),
     })
 
     if (!res.ok) {
@@ -286,10 +280,6 @@ export function TaskFlow({ categories, tasks, completions, session, employees, t
       throw new Error(data.error ?? 'Manager PIN required')
     }
 
-    await supabase.from('task_completions').delete().eq('session_date', today)
-    if (session) {
-      await supabase.from('daily_sessions').update({ current_phase: 'register_open' }).eq('id', session.id)
-    }
     setShowResetPin(false)
     setShowSummary(false)
     onRefresh()

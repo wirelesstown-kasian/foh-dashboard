@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { buildEmailDocument, renderEmailShell, sendEmail } from '@/lib/emailUtils'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getEmailSettings } from '@/lib/appSettings'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
@@ -27,7 +27,7 @@ function scoreFromRank(rank: number, count: number) {
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies()
-  if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
+  if (!await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

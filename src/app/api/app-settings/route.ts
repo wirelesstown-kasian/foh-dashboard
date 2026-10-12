@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { getAppSettings, saveAppSettings } from '@/lib/appSettings'
 
 export const dynamic = 'force-dynamic'
 
 async function requireAdmin() {
   const cookieStore = await cookies()
-  return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+  return await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
 export async function GET() {

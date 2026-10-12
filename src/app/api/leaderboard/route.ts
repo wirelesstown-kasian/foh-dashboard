@@ -1,4 +1,3 @@
-import { format, startOfMonth } from 'date-fns'
 import { NextRequest, NextResponse } from 'next/server'
 import {
   EMPLOYEE_PUBLIC_SELECT,
@@ -19,6 +18,9 @@ import {
 import { isReviewBoardSetupMissingError, normalizeReviewRow } from '@/lib/reviewBoard'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { Employee, EodReport, GoogleReview, RewardRedemption, ShiftClock, Task, TaskCompletion, TipDistribution } from '@/lib/types'
+import { getDashboardViewer } from '@/lib/routeAuth'
+import { businessDateInChicago, safeDashboardResponse } from '@/lib/dashboardDataAccess'
+import { getClockBreakMinutes } from '@/lib/clockUtils'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,11 +72,25 @@ async function loadEmployees() {
 }
 
 export async function GET(req: NextRequest) {
+  const dashboardViewer = await getDashboardViewer()
+  if (!dashboardViewer) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   try {
-    const today = format(new Date(), 'yyyy-MM-dd')
-    const monthStart = format(startOfMonth(new Date()), 'yyyy-MM-dd')
+    const today = businessDateInChicago()
+    const monthStart = `${today.slice(0, 7)}-01`
     const startDate = req.nextUrl.searchParams.get('start_date') || monthStart
     const endDate = req.nextUrl.searchParams.get('end_date') || today
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+      return NextResponse.json({ error: 'Invalid date range' }, { status: 400 })
+    }
+    if (!dashboardViewer.isManager) {
+      const oldest = new Date(`${businessDateInChicago()}T00:00:00Z`)
+      oldest.setUTCDate(oldest.getUTCDate() - 35)
+      if (startDate < oldest.toISOString().slice(0, 10) || endDate > businessDateInChicago()) {
+        return NextResponse.json({ error: 'Date range not allowed' }, { status: 403 })
+      }
+    }
 
     const employees = await loadEmployees()
     const [
@@ -134,17 +150,38 @@ export async function GET(req: NextRequest) {
       throw new Error(redemptionsResult.error.message)
     }
 
-    return NextResponse.json({
+    const eodReports = (eodReportsResult.data ?? []) as (EodReport & { tip_distributions?: TipDistribution[] })[]
+    const clockRecords = (clockRecordsResult.data ?? []) as ShiftClock[]
+    const redemptions = redemptionsResult.error ? [] : ((redemptionsResult.data ?? []) as RewardRedemption[])
+    const response = {
       employees,
       tasks: (tasksResult.data ?? []) as Task[],
       completions: (completionsResult.data ?? []) as TaskCompletion[],
-      eodReports: (eodReportsResult.data ?? []) as (EodReport & { tip_distributions?: (TipDistribution & { employee?: Employee })[] })[],
-      clockRecords: (clockRecordsResult.data ?? []) as ShiftClock[],
+      eodReports: dashboardViewer.isManager ? eodReports : eodReports.map(report => ({
+        id: report.id,
+        session_date: report.session_date,
+        tip_distributions: (report.tip_distributions ?? []).map(tip => ({ employee_id: tip.employee_id, net_tip: tip.net_tip })),
+      })),
+      clockRecords: dashboardViewer.isManager ? clockRecords : clockRecords.map(clock => ({
+        id: clock.id,
+        employee_id: clock.employee_id,
+        session_date: clock.session_date,
+        clock_in_at: clock.clock_in_at,
+        clock_out_at: clock.clock_out_at,
+        approval_status: clock.approval_status,
+        break_minutes: getClockBreakMinutes(clock),
+        unpaid_break_minutes: 0,
+        manager_note: null,
+      })),
       reviews: reviewsResult.error
         ? []
         : ((reviewsResult.data ?? []) as GoogleReview[]).map(review => normalizeReviewRow(review, employees)),
-      redemptions: redemptionsResult.error ? [] : ((redemptionsResult.data ?? []) as RewardRedemption[]),
-    })
+      redemptions: dashboardViewer.isManager ? redemptions : redemptions.map(redemption => ({
+        employee_id: redemption.employee_id,
+        points_delta: redemption.points_delta,
+      })),
+    }
+    return NextResponse.json(safeDashboardResponse(response, dashboardViewer, 'leaderboard', businessDateInChicago()))
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load leaderboard data' }, { status: 500 })
   }

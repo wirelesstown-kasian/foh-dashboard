@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
-import { APP_SESSION_COOKIE, parseAppSessionValue } from '@/lib/appAuth'
+import { getDashboardViewer } from '@/lib/routeAuth'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import type { PaymentMethod, PayrollPaymentAllocations } from '@/lib/types'
 
@@ -60,10 +58,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 async function hasPayrollAccess() {
-  const cookieStore = await cookies()
-  if (isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) return true
-  const appSession = parseAppSessionValue(cookieStore.get(APP_SESSION_COOKIE)?.value)
-  return appSession?.role.toLowerCase() === 'manager'
+  return (await getDashboardViewer())?.isManager === true
 }
 
 function normalizeNumber(value: unknown) {

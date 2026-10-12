@@ -13,11 +13,23 @@ export async function GET() {
     return NextResponse.json({ authenticated: false, login_ready: true })
   }
 
+  const { data: employee, error } = await supabaseAdmin
+    .from('employees')
+    .select('id, name, email, role')
+    .eq('id', session.employeeId)
+    .eq('is_active', true)
+    .eq('login_enabled', true)
+    .maybeSingle()
+  if (error || !employee) {
+    cookieStore.delete(APP_SESSION_COOKIE)
+    return NextResponse.json({ authenticated: false, login_ready: true })
+  }
+
   cookieStore.set(APP_SESSION_COOKIE, createAppSessionValue({
-    employeeId: session.employeeId,
-    name: session.name,
-    email: session.email,
-    role: session.role,
+    employeeId: employee.id,
+    name: employee.name,
+    email: employee.email,
+    role: employee.role,
   }), {
     httpOnly: true,
     sameSite: 'lax',
@@ -30,12 +42,12 @@ export async function GET() {
     authenticated: true,
     login_ready: true,
     employee: {
-      id: session.employeeId,
-      name: session.name,
-      email: session.email,
-      role: session.role,
+      id: employee.id,
+      name: employee.name,
+      email: employee.email,
+      role: employee.role,
     },
-    can_manage_admin: session.role === 'manager',
+    can_manage_admin: employee.role === 'manager',
   })
 }
 

@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { syncGoogleReviews } from '@/lib/reviewSync'
+import { getDashboardViewer } from '@/lib/routeAuth'
 
 export async function POST() {
+  const viewer = await getDashboardViewer()
+  if (!viewer?.isManager) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const result = await syncGoogleReviews()
     return NextResponse.json(result)

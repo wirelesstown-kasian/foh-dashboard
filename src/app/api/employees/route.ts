@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { hashPin, verifyPin } from '@/lib/pin'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { EmployeeRole, PaymentMethod } from '@/lib/types'
 import { isValidPin } from '@/lib/validation'
@@ -41,7 +41,7 @@ const EMPLOYEE_SELECT_FALLBACKS = [
 
 async function requireAdmin() {
   const cookieStore = await cookies()
-  return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+  return await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
 async function getValidRoles() {

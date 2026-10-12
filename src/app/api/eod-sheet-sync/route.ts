@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { resetEodSheetInGoogleSheet, syncEodReportToGoogleSheet, syncEodCashCountToGoogleSheet } from '@/lib/eodGoogleSheet'
+import { getDashboardViewer } from '@/lib/routeAuth'
+import { getBusinessDateString } from '@/lib/dateUtils'
 
 export async function POST(req: NextRequest) {
+  const viewer = await getDashboardViewer()
+  if (!viewer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { report_id, reset_sheet } = await req.json() as { report_id?: string; reset_sheet?: boolean }
 
     if (reset_sheet) {
+      if (!viewer.isManager) return NextResponse.json({ error: 'Manager access required' }, { status: 403 })
       const { data: reports, error } = await supabaseAdmin
         .from('eod_reports')
         .select('*, closed_by:employees(name)')
@@ -22,6 +27,17 @@ export async function POST(req: NextRequest) {
     }
 
     if (!report_id) return NextResponse.json({ error: 'Missing report_id' }, { status: 400 })
+
+    if (!viewer.isManager) {
+      const { data: authorizedReport } = await supabaseAdmin
+        .from('eod_reports')
+        .select('session_date')
+        .eq('id', report_id)
+        .maybeSingle()
+      if (authorizedReport?.session_date !== getBusinessDateString()) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+      }
+    }
 
     const [{ data: report, error }, { data: allReports }, { data: allCashEntries }] = await Promise.all([
       supabaseAdmin.from('eod_reports').select('*, closed_by:employees(name)').eq('id', report_id).single(),

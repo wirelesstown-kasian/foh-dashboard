@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { syncCashBalanceEntryToGoogleSheet } from '@/lib/eodGoogleSheet'
+import { getDashboardViewer } from '@/lib/routeAuth'
 
 export async function POST(req: NextRequest) {
+  const viewer = await getDashboardViewer()
+  if (!viewer?.isManager) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { entry_id, cash_on_hand } = await req.json() as { entry_id?: string; cash_on_hand?: number }
     if (!entry_id) return NextResponse.json({ error: 'Missing entry_id' }, { status: 400 })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
+import { getDashboardViewer } from '@/lib/routeAuth'
 import { buildAnnouncementItems, formatAnnouncementBoardText } from '@/lib/announcementBoard'
 import { getAppSettings, saveAppSettings, type AnnouncementEvent } from '@/lib/appSettings'
 import { getBusinessDateString } from '@/lib/dateUtils'
@@ -11,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 async function requireAdmin() {
   const cookieStore = await cookies()
-  return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+  return await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
 function formatEventDetail(event: AnnouncementEvent) {
@@ -81,6 +82,7 @@ async function sendAnnouncementEventEmail(event: AnnouncementEvent, settings: Aw
 }
 
 export async function GET() {
+  if (!await getDashboardViewer()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const settings = await getAppSettings()
     const { data: employees, error } = await supabaseAdmin

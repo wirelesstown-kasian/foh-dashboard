@@ -189,6 +189,7 @@ export default function EodPage() {
   const [financialsSaved, setFinancialsSaved] = useState(false)
   const [tipDistributionSaved, setTipDistributionSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [signedInEmployeeId, setSignedInEmployeeId] = useState<string | null>(null)
 
 
   const [startingCash, setStartingCash] = useState<number>(0)
@@ -214,7 +215,8 @@ export default function EodPage() {
   const [tipRows, setTipRows] = useState<TipRow[]>([])
   const employeeNameById = new Map(employees.map(employee => [employee.id, employee.name]))
   const tipEligibleEmployees = employees.filter(employee => isTipEligibleEmployee(employee))
-  const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role))
+  const eodCloserEmployees = employees.filter(employee => isEodCloserRole(employee.role)
+    && (appCanManageAdmin || managerOverride || !signedInEmployeeId || employee.id === signedInEmployeeId))
 
   const toFinancialForm = useCallback((value: Partial<{
     cash_total: string | number | null
@@ -283,12 +285,12 @@ export default function EodPage() {
     const [sessRes, empRes, eodRes, clockRes, appSessionRes, appSettingsRes] = await Promise.all([
       supabase.from('daily_sessions').select('*').eq('session_date', today).maybeSingle(),
       loadEmployees(),
-      supabase.from('eod_reports').select('*, tip_distributions(*, employee:employees(*))').eq('session_date', today).maybeSingle(),
+      supabase.from('eod_reports').select(`*, tip_distributions(*, employee:employees(${EMPLOYEE_PUBLIC_SELECT}))`).eq('session_date', today).maybeSingle(),
       fetch(`/api/clock-events?session_date=${today}`, { cache: 'no-store' }).then(async res => (
         (await res.json().catch(() => ({}))) as { records?: ShiftClock[] }
       )),
       fetch('/api/app-session', { cache: 'no-store' }).then(async res => (
-        (await res.json().catch(() => ({}))) as { can_manage_admin?: boolean }
+        (await res.json().catch(() => ({}))) as { can_manage_admin?: boolean; employee?: { id?: string } }
       )),
       fetch('/api/org-settings', { cache: 'no-store' }).then(async res => (
         res.ok ? (await res.json().catch(() => ({}))) as { eod_send_timing?: string } : {}
@@ -296,6 +298,7 @@ export default function EodPage() {
     ])
     setSession(sessRes.data ?? null)
     setAppCanManageAdmin(appSessionRes.can_manage_admin === true)
+    setSignedInEmployeeId(appSessionRes.employee?.id ?? null)
     setEodSendTiming(appSettingsRes.eod_send_timing === 'after_save' ? 'after_save' : 'manual')
     setStartingCash(Number(sessRes.data?.starting_cash ?? 0))
     setEmployees(empRes.data ?? [])
@@ -343,6 +346,9 @@ export default function EodPage() {
       }
       setFinancialsSaved(true)
     } else {
+      if (appSessionRes.employee?.id && appSessionRes.can_manage_admin !== true) {
+        setForm(current => ({ ...current, closed_by: appSessionRes.employee?.id ?? '' }))
+      }
       setTipRows(clockBasedRows)
       setFinancialsSaved(false)
       setTipDistributionSaved(false)
@@ -370,7 +376,10 @@ export default function EodPage() {
     if (storedFinancials && !existing) {
       try {
         const parsed = JSON.parse(storedFinancials) as Partial<typeof form & { batch_total?: string }>
-        setForm(toFinancialForm(parsed))
+        setForm({
+          ...toFinancialForm(parsed),
+          closed_by: !appCanManageAdmin && signedInEmployeeId ? signedInEmployeeId : (parsed.closed_by ?? ''),
+        })
         setFinancialsSaved(true)
       } catch {
         window.localStorage.removeItem(getFinancialDraftKey(today))
@@ -396,7 +405,7 @@ export default function EodPage() {
     } catch {
       window.localStorage.removeItem(getTipDraftKey(today))
     }
-  }, [clockRecords, employees, existing, loading, toFinancialForm, today])
+  }, [clockRecords, employees, existing, loading, toFinancialForm, today, appCanManageAdmin, signedInEmployeeId])
 
   const openClockRecords = clockRecords.filter(record => !record.clock_out_at)
   const openClockStaff = openClockRecords.map(record => ({
@@ -721,10 +730,10 @@ export default function EodPage() {
 
     setResetError(null)
 
-    const pinRes = await fetch('/api/manager-pin', {
+    const pinRes = await fetch('/api/manager-actions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ pin, action: 'reset_eod', report_id: existing.id }),
     })
 
     if (!pinRes.ok) {
@@ -736,12 +745,6 @@ export default function EodPage() {
 
     setSaving(true)
     try {
-      const deleteTips = await supabase.from('tip_distributions').delete().eq('eod_report_id', existing.id)
-      if (deleteTips.error) throw deleteTips.error
-
-      const deleteReport = await supabase.from('eod_reports').delete().eq('id', existing.id)
-      if (deleteReport.error) throw deleteReport.error
-
       setExisting(null)
       setCurrentReportId(null)
       setSubmissionComplete(false)

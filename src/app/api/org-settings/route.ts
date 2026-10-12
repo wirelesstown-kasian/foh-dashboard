@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { getAppSettings } from '@/lib/appSettings'
+import { getDashboardViewer } from '@/lib/routeAuth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
+  if (!await getDashboardViewer()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const settings = await getAppSettings()
     return NextResponse.json({

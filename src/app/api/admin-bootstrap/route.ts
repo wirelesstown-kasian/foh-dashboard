@@ -1,82 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-import { ADMIN_SESSION_COOKIE, createAdminSessionValue } from '@/lib/adminSession'
-import { hasActiveManagers } from '@/lib/adminBootstrap'
-import { hashPin } from '@/lib/pin'
-import { getSupabaseAdminConfigError, supabaseAdmin } from '@/lib/supabaseAdmin'
+import { NextResponse } from 'next/server'
 
-function isMissingPinCodeColumn(error: { message?: string } | null | undefined) {
-  return (error?.message?.toLowerCase() ?? '').includes('pin_code')
-}
-
+// Managers are created by an authenticated manager through the staffing API.
+// Public first-manager setup could take over a project if all managers become inactive.
 export async function GET() {
-  const configError = getSupabaseAdminConfigError()
-  if (configError) {
-    return NextResponse.json({ error: `Supabase admin is not configured: ${configError}` }, { status: 500 })
-  }
-
-  try {
-    return NextResponse.json({ needsSetup: !(await hasActiveManagers()) })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to check admin setup' }, { status: 500 })
-  }
+  return NextResponse.json({ needsSetup: false })
 }
 
-export async function POST(req: NextRequest) {
-  const configError = getSupabaseAdminConfigError()
-  if (configError) {
-    return NextResponse.json({ error: `Supabase admin is not configured: ${configError}` }, { status: 500 })
-  }
-
-  const { name, email, pin } = await req.json()
-
-  if (typeof name !== 'string' || !name.trim()) {
-    return NextResponse.json({ error: 'Manager name is required' }, { status: 400 })
-  }
-  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) {
-    return NextResponse.json({ error: 'PIN must be 4 digits' }, { status: 400 })
-  }
-
-  try {
-    if (await hasActiveManagers()) {
-      return NextResponse.json({ error: 'An admin manager already exists' }, { status: 409 })
-    }
-
-    const pinHash = await hashPin(pin)
-    const payload = {
-      name: name.trim(),
-      email: typeof email === 'string' && email.trim() ? email.trim() : null,
-      role: 'manager',
-      pin_hash: pinHash,
-      pin_code: pin,
-    }
-    let { error } = await supabaseAdmin.from('employees').insert(payload)
-    if (error && isMissingPinCodeColumn(error)) {
-      const fallbackPayload: Omit<typeof payload, 'pin_code'> = {
-        name: payload.name,
-        email: payload.email,
-        role: payload.role,
-        pin_hash: payload.pin_hash,
-      }
-      const fallback = await supabaseAdmin.from('employees').insert(fallbackPayload)
-      error = fallback.error
-    }
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    const cookieStore = await cookies()
-    cookieStore.set(ADMIN_SESSION_COOKIE, createAdminSessionValue(), {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 60 * 60 * 8,
-    })
-
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create admin manager' }, { status: 500 })
-  }
+export async function POST() {
+  return NextResponse.json({ error: 'Public manager setup is disabled' }, { status: 410 })
 }

@@ -11,11 +11,14 @@ export interface AppSessionPayload {
   expiresAt: number
 }
 
-function getSessionSecret() {
-  return process.env.APP_SESSION_SECRET
-    ?? process.env.SUPABASE_SERVICE_ROLE_KEY
-    ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    ?? 'foh-dashboard-dev-secret'
+export function getSessionSecret() {
+  const secret = process.env.APP_SESSION_SECRET
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_SECRET_KEY
+    || process.env.SUPABASE_SERVICE_KEY
+    || process.env.SUPABASE_SERVICE_ROLE
+  if (!secret) throw new Error('A private session secret is required')
+  return secret
 }
 
 function sign(value: string) {

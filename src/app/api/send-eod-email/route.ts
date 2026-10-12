@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { getEmailSettings } from '@/lib/appSettings'
+import { getDashboardViewer } from '@/lib/routeAuth'
+import { getBusinessDateString } from '@/lib/dateUtils'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
@@ -127,9 +129,22 @@ function getRank<T>(items: T[], getValue: (item: T) => number, idKey: keyof T, t
 }
 
 export async function POST(req: NextRequest) {
+  const viewer = await getDashboardViewer()
+  if (!viewer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { eod_report_id } = await req.json()
     if (!eod_report_id) return NextResponse.json({ error: 'Missing eod_report_id' }, { status: 400 })
+
+    if (!viewer.isManager) {
+      const { data: authorizedReport } = await supabaseAdmin
+        .from('eod_reports')
+        .select('session_date')
+        .eq('id', eod_report_id)
+        .maybeSingle()
+      if (authorizedReport?.session_date !== getBusinessDateString()) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+      }
+    }
 
     const resendKey = process.env.RESEND_API_KEY
     if (!resendKey) return NextResponse.json({ error: 'RESEND_API_KEY not configured' }, { status: 500 })

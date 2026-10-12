@@ -16,6 +16,11 @@ function isPublicSupabaseKey(value: string) {
 
 const supabaseAdminKey = supabaseAdminKeyCandidates.find(value => !isPublicSupabaseKey(value)) ?? null
 
+export function getSupabaseAdminKey() {
+  if (!supabaseAdminKey) throw new Error(getSupabaseAdminConfigError() ?? 'Supabase server key is missing')
+  return supabaseAdminKey
+}
+
 export function getSupabaseAdminConfigError() {
   if (supabaseAdminKey) return null
   if (supabaseAdminKeyCandidates.some(isPublicSupabaseKey)) {

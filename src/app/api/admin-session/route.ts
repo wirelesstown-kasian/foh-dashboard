@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { verifyPin } from '@/lib/pin'
-import { ADMIN_SESSION_COOKIE, createAdminSessionValue } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, createAdminSessionValue, hasManagerAccess } from '@/lib/adminSession'
 import { getSupabaseAdminConfigError, supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
 
 export async function GET() {
   const cookieStore = await cookies()
-  return NextResponse.json({ authenticated: !!cookieStore.get(ADMIN_SESSION_COOKIE)?.value })
+  return NextResponse.json({ authenticated: await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value) })
 }
 
 export async function POST(req: NextRequest) {
@@ -21,18 +21,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid PIN format' }, { status: 400 })
   }
 
-  let managers: Array<{ name: string | null; pin_hash: string | null; pin_code: string | null }> = []
+  let managers: Array<{ id: string; name: string | null; pin_hash: string | null; pin_code: string | null }> = []
   try {
     const result = await supabaseAdmin
       .from('employees')
-      .select('name, pin_hash, pin_code')
+      .select('id, name, pin_hash, pin_code')
       .eq('role', 'manager')
       .eq('is_active', true)
 
     if (result.error) {
       return NextResponse.json({ error: `Failed to read manager PINs from Supabase: ${result.error.message}` }, { status: 500 })
     }
-    managers = (result.data ?? []) as Array<{ name: string | null; pin_hash: string | null; pin_code: string | null }>
+    managers = (result.data ?? []) as typeof managers
   } catch (error) {
     return NextResponse.json({ error: `Failed to reach Supabase for admin access: ${error instanceof Error ? error.message : 'Unknown error'}` }, { status: 500 })
   }
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   for (const manager of managers) {
     if (manager.pin_code === pin) {
       const cookieStore = await cookies()
-      cookieStore.set(ADMIN_SESSION_COOKIE, createAdminSessionValue(), {
+      cookieStore.set(ADMIN_SESSION_COOKIE, createAdminSessionValue(manager.id), {
         httpOnly: true,
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production',
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     if (!manager.pin_hash) continue
     if (await verifyPin(pin, manager.pin_hash)) {
       const cookieStore = await cookies()
-      cookieStore.set(ADMIN_SESSION_COOKIE, createAdminSessionValue(), {
+      cookieStore.set(ADMIN_SESSION_COOKIE, createAdminSessionValue(manager.id), {
         httpOnly: true,
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production',

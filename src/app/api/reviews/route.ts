@@ -3,6 +3,8 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { Employee, GoogleReview, RewardRedemption, Task, TaskCompletion } from '@/lib/types'
 import { getReviewBoardEmployees, getReviewBoardViewer, isReviewBoardSetupMissingError, normalizeReviewRow } from '@/lib/reviewBoard'
 import { withTipPoolHourlyRate } from '@/lib/employeeSelect'
+import { getDashboardViewer } from '@/lib/routeAuth'
+import { businessDateInChicago, safeDashboardResponse } from '@/lib/dashboardDataAccess'
 import { getCompletionPoints } from '@/lib/rewards'
 
 type ReviewRouteResponse = {
@@ -26,6 +28,10 @@ function isMissingRewardsTable(error: { message?: string; code?: string } | null
 }
 
 export async function GET() {
+  const dashboardViewer = await getDashboardViewer()
+  if (!dashboardViewer) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   const { session, managerUnlocked } = await getReviewBoardViewer()
 
   const [
@@ -77,7 +83,7 @@ export async function GET() {
         },
         setup_required: true,
       }
-      return NextResponse.json(response)
+      return NextResponse.json(safeDashboardResponse(response, dashboardViewer, 'reviews', businessDateInChicago()))
     }
 
     return NextResponse.json({ error: reviewsResult.error.message }, { status: 500 })
@@ -118,5 +124,5 @@ export async function GET() {
     },
   }
 
-  return NextResponse.json(response)
+  return NextResponse.json(safeDashboardResponse(response, dashboardViewer, 'reviews', businessDateInChicago()))
 }

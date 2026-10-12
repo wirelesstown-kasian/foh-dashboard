@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { AppSessionPayload, APP_SESSION_COOKIE, parseAppSessionValue } from '@/lib/appAuth'
 import { Employee, GoogleReview, ReviewCategory, ReviewSentiment } from '@/lib/types'
 import { getReviewAssignableEmployees } from '@/lib/reviewEmployees'
@@ -9,7 +9,7 @@ type ReviewRow = Omit<GoogleReview, 'matched_employee' | 'assigned_by_employee'>
 export async function getReviewBoardViewer() {
   const cookieStore = await cookies()
   const session = parseAppSessionValue(cookieStore.get(APP_SESSION_COOKIE)?.value)
-  const managerUnlocked = isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+  const managerUnlocked = await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 
   return {
     session,

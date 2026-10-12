@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, DailySession, ShiftClock } from '@/lib/types'
 import { format } from 'date-fns'
@@ -105,6 +105,17 @@ function isRegisterOpener(employee: Employee) {
 }
 
 export function RegisterOpenPanel({ session, employees, clockRecords, today, businessDate, onComplete }: Props) {
+  const [viewerId, setViewerId] = useState<string | null>(null)
+  const [managerAccess, setManagerAccess] = useState(false)
+  useEffect(() => {
+    void Promise.all([
+      fetch('/api/app-session', { cache: 'no-store' }).then(response => response.json()),
+      fetch('/api/admin-session', { cache: 'no-store' }).then(response => response.json()),
+    ]).then(([app, admin]) => {
+      setViewerId(app.employee?.id ?? null)
+      setManagerAccess(app.can_manage_admin === true || admin.authenticated === true)
+    }).catch(() => {})
+  }, [])
   const [openedBy, setOpenedBy] = useState<string>(session?.register_opened_by ?? '')
   const [coinOverride, setCoinOverride] = useState<string>('')
   const [billOverride, setBillOverride] = useState<string>('')
@@ -126,8 +137,10 @@ export function RegisterOpenPanel({ session, employees, clockRecords, today, bus
         employeeById.set(employee.id, employee)
       }
     }
-    return [...employeeById.values()].filter(employee => isRegisterOpener(employee) && clockedInEmployeeIds.has(employee.id))
-  }, [clockRecords, clockedInEmployeeIds, employees, today])
+    return [...employeeById.values()].filter(employee => isRegisterOpener(employee)
+      && clockedInEmployeeIds.has(employee.id)
+      && (managerAccess || !viewerId || employee.id === viewerId))
+  }, [clockRecords, clockedInEmployeeIds, employees, today, managerAccess, viewerId])
   const hasAvailableOpeners = eligibleOpeners.length > 0
   const selectedOpener = eligibleOpeners.find(e => e.id === openedBy) ?? null
   const selectedOpenerName = selectedOpener?.name ?? 'Unknown'

@@ -324,7 +324,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
 
     const [empRes, schRes, draftWeekRes, draftRes, previousDraftOrderRes] = await Promise.all([
       loadEmployees(),
-      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, schedule_departments, is_active, pin_hash, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
+      supabase.from('schedules').select('*, employee:employees(id, name, role, primary_department, schedule_departments, is_active, phone, email, birth_date, created_at)').gte('date', startDate).lte('date', endDate).eq('department', department),
       supabase.from('schedule_draft_weeks').select('week_start').eq('week_start', startDate).maybeSingle(),
       supabase.from('schedule_drafts').select('*').eq('week_start', startDate).eq('department', department).order('display_order').order('date'),
       previousDraftOrderPromise,
@@ -810,7 +810,7 @@ export function PlanningGrid({ department, rightSlot }: PlanningGridProps) {
         .order('date'),
       supabase
         .from('schedules')
-        .select('*, employee:employees(id, name, role, primary_department, schedule_departments, is_active, pin_hash, phone, email, birth_date, created_at)')
+        .select('*, employee:employees(id, name, role, primary_department, schedule_departments, is_active, phone, email, birth_date, created_at)')
         .gte('date', previousWeekStart)
         .lte('date', previousWeekEnd)
         .eq('department', department)

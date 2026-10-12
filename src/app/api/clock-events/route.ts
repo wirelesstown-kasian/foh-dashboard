@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { verifyPin } from '@/lib/pin'
 import { getSupabaseAdminConfigError, supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import {
   CLOCK_PHOTO_BUCKET,
   calculateClockHours,
@@ -20,6 +20,8 @@ import {
 } from '@/lib/clockUtils'
 import { normalizeScheduleDepartment } from '@/lib/employeeSelect'
 import { ShiftClock } from '@/lib/types'
+import { getDashboardViewer } from '@/lib/routeAuth'
+import { businessDateInChicago } from '@/lib/dashboardDataAccess'
 
 export const runtime = 'nodejs'
 
@@ -36,7 +38,7 @@ function getAdminConfigResponse() {
 
 async function requireAdmin() {
   const cookieStore = await cookies()
-  return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+  return await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
 function isMissingPinCodeColumn(error: { message?: string; code?: string } | null | undefined) {
@@ -464,6 +466,8 @@ async function upsertClockTaskCompletion(taskId: string | null | undefined, empl
 export async function GET(req: NextRequest) {
   const configResponse = getAdminConfigResponse()
   if (configResponse) return configResponse
+  const viewer = await getDashboardViewer()
+  if (!viewer) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const includePhotos = req.nextUrl.searchParams.get('include_photos') === '1'
   const minimal = req.nextUrl.searchParams.get('minimal') === '1' && !includePhotos
@@ -471,12 +475,15 @@ export async function GET(req: NextRequest) {
   const sessionDate = req.nextUrl.searchParams.get('session_date')
   const startDate = req.nextUrl.searchParams.get('start_date')
   const endDate = req.nextUrl.searchParams.get('end_date')
+  if (!viewer.isManager && (includePhotos || startDate || endDate || sessionDate !== businessDateInChicago())) {
+    return NextResponse.json({ error: 'Not allowed' }, { status: 403 })
+  }
 
   let query = supabaseAdmin
     .from('shift_clocks')
     .select(minimal
       ? 'id,session_date,employee_id,clock_in_at,clock_out_at,clock_in_photo_path,clock_out_photo_path,break_started_at,break_ended_at,break_minutes,unpaid_break_started_at,unpaid_break_ended_at,unpaid_break_minutes,auto_clock_out,approval_status,approved_hours,manager_approved_by,manager_approved_at,manager_note,created_at,updated_at'
-      : '*, employee:employees!shift_clocks_employee_id_fkey(*)')
+      : '*, employee:employees!shift_clocks_employee_id_fkey(id, name, role, primary_department, schedule_departments, is_active)')
     .order('session_date', { ascending: false })
     .order('clock_in_at', { ascending: false })
 
@@ -498,6 +505,25 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ records: await addSignedUrls(records) })
   }
 
+  if (!viewer.isManager) {
+    return NextResponse.json({ records: records.map(record => {
+      const employee = Array.isArray(record.employee) ? record.employee[0] : record.employee
+      return {
+        id: record.id,
+        employee_id: record.employee_id,
+        session_date: record.session_date,
+        clock_in_at: record.clock_in_at,
+        clock_out_at: record.clock_out_at,
+        approval_status: record.approval_status,
+        approved_hours: record.approved_hours,
+        auto_clock_out: record.auto_clock_out,
+        break_minutes: getClockBreakMinutes(record),
+        unpaid_break_minutes: 0,
+        manager_note: `[work_department=${getClockWorkDepartment(record, employee)}]`,
+        employee,
+      }
+    }) })
+  }
   return NextResponse.json({ records })
 }
 

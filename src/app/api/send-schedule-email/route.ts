@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { sendWeeklyScheduleEmails } from '@/lib/scheduleEmail'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { getAppSettings, getEmailSettings } from '@/lib/appSettings'
 import type { ScheduleDepartment } from '@/lib/types'
 
@@ -12,7 +12,7 @@ function parseDepartment(value: unknown): ScheduleDepartment | undefined {
 
 export async function POST(req: NextRequest) {
   const cookieStore = await cookies()
-  if (!isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
+  if (!await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

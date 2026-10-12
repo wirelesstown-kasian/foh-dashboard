@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getDashboardViewer } from '@/lib/routeAuth'
 import { getClockWorkDepartment, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { resetWageReportSheetInGoogleSheet, WageSheetRow } from '@/lib/eodGoogleSheet'
 import { getRoleLabel } from '@/lib/organization'
@@ -83,6 +84,8 @@ function shouldRecalculateTips(
 }
 
 export async function POST(req: NextRequest) {
+  const viewer = await getDashboardViewer()
+  if (!viewer?.isManager) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { start_date, end_date, view } = await req.json() as {
       start_date?: string

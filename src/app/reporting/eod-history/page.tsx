@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase'
+import { EMPLOYEE_PUBLIC_SELECT } from '@/lib/employeeSelect'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { PinModal } from '@/components/layout/PinModal'
 import { ReportingNav } from '@/components/reporting/ReportingNav'
@@ -566,7 +567,7 @@ export default function EodHistoryPage() {
 
       const { data: refreshedReport, error: refreshedError } = await supabase
         .from('eod_reports')
-        .select('*, tip_distributions(*, employee:employees(*))')
+        .select(`*, tip_distributions(*, employee:employees(${EMPLOYEE_PUBLIC_SELECT}))`)
         .eq('id', reportId)
         .single()
 

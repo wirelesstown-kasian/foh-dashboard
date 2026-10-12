@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { removeClockRecordFromGoogleSheet, resetClockRecordsSheetInGoogleSheet, syncClockRecordToGoogleSheet } from '@/lib/eodGoogleSheet'
+import { getDashboardViewer } from '@/lib/routeAuth'
 
 export async function POST(req: NextRequest) {
+  const viewer = await getDashboardViewer()
+  if (!viewer?.isManager) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { record_id, deleted_record_id, reset_sheet } = await req.json() as {
       record_id?: string

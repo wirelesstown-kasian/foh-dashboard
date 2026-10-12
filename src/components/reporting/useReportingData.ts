@@ -117,7 +117,7 @@ export function useEodReports() {
     const load = async () => {
       const res = await supabase
         .from('eod_reports')
-        .select('*, tip_distributions(*, employee:employees(*))')
+        .select(`*, tip_distributions(*, employee:employees(${EMPLOYEE_PUBLIC_SELECT}))`)
         .order('session_date', { ascending: false })
       if (!mounted) return
       setEodReports(res.data ?? [])

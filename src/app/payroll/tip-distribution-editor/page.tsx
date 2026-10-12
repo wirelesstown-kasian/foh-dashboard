@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
+import { EMPLOYEE_PUBLIC_SELECT } from '@/lib/employeeSelect'
 import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { formatCurrency } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
@@ -261,7 +262,7 @@ export default function TipDistributionEditorPage() {
       notifyReportingDataChanged()
       const refreshed = await supabase
         .from('eod_reports')
-        .select('*, tip_distributions(*, employee:employees(*))')
+        .select(`*, tip_distributions(*, employee:employees(${EMPLOYEE_PUBLIC_SELECT}))`)
         .order('session_date', { ascending: false })
       if (!refreshed.error) setEodReports(refreshed.data ?? [])
       setRows(null)

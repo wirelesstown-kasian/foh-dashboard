@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { ADMIN_SESSION_COOKIE, isValidAdminSession } from '@/lib/adminSession'
+import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { getDashboardViewer } from '@/lib/routeAuth'
 
 async function requireAdmin() {
   const cookieStore = await cookies()
-  return isValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
+  return await hasManagerAccess(cookieStore.get(ADMIN_SESSION_COOKIE)?.value)
 }
 
 function isMissingRewardsTable(error: { message?: string; code?: string } | null | undefined) {
@@ -19,6 +20,7 @@ function normalizePoints(value: unknown) {
 }
 
 export async function GET() {
+  if (!await getDashboardViewer()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const isAdmin = await requireAdmin()
 
   const rewardsResult = await supabaseAdmin.from('reward_catalog').select('*').eq('is_active', true).order('display_order')

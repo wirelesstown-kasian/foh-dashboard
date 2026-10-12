@@ -75,16 +75,6 @@ export function TabNav() {
         return
       }
 
-      if (setupData.needsSetup === true) {
-        const createRes = await fetch('/api/admin-bootstrap/default', {
-          method: 'POST',
-        })
-        if (createRes.ok && mounted) {
-          setAdminNeedsSetup(false)
-          return
-        }
-      }
-
       if (mounted) {
         setAdminUnlocked(sessionData.authenticated === true)
         setAdminNeedsSetup(setupData.needsSetup === true)

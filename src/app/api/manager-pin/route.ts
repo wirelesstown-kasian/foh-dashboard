@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { ADMIN_SESSION_COOKIE, createAdminSessionValue } from '@/lib/adminSession'
 import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { isValidPin } from '@/lib/validation'
@@ -22,6 +24,14 @@ export async function POST(req: NextRequest) {
 
   for (const manager of managers ?? []) {
     if (manager.pin_code === pin || (manager.pin_hash && await verifyPin(pin, manager.pin_hash))) {
+      const cookieStore = await cookies()
+      cookieStore.set(ADMIN_SESSION_COOKIE, createAdminSessionValue(manager.id), {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/',
+        maxAge: 60 * 60 * 8,
+      })
       return NextResponse.json({ success: true, managerId: manager.id })
     }
   }
