@@ -857,17 +857,25 @@ export default function WageReportPage() {
         ['View', view === 'earnings' ? 'Earnings' : 'Tip Only'],
         ['Payout Status', payoutStatus === 'created' ? 'Payout Created' : payoutStatus === 'partial' ? 'Partial Payout Created' : 'Preview Only'],
       ]
+      const paymentMethods = (row: WageSummaryRow) => (['cash', 'check', 'ach', 'unknown'] as const)
+        .filter(method => row.paymentBreakdown[method] > 0)
+        .map(method => method === 'unknown' ? 'Unknown' : paymentMethodLabel(method))
+        .join(' + ') || 'Unknown'
       await exportReportToExcel(`wage_report_${view}_${department}_${staff}_${startDate}_${endDate}`, [
         {
           name: 'Wage Summary', title: 'Wage Report', metadata,
           columns: [
-            { label: 'Name' }, { label: 'Role' }, { label: 'Paid By' }, { label: 'Clock Status' },
+            { label: 'Name' }, { label: 'Role' }, { label: 'Paid By' },
+            { label: 'Cash Amount', format: 'money' }, { label: 'Check Amount', format: 'money' },
+            { label: 'ACH Amount', format: 'money' }, { label: 'Unknown Amount', format: 'money' },
+            { label: 'Clock Status' },
             { label: 'Hours', format: 'decimal' }, { label: 'Meal Break (minutes)', format: 'integer' },
             { label: 'Tips', format: 'money' }, { label: 'Tips / Hr', format: 'money', total: false },
             ...earningsColumns,
           ],
           rows: exportRows.map(row => [
-            row.emp.name, getRoleLabel(row.emp.role, roleDefinitions), formatPaymentBreakdown(row.paymentBreakdown),
+            row.emp.name, getRoleLabel(row.emp.role, roleDefinitions), paymentMethods(row),
+            row.paymentBreakdown.cash, row.paymentBreakdown.check, row.paymentBreakdown.ach, row.paymentBreakdown.unknown,
             row.hasOpenClock ? 'Clock Out Needed' : row.hasAutoClockOut ? 'Auto Clock-Out' : 'Verified',
             row.hours, row.mealBreakMinutes, row.tips, row.tipRate,
             ...(view === 'earnings' ? [row.baseWages, row.guaranteeTopUp, row.commission, row.deductions, row.totalEarnings] : []),

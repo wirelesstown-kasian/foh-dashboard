@@ -23,7 +23,7 @@ function load(filename) {
 }
 const { buildReportWorkbook } = load('src/lib/reportExcel.ts')
 const { getRoleLabel, getDepartmentLabel } = load('src/lib/organization.ts')
-const { formatPayrollPaymentSummary } = load('src/lib/payroll.ts')
+const { formatPayrollPaymentSummary, paymentMethodLabel } = load('src/lib/payroll.ts')
 const { format } = require('date-fns')
 
 // Exercise the actual page export handler without rendering the report or
@@ -44,7 +44,7 @@ function setupHandler(filename, globals) {
   const result = { busy: [], message: null, workbook: null, filename: null }
   const exports = {}
   vm.runInNewContext(output, {
-    exports, getRoleLabel, getDepartmentLabel, formatPayrollPaymentSummary, format, Error,
+    exports, getRoleLabel, getDepartmentLabel, formatPayrollPaymentSummary, paymentMethodLabel, format, Error,
     setExportingExcel: value => result.busy.push(value),
     setRefreshMessage: value => { result.message = value },
     setMessage: value => { result.message = value },
@@ -86,6 +86,11 @@ test('wage Excel preserves filtered staff, numeric earnings, totals, dates and l
   const sheet = result.workbook.Sheets['Wage Summary']
   const [headers, row, total] = dataRows(sheet)
   assert.equal(row[0], '=Alice')
+  assert.equal(row[headers.indexOf('Paid By')], 'Cash + Check')
+  assert.equal(row[headers.indexOf('Cash Amount')], 10)
+  assert.equal(row[headers.indexOf('Check Amount')], 101.5)
+  assert.equal(row[headers.indexOf('ACH Amount')], 0)
+  assert.equal(total[headers.indexOf('Check Amount')], 101.5)
   assert.equal(row[headers.indexOf('Tips')], 65.25)
   assert.equal(row[headers.indexOf('Total Earnings')], 111.5)
   assert.equal(total[headers.indexOf('Total Earnings')], 111.5)
@@ -93,13 +98,31 @@ test('wage Excel preserves filtered staff, numeric earnings, totals, dates and l
   const start = xlsx.utils.decode_range(sheet['!autofilter'].ref).s.r + 1
   assert.equal(sheet[xlsx.utils.encode_cell({ r: start, c: 0 })].t, 's')
   assert.equal(sheet[xlsx.utils.encode_cell({ r: start, c: 0 })].f, undefined)
-  assert.equal(sheet[xlsx.utils.encode_cell({ r: start, c: 6 })].t, 'n')
-  assert.match(sheet[xlsx.utils.encode_cell({ r: start, c: 6 })].z, /0\.00/)
+  const cashCell = sheet[xlsx.utils.encode_cell({ r: start, c: headers.indexOf('Cash Amount') })]
+  assert.equal(cashCell.t, 'n')
+  assert.match(cashCell.z, /0\.00/)
   const daily = dataRows(result.workbook.Sheets['Daily Details'])
   assert.equal(daily[1][1], '2026-10-02')
   assert.equal(daily.length, 3)
   assert.ok(!JSON.stringify(result.workbook).includes('not-for-export'))
   assert.deepEqual(result.busy, [true, false])
+})
+
+test('wage payment methods remain filterable for ACH, mixed unknown, and unpaid rows', async () => {
+  const exportRows = [
+    { ...alice, paymentBreakdown: { cash: 0, check: 0, ach: 50, unknown: 0 } },
+    { ...bob, paymentBreakdown: { cash: 10, check: 0, ach: 0, unknown: 20 } },
+    { ...bob, paymentBreakdown: { cash: 0, check: 0, ach: 0, unknown: 0 } },
+  ]
+  const { handler, result } = setupHandler('src/app/reporting/wages/page.tsx', { ...wageGlobals, displayedRows: exportRows })
+  await handler()
+  const [headers, ach, mixed, unpaid, total] = dataRows(result.workbook.Sheets['Wage Summary'])
+  const method = headers.indexOf('Paid By')
+  assert.equal(ach[method], 'ACH')
+  assert.equal(mixed[method], 'Cash + Unknown')
+  assert.equal(unpaid[method], 'Unknown')
+  assert.equal(total[headers.indexOf('ACH Amount')], 50)
+  assert.equal(total[headers.indexOf('Unknown Amount')], 20)
 })
 
 test('Tip Only exports omit wage and earnings columns from both sheets', async () => {
