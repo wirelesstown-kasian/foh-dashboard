@@ -143,10 +143,15 @@ async function handler(req: NextRequest, context: Context) {
   if (method !== 'GET' && method !== 'HEAD') {
     rawBody = await req.text()
     if (rawBody.length > 256_000) return NextResponse.json({ message: 'Request too large' }, { status: 413 })
-    try {
-      body = JSON.parse(rawBody)
-    } catch {
-      return NextResponse.json({ message: 'Invalid JSON' }, { status: 400 })
+    // PostgREST DELETE requests normally have no body.
+    if (method === 'DELETE' && rawBody.length === 0) {
+      rawBody = undefined
+    } else {
+      try {
+        body = JSON.parse(rawBody)
+      } catch {
+        return NextResponse.json({ message: 'Invalid JSON' }, { status: 400 })
+      }
     }
     if (!viewer.isManager && !await validateStaffWrite(
       table, method, req.nextUrl.searchParams, body, viewer.employeeId, viewer.role, date,
