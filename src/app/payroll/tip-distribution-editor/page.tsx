@@ -156,7 +156,10 @@ export default function TipDistributionEditorPage() {
       }
     })
     : []), [clockRows, employees, report])
-  const currentRows = useMemo(() => rows ?? savedRows, [rows, savedRows])
+  const currentRows = useMemo(() => (
+    rows ?? (savedRows.length > 0 ? savedRows : report ? clockRows : [])
+  ), [clockRows, report, rows, savedRows])
+  const hasUnsavedClockDraft = !!report && savedRows.length === 0 && currentRows.length > 0
   const calculatedRows = useMemo(() => rebalanceTips(Number.isFinite(totalTip) ? totalTip : 0, currentRows), [currentRows, totalTip])
   const distributedTotal = roundMoney(calculatedRows.reduce((sum, row) => sum + row.net_tip, 0))
   const houseTotal = roundMoney((Number.isFinite(totalTip) ? totalTip : 0) * 0.15)
@@ -207,6 +210,10 @@ export default function TipDistributionEditorPage() {
     }
     if (isPaidDate) {
       setMessage('This date is already part of a paid payroll payout. Make post-payout corrections from Reporting > Payroll Payouts.')
+      return
+    }
+    if (calculatedRows.length === 0) {
+      setMessage('No eligible clock hours are available. Check Clock Records before saving tip distribution.')
       return
     }
     if (hasAdjustmentWithoutMemo) {
@@ -317,7 +324,7 @@ export default function TipDistributionEditorPage() {
               <Label className="text-sm font-semibold">Total Collected Tip</Label>
               <Input className="mt-1 h-11 text-base font-medium" type="number" step="0.01" value={totalTipInput === '' ? Number(report?.tip_total ?? 0) : totalTipInput} onChange={event => setTotalTipInput(event.target.value)} />
             </div>
-            <Button variant="outline" className="h-11 px-4 font-semibold" onClick={loadClockRows} disabled={!report}>Reload From Clock Records</Button>
+            <Button variant="outline" className="h-11 px-4 font-semibold" onClick={loadClockRows} disabled={!report || clockRows.length === 0}>Reload From Clock Records</Button>
             {!report && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 No EOD report exists for this date.
@@ -353,6 +360,11 @@ export default function TipDistributionEditorPage() {
           <div className="rounded-lg border bg-white p-3 text-xs text-muted-foreground">
             Add staff and edit hours in <Link className="font-medium text-violet-700 hover:underline" href="/reporting/clock-records">Clock Records</Link>. Tip rows here follow saved clock records.
           </div>
+          {hasUnsavedClockDraft && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status">
+              No employee tip distributions have been saved for this date. Showing a draft calculated from eligible clock records. Review it and select Save Distribution to save these employee tips.
+            </div>
+          )}
           {isPaidDate && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
               This tip date is included in paid payroll: {paidPayrollRuns.map(run => `${run.department} ${run.start_date} to ${run.end_date}`).join(', ')}. Use Payroll Payouts for post-payout corrections.
@@ -405,7 +417,7 @@ export default function TipDistributionEditorPage() {
           {message && <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-700">{message}</div>}
           <div className="flex justify-between">
             <Link className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium hover:bg-slate-50" href="/admin"><ArrowLeft className="size-4" /> Admin Board</Link>
-            <Button onClick={save} disabled={saving || !report || isPaidDate || hasAdjustmentWithoutMemo || Math.abs(ruleTotal - (Number.isFinite(totalTip) ? totalTip : 0)) > 0.02}>
+            <Button onClick={save} disabled={saving || !report || isPaidDate || calculatedRows.length === 0 || hasAdjustmentWithoutMemo || Math.abs(ruleTotal - (Number.isFinite(totalTip) ? totalTip : 0)) > 0.02}>
               <Save className="size-4" /> {saving ? 'Saving...' : 'Save Distribution'}
             </Button>
           </div>

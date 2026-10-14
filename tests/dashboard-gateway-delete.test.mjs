@@ -72,7 +72,8 @@ function setupSaveFlow({ failTips = false } = {}) {
     if (table === 'eod_reports') {
       if (options.method === 'PATCH') Object.assign(state.report, JSON.parse(options.body))
       if (options.method === 'GET' || options.headers.get('prefer')?.includes('return=representation')) {
-        return Response.json({ ...state.report, tip_distributions: state.tips })
+        const report = { ...state.report, tip_distributions: state.tips }
+        return Response.json(options.headers.get('accept') === 'application/vnd.pgrst.object+json' ? report : [report])
       }
       return new Response(null, { status: 204 })
     }
@@ -203,6 +204,47 @@ test('manual EOD report edit replaces tips and completes without Invalid JSON', 
   assert.equal(state.tips.length, 1)
   assert.equal(state.tips[0].employee_id, 'server')
   assert.deepEqual(state.calls, ['PATCH eod_reports', 'GET schedules', 'DELETE tip_distributions', 'POST tip_distributions', 'GET eod_reports', '/api/eod-sheet-sync'])
+})
+
+test('tip editor saves missing employee distributions and refreshes the report used by payroll', async () => {
+  const { state, globals } = setupSaveFlow()
+  state.tips = []
+  const draft = [{ employee_id: 'server', hours_worked: 5, start_time: '17:00', end_time: '22:00',
+    tip_share: 1, net_tip: 85, house_deduction: 15, adjustment: 0, memo: '' }]
+  let refreshedReports
+  const handlers = pageHandlers('src/app/payroll/tip-distribution-editor/page.tsx', ['save'], {
+    ...globals, report: { ...state.report, cash_tip: 0, tip_total: 100, revenue_total: 1100, batch_total: 1000, cash_total: 100 },
+    totalTip: 100, isPaidDate: false, hasAdjustmentWithoutMemo: false, calculatedRows: draft, currentRows: draft,
+    roundMoney: value => Math.round(value * 100) / 100, formatCurrency: value => `$${value}`,
+    EMPLOYEE_PUBLIC_SELECT: 'id,name', setMessage: value => { state.notice = value },
+    notifyReportingDataChanged() {}, setRows() {}, setTotalTipInput() {},
+    setEodReports: reports => { refreshedReports = reports },
+  })
+  await handlers.save()
+  assert.match(state.notice, /Tip distribution saved/)
+  assert.equal(state.tips.length, 1)
+  assert.equal(state.tips[0].net_tip, 85)
+  assert.equal(state.report.tip_total, 100)
+  assert.equal(state.report.id, reportId)
+  assert.equal(refreshedReports[0].tip_distributions[0].employee_id, 'server')
+  assert.equal(refreshedReports[0].tip_distributions[0].net_tip, 85)
+  const { getSavedTipMap } = load('src/lib/payroll.ts')
+  assert.equal(getSavedTipMap(refreshedReports, '2026-10-14', '2026-10-14').get('server'), 85)
+  assert.deepEqual(state.calls, ['PATCH eod_reports', 'DELETE tip_distributions', 'POST tip_distributions', 'GET eod_reports'])
+})
+
+test('tip editor refuses paid dates and empty clock drafts without touching reports', async () => {
+  for (const isPaidDate of [true, false]) {
+    const { state, globals } = setupSaveFlow()
+    const handlers = pageHandlers('src/app/payroll/tip-distribution-editor/page.tsx', ['save'], {
+      ...globals, report: { ...state.report }, isPaidDate, calculatedRows: [],
+      setMessage: value => { state.notice = value },
+    })
+    await handlers.save()
+    assert.match(state.notice, isPaidDate ? /paid payroll payout/ : /No eligible clock hours/)
+    assert.equal(state.calls.length, 0)
+    assert.equal(state.tips.length, 1)
+  }
 })
 
 test('staff can replace only their own current-day tips using a bodyless DELETE', async () => {
