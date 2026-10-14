@@ -6,6 +6,7 @@ import { getBusinessDateString } from '@/lib/dateUtils'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
+import { getDailyReportTips } from '@/lib/dailyTips'
 import { isTipEligibleForWork } from '@/lib/tipEligibility'
 import type { Employee, Schedule, ShiftClock } from '@/lib/types'
 
@@ -171,6 +172,8 @@ export async function POST(req: NextRequest) {
         .select('*, employee:employees(id, name, email, role, primary_department, schedule_departments, tip_pool_hourly_rate, tip_eligible)')
         .eq('session_date', report.session_date),
     ])
+    if (sessionSchedulesRes.error) throw new Error(sessionSchedulesRes.error.message)
+    if (shiftClocksRes.error) throw new Error(shiftClocksRes.error.message)
     const sessionSchedules = (sessionSchedulesRes.data ?? []) as Schedule[]
     const shiftClocks = (shiftClocksRes.data ?? []) as ShiftClockWithEmployee[]
 
@@ -220,66 +223,44 @@ export async function POST(req: NextRequest) {
     const monthlyPerformanceTotals = new Map<string, { tasks: number; hours: number; netTip: number }>()
 
     if (employeeIds.length > 0) {
-    // Batch all date-range queries in parallel
-    const [monthlyTaskRes, monthlyReportsRes, weeklyReportsRes] = await Promise.all([
-      supabaseAdmin
-        .from('task_completions')
-        .select('employee_id, status')
-        .gte('session_date', monthStart)
-        .lte('session_date', monthEnd)
-        .in('employee_id', employeeIds),
-      supabaseAdmin
-        .from('eod_reports')
-        .select('id')
-        .gte('session_date', monthStart)
-        .lte('session_date', monthEnd),
-      supabaseAdmin
-        .from('eod_reports')
-        .select('id')
-        .gte('session_date', weekStart)
-        .lte('session_date', weekEnd),
-    ])
-
-    for (const completion of (monthlyTaskRes.data ?? []) as Array<{ employee_id: string; status?: 'complete' | 'incomplete' }>) {
-      if (completion.status === 'incomplete') continue
-      monthlyTaskTotals.set(completion.employee_id, (monthlyTaskTotals.get(completion.employee_id) ?? 0) + 1)
+      const rangeStart = monthStart < weekStart ? monthStart : weekStart
+      const rangeEnd = monthEnd > weekEnd ? monthEnd : weekEnd
+      const [monthlyTaskRes, periodReportsRes, periodClocksRes, periodEmployeesRes, periodSchedulesRes] = await Promise.all([
+        supabaseAdmin.from('task_completions').select('employee_id, status').gte('session_date', monthStart).lte('session_date', monthEnd).in('employee_id', employeeIds),
+        supabaseAdmin.from('eod_reports').select('session_date, tip_total, tip_distributions(*)').gte('session_date', rangeStart).lte('session_date', rangeEnd),
+        supabaseAdmin.from('shift_clocks').select('*').gte('session_date', rangeStart).lte('session_date', rangeEnd),
+        supabaseAdmin.from('employees').select('id, role, primary_department, schedule_departments, tip_pool_hourly_rate, tip_eligible'),
+        supabaseAdmin.from('schedules').select('employee_id, date, department').gte('date', rangeStart).lte('date', rangeEnd),
+      ])
+      for (const result of [monthlyTaskRes, periodReportsRes, periodClocksRes, periodEmployeesRes, periodSchedulesRes]) {
+        if (result.error) throw new Error(result.error.message)
+      }
+      for (const completion of (monthlyTaskRes.data ?? []) as Array<{ employee_id: string; status?: 'complete' | 'incomplete' }>) {
+        if (completion.status === 'incomplete') continue
+        monthlyTaskTotals.set(completion.employee_id, (monthlyTaskTotals.get(completion.employee_id) ?? 0) + 1)
+      }
+      for (const periodReport of periodReportsRes.data ?? []) {
+        const { tips } = getDailyReportTips({
+          report: periodReport, employees: (periodEmployeesRes.data ?? []) as Employee[],
+          clockRecords: (periodClocksRes.data ?? []) as ShiftClock[], schedules: (periodSchedulesRes.data ?? []) as Schedule[],
+        })
+        for (const [employeeId, tip] of tips) {
+          if (!employeeIds.includes(employeeId)) continue
+          if (periodReport.session_date >= monthStart && periodReport.session_date <= monthEnd) {
+            const current = monthlyPerformanceTotals.get(employeeId) ?? { tasks: 0, hours: 0, netTip: 0 }
+            current.hours += tip.hours
+            current.netTip += tip.tips
+            monthlyPerformanceTotals.set(employeeId, current)
+          }
+          if (periodReport.session_date >= weekStart && periodReport.session_date <= weekEnd) {
+            const current = weeklyTotals.get(employeeId) ?? { hours: 0, netTip: 0 }
+            current.hours += tip.hours
+            current.netTip += tip.tips
+            weeklyTotals.set(employeeId, current)
+          }
+        }
+      }
     }
-
-    const monthlyReportIds = (monthlyReportsRes.data ?? []).map((r: { id: string }) => r.id)
-    const weeklyReportIds = (weeklyReportsRes.data ?? []).map((r: { id: string }) => r.id)
-
-    // Batch tip distribution queries in parallel
-    const [monthlyTipRes, weeklyTipRes] = await Promise.all([
-      monthlyReportIds.length > 0
-        ? supabaseAdmin
-            .from('tip_distributions')
-            .select('employee_id, hours_worked, net_tip')
-            .in('eod_report_id', monthlyReportIds)
-            .in('employee_id', employeeIds)
-        : Promise.resolve({ data: [] }),
-      weeklyReportIds.length > 0
-        ? supabaseAdmin
-            .from('tip_distributions')
-            .select('employee_id, hours_worked, net_tip')
-            .in('eod_report_id', weeklyReportIds)
-            .in('employee_id', employeeIds)
-        : Promise.resolve({ data: [] }),
-    ])
-
-    for (const distribution of (monthlyTipRes.data ?? []) as Array<{ employee_id: string; hours_worked: number; net_tip: number }>) {
-      const current = monthlyPerformanceTotals.get(distribution.employee_id) ?? { tasks: 0, hours: 0, netTip: 0 }
-      current.hours += Number(distribution.hours_worked)
-      current.netTip += Number(distribution.net_tip)
-      monthlyPerformanceTotals.set(distribution.employee_id, current)
-    }
-
-    for (const distribution of (weeklyTipRes.data ?? []) as Array<{ employee_id: string; hours_worked: number; net_tip: number }>) {
-      const current = weeklyTotals.get(distribution.employee_id) ?? { hours: 0, netTip: 0 }
-      current.hours += Number(distribution.hours_worked)
-      current.netTip += Number(distribution.net_tip)
-      weeklyTotals.set(distribution.employee_id, current)
-    }
-  }
 
     const monthlyRankings = employeeIds.map(employeeId => {
     const totals = monthlyPerformanceTotals.get(employeeId) ?? { tasks: 0, hours: 0, netTip: 0 }

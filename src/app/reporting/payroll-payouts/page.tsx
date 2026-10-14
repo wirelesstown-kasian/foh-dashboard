@@ -16,8 +16,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getClockWorkDepartment, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState } from '@/lib/clockUtils'
-import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
-import { calculatePayrollAmounts, formatPayrollPaymentSummary, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
+import { calculatePayrollAmounts, formatPayrollPaymentSummary, getDailyGuaranteeTopUp, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
+import { getDailyReportTips } from '@/lib/dailyTips'
 import { formatCurrency } from '@/lib/reporting'
 import { exportReportToExcel, type ExcelReportSheet } from '@/lib/reportExcel'
 import { supabase } from '@/lib/supabase'
@@ -98,8 +98,7 @@ function getEmployeeClockRecords({
       if (record.employee_id !== employeeId || record.session_date < startDate || record.session_date > endDate) return false
       if (department === 'all') return true
       const employee = getClockRecordEmployee(record, employees)
-      return clockMatchesWorkDepartment(record, department, employee, schedules) ||
-        (employee ? getEmployeeScheduleDepartments(employee).includes(department) : false)
+      return clockMatchesWorkDepartment(record, department, employee, schedules)
     })
     .sort((left, right) => left.session_date.localeCompare(right.session_date) || left.clock_in_at.localeCompare(right.clock_in_at))
 }
@@ -129,14 +128,11 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
   const hours = normalizeMoney(patch.hours ?? item.hours)
   const employee = getPayrollItemEmployee({ ...item, ...patch }, employees)
   const hourlyRate = Number(employee?.hourly_wage ?? 0)
-  const guaranteedRate = Number(employee?.guaranteed_hourly ?? 0)
   const tips = normalizeMoney(patch.tips ?? item.tips)
   const baseWages = patch.base_wages === undefined && patch.hours !== undefined
     ? normalizeMoney(hours * hourlyRate)
     : normalizeMoney(patch.base_wages ?? item.base_wages)
-  const topUp = patch.guarantee_top_up === undefined && (patch.hours !== undefined || patch.tips !== undefined || patch.base_wages !== undefined)
-    ? normalizeMoney(Math.max(0, hours * guaranteedRate - (baseWages + tips)))
-    : normalizeMoney(patch.guarantee_top_up ?? item.guarantee_top_up)
+  const topUp = normalizeMoney(patch.guarantee_top_up ?? item.guarantee_top_up)
   const commission = normalizeMoney(patch.commission ?? item.commission)
   const commissionPaymentMethod = commission > 0 && requestedCommissionPaymentMethod !== paymentMethod
     ? requestedCommissionPaymentMethod
@@ -314,6 +310,8 @@ function recalculateRowsForClockTimeChanges({
   )
   const oldTipsByEmployee = new Map<string, number>()
   const nextTipsByEmployee = new Map<string, number>()
+  const oldTipsByDate = new Map<string, Map<string, number>>()
+  const nextTipsByDate = new Map<string, Map<string, number>>()
 
   for (const date of affectedDates) {
     const dayReports = eodReports.filter(report => report.session_date === date)
@@ -323,12 +321,16 @@ function recalculateRowsForClockTimeChanges({
     }
 
     for (const report of dayReports) {
-      for (const distribution of report.tip_distributions ?? []) {
+      const { tips } = getDailyReportTips({ report, employees, clockRecords, schedules })
+      const dayTips = oldTipsByDate.get(date) ?? new Map<string, number>()
+      for (const [employeeId, tip] of tips) {
         oldTipsByEmployee.set(
-          distribution.employee_id,
-          normalizeMoney((oldTipsByEmployee.get(distribution.employee_id) ?? 0) + Number(distribution.net_tip ?? 0))
+          employeeId,
+          normalizeMoney((oldTipsByEmployee.get(employeeId) ?? 0) + tip.tips)
         )
+        dayTips.set(employeeId, (dayTips.get(employeeId) ?? 0) + tip.tips)
       }
+      oldTipsByDate.set(date, dayTips)
     }
 
     const hoursByEmployee = new Map<string, { employee_id: string; hours_worked: number; tip_pool_hourly_rate?: number | null; start_time: string | null; end_time: string | null }>()
@@ -359,12 +361,15 @@ function recalculateRowsForClockTimeChanges({
     const tipRows = Array.from(hoursByEmployee.values())
     for (const report of dayReports) {
       const results = calculateTips(Number(report.tip_total ?? 0), tipRows)
+      const dayTips = nextTipsByDate.get(date) ?? new Map<string, number>()
       for (const result of results) {
         nextTipsByEmployee.set(
           result.employee_id,
           normalizeMoney((nextTipsByEmployee.get(result.employee_id) ?? 0) + result.net_tip)
         )
+        dayTips.set(result.employee_id, (dayTips.get(result.employee_id) ?? 0) + result.net_tip)
       }
+      nextTipsByDate.set(date, dayTips)
       tipDistributionUpdates.push({
         eod_report_id: report.id,
         rows: results.map(result => {
@@ -394,13 +399,32 @@ function recalculateRowsForClockTimeChanges({
     if (row.id === selectedItem.id) patch.hours = selectedEditedHours
     if (row.employee_id && affectedDates.length > 0) {
       const oldTip = oldTipsByEmployee.get(row.employee_id) ?? 0
-      const nextTip = nextTipsByEmployee.get(row.employee_id) ?? oldTip
+      const nextTip = nextTipsByEmployee.get(row.employee_id) ?? 0
       const tipDifference = normalizeMoney(nextTip - oldTip)
       if (tipDifference !== 0) {
         patch.tips = normalizeMoney(Number(row.tips ?? 0) + tipDifference)
         patch.memo = appendMemo(row.memo, note)
         affectedEmployeeIds.add(row.employee_id)
       }
+    }
+    if (row.employee_id && (patch.hours !== undefined || patch.tips !== undefined)) {
+      const employee = getPayrollItemEmployee(row, employees)
+      let guaranteeDelta = 0
+      for (const date of affectedDates) {
+        const dayClocks = clockRecords.filter(record => (
+          record.employee_id === row.employee_id && record.session_date === date &&
+          (!row.department || row.department === 'all' || clockMatchesWorkDepartment(record, row.department, employee, schedules))
+        ))
+        const oldHours = dayClocks.reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
+        const nextHours = dayClocks.reduce((sum, record) => sum + (
+          changedRecords.some(changed => changed.id === record.id)
+            ? getEditedClockHours(record, clockEdits[record.id])
+            : getEffectiveClockHours(record)
+        ), 0)
+        guaranteeDelta += getDailyGuaranteeTopUp(employee, nextHours, nextTipsByDate.get(date)?.get(row.employee_id) ?? 0)
+          - getDailyGuaranteeTopUp(employee, oldHours, oldTipsByDate.get(date)?.get(row.employee_id) ?? 0)
+      }
+      patch.guarantee_top_up = normalizeMoney(Math.max(0, Number(row.guarantee_top_up ?? 0) + guaranteeDelta))
     }
     if (row.id === selectedItem.id) {
       patch.memo = appendMemo(patch.memo ?? row.memo, note)
@@ -1359,6 +1383,10 @@ export default function PayrollPayoutsReportPage() {
                     <div>
                       <Label>Tips</Label>
                       <Input className="h-9 text-right" type="number" step="0.01" value={Number(selectedItem.tips ?? 0)} onChange={event => updateItemEdit(selectedItem, { tips: normalizeMoney(event.target.value) })} />
+                    </div>
+                    <div>
+                      <Label htmlFor="payout-daily-guarantee-top-up">Daily Guarantee Top-Up</Label>
+                      <Input id="payout-daily-guarantee-top-up" className="h-9 text-right" type="number" step="0.01" value={Number(selectedItem.guarantee_top_up ?? 0)} onChange={event => updateItemEdit(selectedItem, { guarantee_top_up: normalizeMoney(event.target.value) })} />
                     </div>
                     <div>
                       <Label>Commission</Label>

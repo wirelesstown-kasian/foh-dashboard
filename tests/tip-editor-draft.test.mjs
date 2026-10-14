@@ -97,3 +97,31 @@ test('local edits remain visible when saved distributions are absent', () => {
   assert.match(html, /Edited Alice/)
   assert.match(html, /4\.00/)
 })
+
+test('saved manual tip allocations are displayed without being rebalanced on open', () => {
+  const bob = { ...server, id: 'bob', name: 'Bob' }
+  const html = renderEditor({ employees: [server, bob], clocks: [clock, { ...clock, employee_id: 'bob' }],
+    reports: [{ ...report, tip_distributions: [
+      { employee_id: 'server', hours_worked: 5, net_tip: 60, house_deduction: 7.5 },
+      { employee_id: 'bob', hours_worked: 5, net_tip: 25, house_deduction: 7.5 },
+    ] }] })
+  assert.match(html, /\$60\.00/)
+  assert.match(html, /\$25\.00/)
+  assert.doesNotMatch(html, /\$42\.50/)
+})
+
+test('clock-based tip drafts honor employee hourly tip caps', () => {
+  const bob = { ...server, id: 'bob', name: 'Bob' }
+  const html = renderEditor({ employees: [{ ...server, tip_pool_hourly_rate: 4 }, bob], clocks: [clock, { ...clock, employee_id: 'bob' }] })
+  assert.match(html, /\$20\.00/)
+  assert.match(html, /\$65\.00/)
+  assert.doesNotMatch(html, /\$42\.50/)
+})
+
+test('an entirely capped tip pool shows its unallocated amount without increasing employee tips', () => {
+  const bob = { ...server, id: 'bob', name: 'Bob', tip_pool_hourly_rate: 4 }
+  const html = renderEditor({ employees: [{ ...server, tip_pool_hourly_rate: 4 }, bob], clocks: [clock, { ...clock, employee_id: 'bob' }] })
+  assert.match(html, /\$20\.00/)
+  assert.match(html, /\$45\.00 remains unallocated/)
+  assert.match(html, /<button> Save Distribution<\/button>/)
+})

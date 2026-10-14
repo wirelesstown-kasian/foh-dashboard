@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowLeft } from 'lucide-react'
 import { useAppSettings } from '@/components/useAppSettings'
+import { MissingTipDistributionNotice } from '@/components/reporting/MissingTipDistributionNotice'
 import { useClockRecords, useEmployees, useEodReports, notifyReportingDataChanged, usePayrollRuns, useSchedulesByRange } from '@/components/reporting/useReportingData'
 import { supabase } from '@/lib/supabase'
 import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getClockWorkDepartment, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState, shouldWarnMissingMealBreak } from '@/lib/clockUtils'
@@ -572,13 +573,6 @@ export default function WageWorksheetPage() {
     .map(record => `${record.employee_id}|${record.session_date}`)
   ), [clockRecords, paidClockRecordIdsForRange])
   const unpaidClockRecords = useMemo(() => clockRecords.filter(record => !paidClockRecordIdsForRange.has(record.id)), [clockRecords, paidClockRecordIdsForRange])
-  const unpaidEodReports = useMemo(() => eodReports.map(report => {
-    if (report.session_date < startDate || report.session_date > endDate) return report
-    return {
-      ...report,
-      tip_distributions: (report.tip_distributions ?? []).filter(distribution => !paidEmployeeDateKeysForRange.has(`${distribution.employee_id}|${report.session_date}`)),
-    }
-  }), [endDate, eodReports, paidEmployeeDateKeysForRange, startDate])
   const selectedSummaryRun = useMemo(
     () => payrollRuns.find(run => run.id === summaryRunId) ?? null,
     [payrollRuns, summaryRunId]
@@ -685,7 +679,9 @@ export default function WageWorksheetPage() {
     const nextRows = buildPayrollDraftRows({
       employees,
       clockRecords: unpaidClockRecords,
-      eodReports: unpaidEodReports,
+      eodReports,
+      tipClockRecords: clockRecords,
+      excludedTipEmployeeDates: paidEmployeeDateKeysForRange,
       department,
       startDate,
       endDate,
@@ -721,7 +717,9 @@ export default function WageWorksheetPage() {
     const sourceRows = buildPayrollDraftRows({
       employees,
       clockRecords: unpaidClockRecords,
-      eodReports: unpaidEodReports,
+      eodReports,
+      tipClockRecords: clockRecords,
+      excludedTipEmployeeDates: paidEmployeeDateKeysForRange,
       department,
       startDate,
       endDate,
@@ -732,7 +730,7 @@ export default function WageWorksheetPage() {
       const nextRows = sortPayrollRows(mergeWorksheetRowsWithClockSource(currentRows, sourceRows, manualEmployeeIds))
       return arePayrollRowsEqual(currentRows, nextRows) ? currentRows : nextRows
     })
-  }, [department, employees, endDate, excludedEmployeeIds, manualEmployeeIds, schedules, startDate, step, unpaidClockRecords, unpaidEodReports, worksheetMode])
+  }, [department, employees, endDate, excludedEmployeeIds, manualEmployeeIds, schedules, startDate, step, unpaidClockRecords, eodReports, clockRecords, paidEmployeeDateKeysForRange, worksheetMode])
 
   const updateRow = (employeeId: string, patch: Partial<PayrollDraftRow>) => {
     if (worksheetMode === 'paid_view') return
@@ -740,7 +738,6 @@ export default function WageWorksheetPage() {
       if (row.employee_id !== employeeId) return row
       const employee = employees.find(item => item.id === employeeId)
       const hourlyRate = Number(employee?.hourly_wage ?? 0)
-      const guaranteedRate = Number(employee?.guaranteed_hourly ?? 0)
       const next = { ...row, ...patch }
       if (employee?.commission_enabled !== true) {
         next.commission = 0
@@ -753,14 +750,6 @@ export default function WageWorksheetPage() {
 
       if (patch.hours !== undefined && patch.base_wages === undefined) {
         next.base_wages = normalizeMoney(next.hours * hourlyRate)
-      }
-
-      if (
-        patch.guarantee_top_up === undefined &&
-        (patch.hours !== undefined || patch.tips !== undefined || patch.base_wages !== undefined)
-      ) {
-        const guaranteeTarget = normalizeMoney(next.hours * guaranteedRate)
-        next.guarantee_top_up = normalizeMoney(Math.max(0, guaranteeTarget - (next.base_wages + next.tips)))
       }
 
       return { ...next, ...calculatePayrollAmounts(next) }
@@ -779,9 +768,11 @@ export default function WageWorksheetPage() {
     const employee = employees.find(item => item.id === employeeId)
     if (!employee) return
     const nextRows = buildPayrollDraftRows({
-      employees: [employee],
+      employees,
       clockRecords: nextClockRecords.filter(record => !paidClockRecordIdsForRange.has(record.id)),
-      eodReports: unpaidEodReports,
+      eodReports,
+      tipClockRecords: nextClockRecords,
+      excludedTipEmployeeDates: paidEmployeeDateKeysForRange,
       department,
       startDate,
       endDate,
@@ -999,15 +990,17 @@ export default function WageWorksheetPage() {
     const employee = employees.find(item => item.id === employeeToAdd)
     if (!employee) return
     const nextRows = buildPayrollDraftRows({
-      employees: [employee],
+      employees,
       clockRecords: unpaidClockRecords,
-      eodReports: unpaidEodReports,
+      eodReports,
+      tipClockRecords: clockRecords,
+      excludedTipEmployeeDates: paidEmployeeDateKeysForRange,
       department,
       startDate,
       endDate,
       schedules,
     })
-    const rowToAdd = nextRows[0] ?? {
+    const rowToAdd = nextRows.find(row => row.employee_id === employee.id) ?? {
       employee_id: employee.id,
       employee_name: employee.name,
       role: employee.role,
@@ -1236,6 +1229,7 @@ export default function WageWorksheetPage() {
 
   return (
     <div className="p-4">
+      <MissingTipDistributionNotice reports={eodReports} startDate={startDate} endDate={endDate} />
       {message && (
         <div className="mb-4 rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</div>
       )}
@@ -1505,6 +1499,10 @@ export default function WageWorksheetPage() {
               Payout
             </Button>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Top-Up adds each day’s guarantee shortfall. If you override period hours, tips, or base wages manually, review and adjust Top-Up explicitly.
+          </p>
 
           <div className="overflow-x-auto rounded-lg border bg-white">
             <Table className="min-w-[1280px] table-fixed border-collapse text-xs">

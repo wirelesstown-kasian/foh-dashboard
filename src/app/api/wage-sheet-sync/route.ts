@@ -1,87 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getDashboardViewer } from '@/lib/routeAuth'
-import { getClockWorkDepartment, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { resetWageReportSheetInGoogleSheet, WageSheetRow } from '@/lib/eodGoogleSheet'
 import { getRoleLabel } from '@/lib/organization'
 import { getAppSettings } from '@/lib/appSettings'
-import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleForWork } from '@/lib/tipEligibility'
+import { calculateDailyTipPreview, getSavedDailyTips, shouldRecalculateTips } from '@/lib/dailyTips'
 import type { Employee, EodReport, Schedule, ShiftClock } from '@/lib/types'
+import { getDailyGuaranteeTopUp } from '@/lib/payroll'
 
 type DailyTipPreview = { hours: number; tips: number }
 type SavedDailyTip = { hours: number; tips: number }
-
-function getSavedDailyTips(report: EodReport) {
-  const savedTips = new Map<string, SavedDailyTip>()
-
-  for (const distribution of report.tip_distributions ?? []) {
-    const current = savedTips.get(distribution.employee_id) ?? { hours: 0, tips: 0 }
-    savedTips.set(distribution.employee_id, {
-      hours: current.hours + Number(distribution.hours_worked ?? 0),
-      tips: current.tips + Number(distribution.net_tip ?? 0),
-    })
-  }
-
-  return savedTips
-}
-
-function calculateDailyTipPreview({
-  employees,
-  clockRecords,
-  schedules = [],
-  report,
-}: {
-  employees: Employee[]
-  clockRecords: ShiftClock[]
-  schedules?: Schedule[]
-  report: EodReport
-}) {
-  const employeeById = new Map(employees.map(employee => [employee.id, employee]))
-  const hoursByEmployee = new Map<string, number>()
-
-  for (const record of clockRecords) {
-    if (record.session_date !== report.session_date) continue
-    const employee = employeeById.get(record.employee_id)
-    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
-
-    const hours = getEffectiveClockHours(record)
-    if (hours <= 0) continue
-    hoursByEmployee.set(record.employee_id, (hoursByEmployee.get(record.employee_id) ?? 0) + hours)
-  }
-
-  const tipEntries = [...hoursByEmployee.entries()].map(([employeeId, hours]) => {
-    const employee = employeeById.get(employeeId)
-    return {
-      employee_id: employeeId,
-      hours_worked: hours,
-      tip_pool_hourly_rate: employee?.tip_pool_hourly_rate ?? null,
-    }
-  })
-  const tipResults = calculateTips(Number(report.tip_total ?? 0), tipEntries)
-
-  return new Map(
-    tipResults.map(result => [result.employee_id, {
-      hours: result.hours_worked,
-      tips: result.net_tip,
-    }])
-  )
-}
-
-function shouldRecalculateTips(
-  savedTips: Map<string, SavedDailyTip>,
-  calculatedTips: Map<string, DailyTipPreview>
-) {
-  if (calculatedTips.size === 0) return false
-
-  for (const [employeeId, calculated] of calculatedTips) {
-    const saved = savedTips.get(employeeId)
-    if (!saved) return true
-    if (Math.abs(saved.hours - calculated.hours) > 0.01) return true
-  }
-
-  return false
-}
 
 export async function POST(req: NextRequest) {
   const viewer = await getDashboardViewer()
@@ -98,7 +27,7 @@ export async function POST(req: NextRequest) {
     }
 
     const [{ data: employees, error: employeesError }, { data: eodReports, error: eodError }, { data: clockRecords, error: clockError }, { data: schedules, error: schedulesError }, settings] = await Promise.all([
-      supabaseAdmin.from('employees').select('*').eq('is_active', true),
+      supabaseAdmin.from('employees').select('*'),
       supabaseAdmin.from('eod_reports').select('*, tip_distributions(*)').gte('session_date', start_date).lte('session_date', end_date),
       supabaseAdmin.from('shift_clocks').select('*').gte('session_date', start_date).lte('session_date', end_date),
       supabaseAdmin.from('schedules').select('id, employee_id, date, start_time, end_time, department, created_at').gte('date', start_date).lte('date', end_date),
@@ -133,6 +62,7 @@ export async function POST(req: NextRequest) {
 
       let hours = 0
       let tips = 0
+      let guaranteeTopUp = 0
       for (const date of employeeDates) {
         const report = reportByDate.get(date)
         const savedTips = savedTipsByDate.get(date) ?? new Map<string, SavedDailyTip>()
@@ -150,11 +80,10 @@ export async function POST(req: NextRequest) {
 
         hours += dayHours
         tips += dayTips
+        guaranteeTopUp += getDailyGuaranteeTopUp(employee, dayHours, dayTips)
       }
 
       const baseWages = hours * Number(employee.hourly_wage ?? 0)
-      const guaranteedTarget = hours * Number(employee.guaranteed_hourly ?? 0)
-      const guaranteeTopUp = Math.max(0, guaranteedTarget - (baseWages + tips))
       const totalEarnings = baseWages + tips + guaranteeTopUp
       const tipRate = hours > 0 ? tips / hours : null
       const matchingClocks = employeeClockRows

@@ -16,6 +16,7 @@ import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils
 import { formatCurrency } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleForWork } from '@/lib/tipEligibility'
+import { getCashVariance } from '@/lib/eodVariance'
 import { Employee } from '@/lib/types'
 import { ArrowLeft, ChevronLeft, ChevronRight, Save } from 'lucide-react'
 
@@ -27,6 +28,10 @@ type EditorRow = {
   end_time: string | null
   adjustment: number
   memo: string
+  tip_pool_hourly_rate?: number | null
+  saved_net_tip?: number
+  saved_house_deduction?: number
+  saved_tip_total?: number
 }
 
 function todayKey() {
@@ -69,6 +74,7 @@ function buildClockRows(date: string, employees: Employee[], clockRecords: Retur
       end_time: null,
       adjustment: 0,
       memo: '',
+      tip_pool_hourly_rate: employee.tip_pool_hourly_rate,
     }
 
     existing.hours_worked = roundMoney(existing.hours_worked + hours)
@@ -86,22 +92,28 @@ function rebalanceTips(totalTip: number, rows: EditorRow[]) {
   const baseResults = calculateTips(totalTip, rows.map(row => ({
     employee_id: row.employee_id,
     hours_worked: row.hours_worked,
+    tip_pool_hourly_rate: row.tip_pool_hourly_rate,
   })))
   const baseById = new Map(baseResults.map(result => [result.employee_id, result]))
-  const distributable = roundMoney(totalTip * 0.85)
-  const adjusted = rows.map(row => ({
-    ...row,
-    base_tip: roundMoney(baseById.get(row.employee_id)?.net_tip ?? 0),
-    net_tip: roundMoney((baseById.get(row.employee_id)?.net_tip ?? 0) + row.adjustment),
-    house_deduction: roundMoney(baseById.get(row.employee_id)?.house_deduction ?? 0),
-  }))
+  const preserveSaved = rows.every(row => row.saved_net_tip !== undefined && row.saved_tip_total === totalTip && row.adjustment === 0)
+  const distributable = roundMoney(baseResults.reduce((sum, row) => sum + row.net_tip, 0))
+  const adjusted = rows.map(row => {
+    const useSavedTip = row.saved_net_tip !== undefined && row.saved_tip_total === totalTip
+    const baseTip = useSavedTip ? row.saved_net_tip ?? 0 : baseById.get(row.employee_id)?.net_tip ?? 0
+    return {
+      ...row,
+      base_tip: roundMoney(baseTip),
+      net_tip: roundMoney(baseTip + row.adjustment),
+      house_deduction: roundMoney(useSavedTip ? row.saved_house_deduction ?? 0 : baseById.get(row.employee_id)?.house_deduction ?? 0),
+    }
+  })
   const adjustedTotal = roundMoney(adjusted.reduce((sum, row) => sum + row.net_tip, 0))
   const difference = roundMoney(adjustedTotal - distributable)
   const balancingRows = adjusted.filter(row => row.adjustment === 0 && row.net_tip > 0)
   const fallbackRows = balancingRows.length > 0 ? balancingRows : adjusted.filter(row => row.net_tip > 0)
   const balancingTotal = fallbackRows.reduce((sum, row) => sum + row.net_tip, 0)
 
-  if (difference !== 0 && balancingTotal > 0) {
+  if (!preserveSaved && difference !== 0 && balancingTotal > 0) {
     let applied = 0
     fallbackRows.forEach((row, index) => {
       const share = index === fallbackRows.length - 1
@@ -115,7 +127,7 @@ function rebalanceTips(totalTip: number, rows: EditorRow[]) {
   const finalTotal = roundMoney(adjusted.reduce((sum, row) => sum + row.net_tip, 0))
   const correction = roundMoney(distributable - finalTotal)
   const correctionRow = adjusted.find(row => row.net_tip > 0)
-  if (correctionRow && correction !== 0) correctionRow.net_tip = roundMoney(correctionRow.net_tip + correction)
+  if (!preserveSaved && correctionRow && correction !== 0) correctionRow.net_tip = roundMoney(correctionRow.net_tip + correction)
 
   return adjusted.map(row => ({
     ...row,
@@ -153,6 +165,10 @@ export default function TipDistributionEditorPage() {
         end_time: distribution.end_time ?? clockRow?.end_time ?? null,
         adjustment: 0,
         memo: '',
+        tip_pool_hourly_rate: employee?.tip_pool_hourly_rate,
+        saved_net_tip: Number(distribution.net_tip ?? 0),
+        saved_house_deduction: Number(distribution.house_deduction ?? 0),
+        saved_tip_total: Number(report.tip_total ?? 0),
       }
     })
     : []), [clockRows, employees, report])
@@ -163,7 +179,10 @@ export default function TipDistributionEditorPage() {
   const calculatedRows = useMemo(() => rebalanceTips(Number.isFinite(totalTip) ? totalTip : 0, currentRows), [currentRows, totalTip])
   const distributedTotal = roundMoney(calculatedRows.reduce((sum, row) => sum + row.net_tip, 0))
   const houseTotal = roundMoney((Number.isFinite(totalTip) ? totalTip : 0) * 0.15)
-  const ruleTotal = roundMoney(distributedTotal + houseTotal)
+  const unallocatedCappedTip = currentRows.length > 0 && currentRows.every(row => Number(row.tip_pool_hourly_rate ?? 0) > 0)
+    ? roundMoney(Math.max(0, (Number.isFinite(totalTip) ? totalTip : 0) * 0.85 - distributedTotal))
+    : 0
+  const ruleTotal = roundMoney(distributedTotal + houseTotal + unallocatedCappedTip)
   const hasAdjustmentWithoutMemo = currentRows.some(row => row.adjustment !== 0 && row.memo.trim().length === 0)
   const paidPayrollRuns = useMemo(() => payrollRuns.filter(run => selectedDate >= run.start_date && selectedDate <= run.end_date), [payrollRuns, selectedDate])
   const isPaidDate = paidPayrollRuns.length > 0
@@ -244,6 +263,7 @@ export default function TipDistributionEditorPage() {
           revenue_total: roundMoney(Number(report.revenue_total ?? 0) + tipDelta),
           batch_total: roundMoney(Number(report.batch_total ?? 0) + tipDelta),
           cash_deposit: roundMoney(Number(report.cash_total ?? 0) + cashTip),
+          cash_variance: roundMoney(getCashVariance(Number(report.actual_cash_on_hand ?? 0), Number(report.cash_total ?? 0), cashTip)),
           memo: nextMemo,
           updated_at: new Date().toISOString(),
         })
@@ -363,6 +383,11 @@ export default function TipDistributionEditorPage() {
           {hasUnsavedClockDraft && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status">
               No employee tip distributions have been saved for this date. Showing a draft calculated from eligible clock records. Review it and select Save Distribution to save these employee tips.
+            </div>
+          )}
+          {unallocatedCappedTip > 0.02 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="status">
+              {formatCurrency(unallocatedCappedTip)} remains unallocated because all employees have hourly tip caps. This amount is included in Total Check separately from employee tips and the house cut.
             </div>
           )}
           {isPaidDate && (

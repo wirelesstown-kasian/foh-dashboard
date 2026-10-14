@@ -1,6 +1,7 @@
-import { Employee, EodReport, ShiftClock, TaskCompletion, TipDistribution } from '@/lib/types'
+import { Employee, EodReport, Schedule, ShiftClock, TaskCompletion, TipDistribution } from '@/lib/types'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { formatCurrency, getPercent } from '@/lib/reporting'
+import { getSavedTipMap } from '@/lib/payroll'
 
 export interface EmployeeMonthPerformance {
   emp: Employee
@@ -34,6 +35,8 @@ export function scoreFromRank(rank: number, count: number) {
 
 interface BuildPerformanceRowsArgs {
   employees: Employee[]
+  tipEmployees?: Employee[]
+  schedules?: Schedule[]
   completions: TaskCompletion[]
   eodReports: (EodReport & { tip_distributions?: (TipDistribution & { employee?: Employee })[] })[]
   clockRecords: ShiftClock[]
@@ -45,6 +48,8 @@ interface BuildPerformanceRowsArgs {
 
 export function buildPerformanceRows({
   employees,
+  tipEmployees = employees,
+  schedules = [],
   completions,
   eodReports,
   clockRecords,
@@ -76,23 +81,13 @@ export function buildPerformanceRows({
   )
 
   const monthHoursByEmp = new Map<string, number>()
-  const monthTipsByEmp = new Map<string, number>()
+  const monthTipsByEmp = getSavedTipMap(monthEods, monthStart, monthEnd, tipEmployees, clockRecords, 'all', schedules)
   const workingDatesByEmp = new Map<string, Set<string>>()
 
   for (const record of monthClockRecords) {
     monthHoursByEmp.set(record.employee_id, (monthHoursByEmp.get(record.employee_id) ?? 0) + getEffectiveClockHours(record))
     if (!workingDatesByEmp.has(record.employee_id)) workingDatesByEmp.set(record.employee_id, new Set())
     workingDatesByEmp.get(record.employee_id)!.add(record.session_date)
-  }
-
-  for (const eod of monthEods) {
-    for (const distribution of eod.tip_distributions ?? []) {
-      if (!filteredEmployeeIds.has(distribution.employee_id)) continue
-      monthTipsByEmp.set(
-        distribution.employee_id,
-        (monthTipsByEmp.get(distribution.employee_id) ?? 0) + Number(distribution.net_tip)
-      )
-    }
   }
 
   // Build daily total task map: date → total tasks completed by all employees that day

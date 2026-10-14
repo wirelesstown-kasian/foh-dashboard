@@ -3,11 +3,12 @@ import { cookies } from 'next/headers'
 import { buildEmailDocument, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { formatPayrollPaymentSummary } from '@/lib/payroll'
+import { formatPayrollPaymentSummary, getDailyGuaranteeTopUp } from '@/lib/payroll'
+import { getDailyReportTips } from '@/lib/dailyTips'
 import type { PaymentMethod } from '@/lib/types'
 import { getEmailSettings } from '@/lib/appSettings'
 import { getEffectiveClockHours } from '@/lib/clockUtils'
-import type { ShiftClock } from '@/lib/types'
+import type { Employee, Schedule, ShiftClock } from '@/lib/types'
 
 type WageReportPeriod = 'daily' | 'weekly' | 'monthly'
 type WageReportView = 'earnings' | 'tips'
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
   // Fallback: rebuild report server-side (legacy path)
   const { data: reports, error: reportsError } = await supabaseAdmin
     .from('eod_reports')
-    .select('id, session_date, tip_distributions(*)')
+    .select('id, session_date, tip_total, tip_distributions(*)')
     .gte('session_date', start)
     .lte('session_date', end)
     .order('session_date')
@@ -199,7 +200,6 @@ export async function POST(req: NextRequest) {
   const { data: clockRecords, error: clockError } = await supabaseAdmin
     .from('shift_clocks')
     .select('*')
-    .eq('employee_id', employee_id)
     .gte('session_date', start)
     .lte('session_date', end)
 
@@ -207,39 +207,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: clockError.message }, { status: 500 })
   }
 
-  const approvedClockHoursByDate = ((clockRecords ?? []) as ShiftClock[])
-    .reduce((map, record) => {
-      map.set(record.session_date, (map.get(record.session_date) ?? 0) + getEffectiveClockHours(record))
-      return map
-    }, new Map<string, number>())
-
-  const distributions = (reports ?? []).flatMap(report => {
-    const dailyTips = (report.tip_distributions ?? [])
-      .filter((dist: { employee_id: string }) => dist.employee_id === employee_id)
-      .reduce((sum: number, dist: { net_tip: number }) => sum + Number(dist.net_tip), 0)
-    const dailyHours = approvedClockHoursByDate.get(report.session_date) ?? 0
-    return dailyTips > 0 || dailyHours > 0
-      ? [{ date: report.session_date, hours: dailyHours, tips: dailyTips }]
-      : []
+  const [employeesRes, schedulesRes] = await Promise.all([
+    supabaseAdmin.from('employees').select('*'),
+    supabaseAdmin.from('schedules').select('employee_id, date, department').gte('date', start).lte('date', end),
+  ])
+  if (employeesRes.error) return NextResponse.json({ error: employeesRes.error.message }, { status: 500 })
+  if (schedulesRes.error) return NextResponse.json({ error: schedulesRes.error.message }, { status: 500 })
+  const poolClocks = (clockRecords ?? []) as ShiftClock[]
+  const employeeClocks = poolClocks.filter(record => record.employee_id === employee_id)
+  const approvedClockHoursByDate = employeeClocks.reduce((map, record) => {
+    map.set(record.session_date, (map.get(record.session_date) ?? 0) + getEffectiveClockHours(record))
+    return map
+  }, new Map<string, number>())
+  const dailyTipResults = new Map((reports ?? []).map(report => [report.session_date, getDailyReportTips({
+    report, employees: (employeesRes.data ?? []) as Employee[], clockRecords: poolClocks, schedules: (schedulesRes.data ?? []) as Schedule[],
+  })]))
+  const calculatedDates = [...dailyTipResults].filter(([, result]) => result.source === 'calculated').map(([date]) => date)
+  const dates = new Set([...approvedClockHoursByDate.keys(), ...dailyTipResults.keys()])
+  const distributions = [...dates].sort().flatMap(date => {
+    const dailyTips = dailyTipResults.get(date)?.tips.get(employee_id)?.tips ?? 0
+    const dailyHours = approvedClockHoursByDate.get(date) ?? 0
+    return dailyTips > 0 || dailyHours > 0 ? [{ date, hours: dailyHours, tips: dailyTips }] : []
   })
-
   const hours = distributions.reduce((sum, dist) => sum + dist.hours, 0)
   const tips = distributions.reduce((sum, dist) => sum + dist.tips, 0)
   const baseWages = hours * Number(employee.hourly_wage ?? 0)
-  const guaranteedTopUp = distributions.reduce((sum, dist) => {
-    const guaranteedTarget = dist.hours * Number(employee.guaranteed_hourly ?? 0)
-    const shiftBaseWage = dist.hours * Number(employee.hourly_wage ?? 0)
-    return sum + Math.max(0, guaranteedTarget - (shiftBaseWage + dist.tips))
-  }, 0)
+  const guaranteedTopUp = distributions.reduce((sum, dist) => sum + getDailyGuaranteeTopUp(employee, dist.hours, dist.tips), 0)
   const totalEarnings = baseWages + tips + guaranteedTopUp
   const tipsPerHour = hours > 0 ? tips / hours : null
   const effectiveRate = hours > 0 ? totalEarnings / hours : null
-  const hasClockWarning = ((clockRecords ?? []) as Array<{ auto_clock_out: boolean; clock_out_at: string | null; approval_status: string }>)
-    .some(record => record.auto_clock_out || !record.clock_out_at || record.approval_status === 'pending_review')
+  const hasClockWarning = employeeClocks.some(record => record.auto_clock_out || !record.clock_out_at || record.approval_status === 'pending_review')
 
   const html = renderEmailShell(logoUrl, `
     <h2 style="color:#1a1a1a">${view === 'earnings' ? 'Earnings Report' : 'Tip Report'} — ${label}</h2>
     <p>Hi ${employee.name},</p>
+    ${calculatedDates.length > 0 ? `<p>Tips for ${calculatedDates.join(', ')} are calculated from eligible approved clock records. Review and save the distributions in Tip Distribution Editor.</p>` : ''}
     ${hasClockWarning ? `
       <div style="margin:0 0 16px;padding:12px 14px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:12px">
         Clock warning: one or more shifts in this report still need review. Hours use approved clock records only.

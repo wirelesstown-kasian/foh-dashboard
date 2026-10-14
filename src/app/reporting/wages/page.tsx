@@ -5,6 +5,7 @@ import { format, formatDistanceToNow } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { DepartmentTabs } from '@/components/reporting/DepartmentTabs'
 import { ReportingNav } from '@/components/reporting/ReportingNav'
+import { MissingTipDistributionNotice } from '@/components/reporting/MissingTipDistributionNotice'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
 import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns, useScheduledDepartmentIds, useSchedulesByRange, useTaskCompletions } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
@@ -14,13 +15,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { clockMatchesWorkDepartment, getClockWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { clockMatchesWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getDepartmentLabel, getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { exportReportToExcel, type ExcelColumn, type ExcelReportSheet } from '@/lib/reportExcel'
-import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleForWork } from '@/lib/tipEligibility'
-import { getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
+import { calculateDailyTipPreview, getSavedDailyTips, shouldRecalculateTips } from '@/lib/dailyTips'
+import { getDailyGuaranteeTopUp, getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
 import type { Employee, PaymentMethod, Schedule, ShiftClock } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
@@ -114,77 +114,6 @@ function recordMatchesDepartment(
   return clockMatchesWorkDepartment(record, department, employee, schedules)
 }
 
-function calculateDailyTipPreview({
-  employees,
-  clockRecords,
-  schedules = [],
-  report,
-}: {
-  employees: Employee[]
-  clockRecords: ReturnType<typeof useClockRecords>['clockRecords']
-  schedules?: Schedule[]
-  report: ReturnType<typeof useEodReports>['eodReports'][number]
-}) {
-  const employeeById = new Map(employees.map(employee => [employee.id, employee]))
-  const hoursByEmployee = new Map<string, number>()
-
-  for (const record of clockRecords) {
-    if (record.session_date !== report.session_date) continue
-    const employee = employeeById.get(record.employee_id)
-    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
-
-    const hours = getEffectiveClockHours(record)
-    if (hours <= 0) continue
-    hoursByEmployee.set(record.employee_id, (hoursByEmployee.get(record.employee_id) ?? 0) + hours)
-  }
-
-  const tipEntries = [...hoursByEmployee.entries()].map(([employeeId, hours]) => {
-    const employee = employeeById.get(employeeId)
-    return {
-      employee_id: employeeId,
-      hours_worked: hours,
-      tip_pool_hourly_rate: employee?.tip_pool_hourly_rate ?? null,
-    }
-  })
-  const tipResults = calculateTips(Number(report.tip_total ?? 0), tipEntries)
-
-  return new Map(
-    tipResults.map(result => [result.employee_id, {
-      hours: result.hours_worked,
-      tips: result.net_tip,
-    }])
-  )
-}
-
-function getSavedDailyTips(report: ReturnType<typeof useEodReports>['eodReports'][number]) {
-  const savedTips = new Map<string, SavedDailyTip>()
-
-  for (const distribution of report.tip_distributions ?? []) {
-    const current = savedTips.get(distribution.employee_id) ?? { hours: 0, tips: 0 }
-    savedTips.set(distribution.employee_id, {
-      hours: current.hours + Number(distribution.hours_worked ?? 0),
-      tips: current.tips + Number(distribution.net_tip ?? 0),
-    })
-  }
-
-  return savedTips
-}
-
-function shouldRecalculateTips(
-  savedTips: Map<string, SavedDailyTip>,
-  calculatedTips: Map<string, DailyTipPreview>
-) {
-  if (calculatedTips.size === 0) return false
-
-  for (const [employeeId, calculated] of calculatedTips) {
-    const saved = savedTips.get(employeeId)
-    if (!saved) return true
-    if (Math.abs(saved.hours - calculated.hours) > 0.01) return true
-  }
-
-  return false
-}
-
 function getDailyWageDetail({
   emp,
   date,
@@ -225,8 +154,7 @@ function getDailyWageDetail({
   if (hours <= 0 && tips <= 0) return null
 
   const baseWages = hours * Number(emp.hourly_wage ?? 0)
-  const guaranteedTarget = hours * Number(emp.guaranteed_hourly ?? 0)
-  const guaranteeTopUp = Math.max(0, guaranteedTarget - (baseWages + tips))
+  const guaranteeTopUp = getDailyGuaranteeTopUp(emp, hours, tips)
 
   return {
     date,
@@ -942,6 +870,7 @@ export default function WageReportPage() {
         backLabel="Back to Admin Board"
       />
       <ReportingNav />
+      <MissingTipDistributionNotice reports={eodReports} startDate={startDate} endDate={endDate} />
       <DepartmentTabs department={department} onChange={value => { setDepartment(value); setEmployeeFilter('all') }} />
       <div className="rounded-xl border bg-white p-5">
         {refreshMessage && (

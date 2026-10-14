@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { ReportingToolbar } from '@/components/reporting/ReportingToolbar'
-import { useClockRecords, useEmployees, useEodReports, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
+import { MissingTipDistributionNotice } from '@/components/reporting/MissingTipDistributionNotice'
+import { useClockRecords, useEmployees, useEodReports, useSchedulesByRange, useTaskCompletions, useTasks } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -57,9 +58,12 @@ export default function TaskPerformancePage() {
   const departmentLabel = department === 'all' ? 'All Staff' : getDepartmentLabel(department, departmentDefinitions)
   const monthStart = format(new Date(`${startDate}T12:00:00`), 'yyyy-MM-01')
   const monthEnd = format(new Date(new Date(`${endDate}T12:00:00`).getFullYear(), new Date(`${endDate}T12:00:00`).getMonth() + 1, 0), 'yyyy-MM-dd')
+  const monthSchedules = useSchedulesByRange(monthStart, monthEnd)
   const { filteredCompletions, employeeMonthStats, perfRows, totalTasks } = useMemo(
     () => buildPerformanceRows({
       employees: filteredEmployees,
+      tipEmployees: employees,
+      schedules: monthSchedules,
       completions,
       eodReports,
       clockRecords,
@@ -68,7 +72,7 @@ export default function TaskPerformancePage() {
       monthStart,
       monthEnd,
     }),
-    [clockRecords, completions, eodReports, filteredEmployees, startDate, endDate, monthStart, monthEnd]
+    [clockRecords, completions, employees, eodReports, filteredEmployees, monthSchedules, startDate, endDate, monthStart, monthEnd]
   )
   const taskById = useMemo(() => new Map(tasks.map(task => [task.id, task])), [tasks])
   const taskPointsByEmployeeId = useMemo(() => {
@@ -121,6 +125,7 @@ export default function TaskPerformancePage() {
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
+      <MissingTipDistributionNotice reports={eodReports} startDate={monthStart} endDate={monthEnd} />
       <div className="rounded-xl border bg-white p-5">
         <ReportingToolbar
           period={period}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
+import { MissingTipDistributionNotice } from '@/components/reporting/MissingTipDistributionNotice'
 import { useClockRecords, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
 import {
   historicalPayroll, historicalRevenue, monthlyTrendValues, nonOverlappingPayroll, nonOverlappingSales, periodRows,
@@ -1030,6 +1031,7 @@ export default function ReportingDashboardPage() {
         backLabel="Back to Admin Board"
       />
 
+      <MissingTipDistributionNotice reports={eodReports} startDate={startDate} endDate={endDate} />
       {historicalError && <p className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{historicalError} Dashboard totals below are incomplete.</p>}
       <div className="mb-5 rounded-xl border bg-white p-4">
         <div className="flex flex-wrap items-center gap-3">

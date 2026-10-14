@@ -1,8 +1,7 @@
 import { EodReport, Employee, PaymentMethod, PayrollPaymentAllocations, PayrollRun, PayrollRunItem, Schedule, ShiftClock } from '@/lib/types'
-import { clockMatchesWorkDepartment, getClockWorkDepartment, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { clockMatchesWorkDepartment, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments } from '@/lib/employeeSelect'
-import { calculateTips } from '@/lib/tipCalc'
-import { isTipEligibleForWork } from '@/lib/tipEligibility'
+import { getDailyReportTips } from '@/lib/dailyTips'
 
 export type PayrollDraftRow = {
   employee_id: string
@@ -146,67 +145,13 @@ export function getPayrollTotals(rows: Array<Pick<PayrollDraftRow, 'payment_meth
   }, { cash: 0, check: 0, ach: 0, gross: 0, deductions: 0, net: 0 })
 }
 
-type DailyPayrollTip = {
-  hours: number
-  tips: number
+export function getDailyGuaranteeTopUp(employee: Pick<Employee, 'hourly_wage' | 'guaranteed_hourly'> | null | undefined, hours: number, tips: number) {
+  const baseWages = hours * Number(employee?.hourly_wage ?? 0)
+  return Math.max(0, hours * Number(employee?.guaranteed_hourly ?? 0) - baseWages - tips)
 }
 
 function addTipToMap(tipsByEmployee: Map<string, number>, employeeId: string, tips: number) {
   tipsByEmployee.set(employeeId, (tipsByEmployee.get(employeeId) ?? 0) + Number(tips ?? 0))
-}
-
-function getSavedDailyTips(report: EodReport & { tip_distributions?: { employee_id: string; hours_worked?: number | null; net_tip: number }[] }) {
-  const savedTips = new Map<string, DailyPayrollTip>()
-  for (const distribution of report.tip_distributions ?? []) {
-    const current = savedTips.get(distribution.employee_id) ?? { hours: 0, tips: 0 }
-    savedTips.set(distribution.employee_id, {
-      hours: current.hours + Number(distribution.hours_worked ?? 0),
-      tips: current.tips + Number(distribution.net_tip ?? 0),
-    })
-  }
-  return savedTips
-}
-
-function getCalculatedDailyTipsForRecords(report: EodReport, employees: Employee[], clockRecords: ShiftClock[], schedules: Schedule[] = []) {
-  const employeeById = new Map(employees.map(employee => [employee.id, employee]))
-  const hoursByEmployee = new Map<string, number>()
-
-  for (const record of clockRecords) {
-    const employee = employeeById.get(record.employee_id)
-    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) continue
-
-    const hours = getEffectiveClockHours(record)
-    if (hours <= 0) continue
-    hoursByEmployee.set(record.employee_id, (hoursByEmployee.get(record.employee_id) ?? 0) + hours)
-  }
-
-  const tipResults = calculateTips(
-    Number(report.tip_total ?? 0),
-    [...hoursByEmployee.entries()].map(([employeeId, hours]) => ({
-      employee_id: employeeId,
-      hours_worked: hours,
-      tip_pool_hourly_rate: employeeById.get(employeeId)?.tip_pool_hourly_rate ?? null,
-    }))
-  )
-
-  return new Map(
-    tipResults.map(result => [result.employee_id, {
-      hours: result.hours_worked,
-      tips: result.net_tip,
-    }])
-  )
-}
-
-function shouldUseCalculatedDailyTips(savedTips: Map<string, DailyPayrollTip>, calculatedTips: Map<string, DailyPayrollTip>) {
-  if (calculatedTips.size === 0) return false
-
-  for (const [employeeId, calculated] of calculatedTips) {
-    const saved = savedTips.get(employeeId)
-    if (!saved) return true
-    if (Math.abs(saved.hours - calculated.hours) > 0.01) return true
-  }
-
-  return false
 }
 
 export function getSavedTipMap(
@@ -216,7 +161,8 @@ export function getSavedTipMap(
   employees: Employee[] = [],
   clockRecords: ShiftClock[] = [],
   department = 'all',
-  schedules: Schedule[] = []
+  schedules: Schedule[] = [],
+  excludedEmployeeDates: Set<string> = new Set()
 ) {
   const tipsByEmployee = new Map<string, number>()
   const employeeById = new Map(employees.map(employee => [employee.id, employee]))
@@ -238,15 +184,11 @@ export function getSavedTipMap(
 
   for (const report of reports) {
     if (report.session_date < startDate || report.session_date > endDate) continue
-    const savedTips = getSavedDailyTips(report)
-    const calculatedTips = getCalculatedDailyTipsForRecords(
-      report,
-      employees,
-      clockRecordsByDate.get(report.session_date) ?? [],
-      schedules
-    )
-    const dailyTips = shouldUseCalculatedDailyTips(savedTips, calculatedTips) ? calculatedTips : savedTips
+    const { tips: dailyTips } = getDailyReportTips({
+      report, employees, clockRecords: clockRecordsByDate.get(report.session_date) ?? [], schedules,
+    })
     for (const [employeeId, tip] of dailyTips) {
+      if (excludedEmployeeDates.has(`${employeeId}|${report.session_date}`)) continue
       if (department !== 'all' && !departmentEmployeeIdsByDate.get(report.session_date)?.has(employeeId)) continue
       addTipToMap(tipsByEmployee, employeeId, tip.tips)
     }
@@ -262,6 +204,8 @@ export function buildPayrollDraftRows({
   startDate,
   endDate,
   schedules = [],
+  tipClockRecords = clockRecords,
+  excludedTipEmployeeDates = new Set(),
 }: {
   employees: Employee[]
   clockRecords: ShiftClock[]
@@ -270,8 +214,13 @@ export function buildPayrollDraftRows({
   startDate: string
   endDate: string
   schedules?: Schedule[]
+  tipClockRecords?: ShiftClock[]
+  excludedTipEmployeeDates?: Set<string>
 }) {
-  const tipsByEmployee = getSavedTipMap(eodReports, startDate, endDate, employees, clockRecords, department, schedules)
+  const tipsByEmployee = getSavedTipMap(eodReports, startDate, endDate, employees, tipClockRecords, department, schedules, excludedTipEmployeeDates)
+  const tipsByDate = new Map(eodReports
+    .filter(report => report.session_date >= startDate && report.session_date <= endDate)
+    .map(report => [report.session_date, getSavedTipMap([report], report.session_date, report.session_date, employees, tipClockRecords, department, schedules, excludedTipEmployeeDates)]))
   const employeeById = new Map(employees.map(employee => [employee.id, employee]))
   const clocksByEmployee = new Map<string, ShiftClock[]>()
 
@@ -295,8 +244,13 @@ export function buildPayrollDraftRows({
       const hasTipData = tipsByEmployee.has(employee.id)
       const tips = normalizeMoney(tipsByEmployee.get(employee.id) ?? 0)
       const baseWages = normalizeMoney(hours * Number(employee.hourly_wage ?? 0))
-      const guaranteeTarget = normalizeMoney(hours * Number(employee.guaranteed_hourly ?? 0))
-      const guaranteeTopUp = normalizeMoney(Math.max(0, guaranteeTarget - (baseWages + tips)))
+      const hoursByDate = new Map<string, number>()
+      for (const clock of employeeClocks) {
+        hoursByDate.set(clock.session_date, (hoursByDate.get(clock.session_date) ?? 0) + getEffectiveClockHours(clock))
+      }
+      const guaranteeTopUp = normalizeMoney([...hoursByDate].reduce((sum, [date, dayHours]) => (
+        sum + getDailyGuaranteeTopUp(employee, dayHours, tipsByDate.get(date)?.get(employee.id) ?? 0)
+      ), 0))
       const paymentMethod: PaymentMethod | '' = employee.payment_method ?? ''
       const baseRow = {
         employee_id: employee.id,

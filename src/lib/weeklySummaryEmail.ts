@@ -2,7 +2,8 @@ import { escapeHtml, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { getEmailSettings } from '@/lib/appSettings'
 import { buildPerformanceRows } from '@/lib/performanceReporting'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
-import { Employee, ShiftClock, TaskCompletion } from '@/lib/types'
+import { Employee, Schedule, ShiftClock, TaskCompletion } from '@/lib/types'
+import { getDailyReportTips } from '@/lib/dailyTips'
 
 function formatDateOnly(date: Date) {
   return date.toISOString().split('T')[0]
@@ -52,6 +53,8 @@ export async function sendPreviousWeekSummaryEmail({
 
   const { weekStart, weekEnd } = getPreviousTuesdaySundayRange(referenceDate)
   const { monthStart, monthEnd } = getMonthRange(weekEnd)
+  const clockRangeStart = weekStart < monthStart ? weekStart : monthStart
+  const clockRangeEnd = weekEnd > monthEnd ? weekEnd : monthEnd
   const logoUrl = `${appUrl}/new%20logo%20V3.jpg`
 
   const [
@@ -62,6 +65,7 @@ export async function sendPreviousWeekSummaryEmail({
     shiftClocksRes,
     cashEntriesRes,
     allCashReportsRes,
+    schedulesRes,
   ] = await Promise.all([
     supabaseAdmin
       .from('eod_reports')
@@ -83,8 +87,8 @@ export async function sendPreviousWeekSummaryEmail({
     supabaseAdmin
       .from('shift_clocks')
       .select('*')
-      .gte('session_date', monthStart)
-      .lte('session_date', monthEnd),
+      .gte('session_date', clockRangeStart)
+      .lte('session_date', clockRangeEnd),
     supabaseAdmin
       .from('cash_balance_entries')
       .select('entry_date, entry_type, amount')
@@ -94,6 +98,7 @@ export async function sendPreviousWeekSummaryEmail({
       .select('session_date, actual_cash_on_hand')
       .gt('actual_cash_on_hand', 0)
       .lte('session_date', weekEnd),
+    supabaseAdmin.from('schedules').select('employee_id, date, department').gte('date', clockRangeStart).lte('date', clockRangeEnd),
   ])
 
   if (weekReportsRes.error) {
@@ -111,16 +116,7 @@ export async function sendPreviousWeekSummaryEmail({
   if (shiftClocksRes.error) throw new Error(shiftClocksRes.error.message)
   if (cashEntriesRes.error) throw new Error(cashEntriesRes.error.message)
   if (allCashReportsRes.error) throw new Error(allCashReportsRes.error.message)
-
-  const allEodIds = weekReports.map((report: { id: string }) => report.id)
-  const { data: allDists, error: distsError } = await supabaseAdmin
-    .from('tip_distributions')
-    .select('*, employee:employees(id, name)')
-    .in('eod_report_id', allEodIds)
-
-  if (distsError) {
-    throw new Error(distsError.message)
-  }
+  if (schedulesRes.error) throw new Error(schedulesRes.error.message)
 
   const totalRevenue = weekReports.reduce((sum: number, report: { revenue_total: number }) => sum + Number(report.revenue_total), 0)
   const totalNetRevenue = weekReports.reduce((sum: number, report: { revenue_total: number; sales_tax: number | null; tip_total: number }) => (
@@ -149,8 +145,10 @@ export async function sendPreviousWeekSummaryEmail({
   const endingCashOnHand = totalCashOnHandByDate.get(weekReports[weekReports.length - 1]?.session_date ?? '') ?? 0
 
   const employees = (employeesRes.data ?? []) as Employee[]
+  const schedules = (schedulesRes.data ?? []) as Schedule[]
   const { perfRows } = buildPerformanceRows({
     employees,
+    schedules,
     completions: (taskCompletionsRes.data ?? []) as TaskCompletion[],
     eodReports: monthlyReportsRes.data ?? [],
     clockRecords: (shiftClocksRes.data ?? []) as ShiftClock[],
@@ -188,14 +186,18 @@ export async function sendPreviousWeekSummaryEmail({
 
   type EmployeeTipSummary = { employeeId: string; name: string; hours: number; total: number; tipPerHour: number; performanceScore: number | null }
   const employeeTipMap = new Map<string, EmployeeTipSummary>()
-  for (const distribution of (allDists ?? []) as Array<{ employee_id: string; employee?: { id: string; name: string } | null; hours_worked: number; net_tip: number }>) {
-    const employeeId = distribution.employee_id
-    const name = distribution.employee?.name ?? employeeId
-    const existing = employeeTipMap.get(employeeId) ?? { employeeId, name, hours: 0, total: 0, tipPerHour: 0, performanceScore: performanceByEmployeeId.get(employeeId) ?? null }
-    existing.hours += Number(distribution.hours_worked)
-    existing.total += Number(distribution.net_tip)
-    existing.tipPerHour = existing.hours > 0 ? existing.total / existing.hours : 0
-    employeeTipMap.set(employeeId, existing)
+  const calculatedTipDates: string[] = []
+  for (const report of weekReports) {
+    const { tips, source } = getDailyReportTips({ report, employees, clockRecords: (shiftClocksRes.data ?? []) as ShiftClock[], schedules })
+    if (source === 'calculated') calculatedTipDates.push(report.session_date)
+    for (const [employeeId, tip] of tips) {
+      const name = employees.find(employee => employee.id === employeeId)?.name ?? employeeId
+      const existing = employeeTipMap.get(employeeId) ?? { employeeId, name, hours: 0, total: 0, tipPerHour: 0, performanceScore: performanceByEmployeeId.get(employeeId) ?? null }
+      existing.hours += tip.hours
+      existing.total += tip.tips
+      existing.tipPerHour = existing.hours > 0 ? existing.total / existing.hours : 0
+      employeeTipMap.set(employeeId, existing)
+    }
   }
 
   const employeeTipSummaries = Array.from(employeeTipMap.values()).sort((left, right) => right.total - left.total)
@@ -241,6 +243,7 @@ export async function sendPreviousWeekSummaryEmail({
       </tr>
     </table>
     <h3>Weekly Tips by Employee</h3>
+    ${calculatedTipDates.length > 0 ? `<p>Tips for ${calculatedTipDates.join(', ')} are calculated from eligible approved clock records. Review and save the distributions in Tip Distribution Editor.</p>` : ''}
     <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
       <tr style="background:#f5f5f5"><th>Name</th><th>Total Hours</th><th>Total Tips</th><th>Tip / Hr</th><th>Performance Score</th></tr>
       ${employeeTipRows}

@@ -213,7 +213,7 @@ test('tip editor saves missing employee distributions and refreshes the report u
     tip_share: 1, net_tip: 85, house_deduction: 15, adjustment: 0, memo: '' }]
   let refreshedReports
   const handlers = pageHandlers('src/app/payroll/tip-distribution-editor/page.tsx', ['save'], {
-    ...globals, report: { ...state.report, cash_tip: 0, tip_total: 100, revenue_total: 1100, batch_total: 1000, cash_total: 100 },
+    ...globals, ...load('src/lib/eodVariance.ts'), report: { ...state.report, cash_tip: 0, tip_total: 100, revenue_total: 1100, batch_total: 1000, cash_total: 100 },
     totalTip: 100, isPaidDate: false, hasAdjustmentWithoutMemo: false, calculatedRows: draft, currentRows: draft,
     roundMoney: value => Math.round(value * 100) / 100, formatCurrency: value => `$${value}`,
     EMPLOYEE_PUBLIC_SELECT: 'id,name', setMessage: value => { state.notice = value },
@@ -245,6 +245,25 @@ test('tip editor refuses paid dates and empty clock drafts without touching repo
     assert.equal(state.calls.length, 0)
     assert.equal(state.tips.length, 1)
   }
+})
+
+test('tip total correction keeps cash variance and net revenue consistent', async () => {
+  const { state, globals } = setupSaveFlow()
+  const original = { ...state.report, cash_tip: 10, tip_total: 10, revenue_total: 1110, batch_total: 1010, cash_total: 100, sales_tax: 0, actual_cash_on_hand: 120 }
+  const draft = [{ employee_id: 'server', hours_worked: 5, tip_share: 1, net_tip: 4.25, house_deduction: 0.75, adjustment: 0, memo: '' }]
+  const handlers = pageHandlers('src/app/payroll/tip-distribution-editor/page.tsx', ['save'], {
+    ...globals, ...load('src/lib/eodVariance.ts'), report: original,
+    totalTip: 5, isPaidDate: false, hasAdjustmentWithoutMemo: false, calculatedRows: draft, currentRows: draft,
+    roundMoney: value => Math.round(value * 100) / 100, formatCurrency: value => `$${value}`,
+    EMPLOYEE_PUBLIC_SELECT: 'id,name', setMessage: value => { state.notice = value },
+    notifyReportingDataChanged() {}, setRows() {}, setTotalTipInput() {}, setEodReports() {},
+  })
+  await handlers.save()
+  assert.match(state.notice, /Tip distribution saved/)
+  assert.equal(state.report.cash_deposit, 105)
+  assert.equal(state.report.cash_variance, 15)
+  assert.equal(state.report.cc_tip + state.report.cash_tip, 5)
+  assert.equal(state.report.revenue_total - state.report.tip_total, original.revenue_total - original.tip_total)
 })
 
 test('staff can replace only their own current-day tips using a bodyless DELETE', async () => {
