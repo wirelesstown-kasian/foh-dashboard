@@ -1,13 +1,13 @@
 # EOD and connected-report audit — October 14, 2026
 
-Local corrections are ready for review. Production data has not been repaired or recalculated, and these corrections have not been pushed.
+Local reporting corrections are ready for review and have not been pushed. The subsequent October 13 record repair is documented below.
 
 ## Production checks
 
 - October 1–13: 11 EOD records and 11 distinct session dates.
 - Tip components, gross/payment totals, and cash deposits: zero mismatches above $0.03.
 - Ten completed EOD distributions reconcile to the 85% employee pool within $0.01; existing historical results were preserved.
-- October 13 has an EOD total but no saved employee distributions. It still needs review and an explicit save after deployment.
+- At the initial audit, October 13 had an EOD total but no saved employee distributions. This record was subsequently repaired as described below.
 - October 1–14: five payroll runs checked; run net totals and payout totals reconcile with their items within $0.03.
 - Vercel reported no grouped runtime errors in the three-day window. Handled HTTP errors, including the previously reproduced Invalid JSON response, are not ruled out by that result.
 
@@ -37,4 +37,12 @@ Local corrections are ready for review. Production data has not been repaired or
 
 ## Release follow-up
 
-Push only when James explicitly requests it, as required by AGENTS.md. After deployment, review October 13 in Tip Distribution Editor and save its employee distributions. EOD email timing is currently Manual; use Send Report for the missed report after confirming its saved tips.
+Push only when James explicitly requests it, as required by AGENTS.md. October 13's distributions are now saved; refresh Tip Distribution Editor to view them. EOD email timing is currently Manual; use Send Report for the missed report after confirming its saved tips.
+
+## October 13 record repair
+
+James explicitly requested repair of yesterday's record on October 14. Rechecked that the October 13 EOD had zero employee tip rows and no covering paid payroll run. The repair calculated and inserted the missing rows inside Supabase, without exporting detailed employee identities or attendance into a fixture.
+
+The transaction locked and rechecked the report/source records, refused existing distributions or changed inputs, and verified its totals before committing. It inserted only tip distribution rows and preserved the entire EOD header.
+
+Post-commit verification: three distinct employees, 23.96 approved tip hours, $605.74 employee tips, $106.89 house deduction, $712.63 total, and $0.00 reconciliation difference. Each row has positive approved hours and shift times. The report's card tips ($647.63), cash tips ($65.00), total tips, and original updated_at are unchanged. Live emails were not sent by this repair.
