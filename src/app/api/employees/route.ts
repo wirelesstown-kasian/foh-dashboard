@@ -267,20 +267,26 @@ async function writeEmployeeWithOptionalFallback(
   return { message: lastError?.message ?? 'Failed to save employee after optional column fallback' }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   if (!(await requireAdmin())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const status = req.nextUrl.searchParams.get('status') ?? 'active'
+  if (!['active', 'archived', 'all'].includes(status)) {
+    return NextResponse.json({ error: 'Invalid employee status' }, { status: 400 })
   }
 
   let data: unknown[] | null = null
   let error: { message: string } | null = null
 
   for (const select of EMPLOYEE_SELECT_FALLBACKS) {
-    const result = await supabaseAdmin
+    let query = supabaseAdmin
       .from('employees')
       .select(select)
-      .eq('is_active', true)
       .order('name')
+    if (status !== 'all') query = query.eq('is_active', status === 'active')
+    const result = await query
 
     data = result.data as unknown[] | null
     error = result.error
@@ -400,7 +406,14 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { id, name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, tip_eligible, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = await req.json()
+  const payload = await req.json()
+  if (payload.action !== undefined) {
+    if (payload.action !== 'reactivate' || Object.keys(payload).some(key => !['action', 'id', 'pin'].includes(key))) {
+      return NextResponse.json({ error: 'Invalid employee action' }, { status: 400 })
+    }
+    return reactivateEmployee(payload)
+  }
+  const { id, name, phone, email, address, role, primary_department, schedule_departments, birth_date, pin, hourly_wage, guaranteed_hourly, tip_pool_hourly_rate, tip_eligible, meal_break_threshold_hours, commission_enabled, commission_note, payment_method, login_enabled, login_password } = payload
   if (typeof id !== 'string' || !id) {
     return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
   }
@@ -544,6 +557,40 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json({ success: true })
+}
+
+async function reactivateEmployee({ id, pin }: { id: unknown; pin: unknown }) {
+  if (typeof id !== 'string' || !id) {
+    return NextResponse.json({ error: 'Employee id is required' }, { status: 400 })
+  }
+  if (!isValidPin(pin)) {
+    return NextResponse.json({ error: 'PIN must be 4 digits' }, { status: 400 })
+  }
+  const current = await supabaseAdmin.from('employees').select('id, is_active').eq('id', id).maybeSingle()
+  if (current.error) return NextResponse.json({ error: current.error.message }, { status: 500 })
+  if (!current.data) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+  if (current.data.is_active) return NextResponse.json({ error: 'Employee is already active. Refresh the list.' }, { status: 409 })
+
+  try {
+    const duplicate = await findDuplicatePin(pin, id)
+    if (duplicate) {
+      return NextResponse.json({ error: `PIN already belongs to ${duplicate.name}. Choose a different PIN.` }, { status: 409 })
+    }
+    const update = { is_active: true, login_enabled: false, login_password_hash: null, pin_hash: await hashPin(pin), pin_code: pin }
+    // Keep the original ID and financial/profile fields. Do not reconcile historical schedules.
+    for (const values of [update, withoutPinCode(update)]) {
+      const result = await supabaseAdmin.from('employees').update(values)
+        .eq('id', id).eq('is_active', false).select('id').maybeSingle()
+      if (result.error?.code === '23505') return NextResponse.json({ error: 'PIN is already in use. Choose a different PIN.' }, { status: 409 })
+      if (result.error && 'pin_code' in values && isMissingPinCodeColumn(result.error)) continue
+      if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 })
+      if (!result.data) return NextResponse.json({ error: 'Employee status changed. Refresh the list.' }, { status: 409 })
+      return NextResponse.json({ success: true, reactivated: true })
+    }
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to reactivate employee' }, { status: 500 })
+  }
+  return NextResponse.json({ error: 'Failed to reactivate employee' }, { status: 500 })
 }
 
 export async function DELETE(req: NextRequest) {

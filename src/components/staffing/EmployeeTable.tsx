@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Archive, Plus, Pencil, Gift, Check, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Archive, ArchiveRestore, Eye, Plus, Pencil, Gift, Check, ChevronDown, AlertTriangle } from 'lucide-react'
 import { format } from 'date-fns'
 import { isBirthdayToday } from '@/lib/dateUtils'
 import { getRoleColorTheme, getRoleLabel } from '@/lib/organization'
@@ -180,23 +180,38 @@ export function EmployeeTable() {
   const [filterRole, setFilterRole] = useState<string>('all')
   const [filterDepartment, setFilterDepartment] = useState<DepartmentFilter>('all')
   const [sortBy, setSortBy] = useState<SortOption>('name_asc')
+  const [status, setStatus] = useState<'active' | 'archived' | 'all'>('active')
+  const [search, setSearch] = useState('')
+  const [reactivateTarget, setReactivateTarget] = useState<Employee | null>(null)
+  const [reactivatePin, setReactivatePin] = useState('')
+  const [reactivateError, setReactivateError] = useState<string | null>(null)
+  const [reactivating, setReactivating] = useState(false)
+  const [archivingId, setArchivingId] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const viewingArchived = editTarget?.is_active === false
 
   const load = useCallback(async () => {
-    const employeesRes = await fetch('/api/employees', { cache: 'no-store' })
-    const employeeData = (await employeesRes.json().catch(() => ({}))) as { employees?: Employee[]; error?: string }
-    if (!employeesRes.ok) {
-      setSaveError(employeeData.error ?? 'Failed to load employees')
-      setEmployees([])
+    setLoading(true)
+    try {
+      const employeesRes = await fetch('/api/employees?status=all', { cache: 'no-store' })
+      const employeeData = (await employeesRes.json().catch(() => ({}))) as { employees?: Employee[]; error?: string }
+      if (!employeesRes.ok) {
+        setSaveError(employeeData.error ?? 'Failed to load employees')
+        setEmployees([])
+        return
+      }
+      setEmployees(employeeData.employees ?? [])
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to load employees')
+    } finally {
       setLoading(false)
-      return
     }
-    setEmployees(employeeData.employees ?? [])
-    setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
   const openAdd = () => {
+    setSaveError(null)
     setEditTarget(null)
     setResetPinMode(true)
     setDepartmentDropdownOpen(false)
@@ -205,6 +220,7 @@ export function EmployeeTable() {
   }
 
   const openEdit = (emp: Employee) => {
+    setSaveError(null)
     const scheduleDepartments = getEmployeeScheduleDepartments(emp)
     const nameParts = splitEmployeeName(emp.name)
     setEditTarget(emp)
@@ -239,6 +255,7 @@ export function EmployeeTable() {
   }
 
   const handleSave = async () => {
+    if (viewingArchived) return
     const name = getFullName(form)
     if (!name) return
     if (!form.role) {
@@ -317,14 +334,54 @@ export function EmployeeTable() {
 
   const handleArchive = async (emp: Employee) => {
     if (!confirm(`Archive ${emp.name}? Financial history will be kept.`)) return
-    await fetch(`/api/employees?id=${encodeURIComponent(emp.id)}`, { method: 'DELETE' })
-    await load()
+    setArchivingId(emp.id)
+    setSaveError(null)
+    setNotice(null)
+    try {
+      const response = await fetch(`/api/employees?id=${encodeURIComponent(emp.id)}`, { method: 'DELETE' })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error ?? 'Failed to archive employee')
+      setNotice(`${emp.name} was archived. Their profile is available under Archived.`)
+      await load()
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to archive employee')
+    } finally {
+      setArchivingId(null)
+    }
+  }
+
+  const handleReactivate = async () => {
+    if (!reactivateTarget || !/^\d{4}$/.test(reactivatePin)) return
+    setReactivating(true)
+    setReactivateError(null)
+    setSaveError(null)
+    setNotice(null)
+    try {
+      const response = await fetch('/api/employees', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reactivate', id: reactivateTarget.id, pin: reactivatePin }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error ?? 'Failed to reactivate employee')
+      setNotice(`${reactivateTarget.name} is active again. App login is off; enable it in Edit Employee if needed.`)
+      setReactivateTarget(null)
+      setStatus('active')
+      await load()
+    } catch (error) {
+      setReactivateError(error instanceof Error ? error.message : 'Failed to reactivate employee')
+    } finally {
+      setReactivating(false)
+    }
   }
 
   const filtered = employees.filter(employee => {
+    const statusMatches = status === 'all' || (status === 'active' ? employee.is_active : !employee.is_active)
+    const query = search.trim().toLowerCase()
+    const searchMatches = !query || [employee.name, employee.email, employee.phone].some(value => value?.toLowerCase().includes(query))
     const roleMatches = filterRole === 'all' || employee.role === filterRole
     const departmentMatches = filterDepartment === 'all' || getEmployeeScheduleDepartments(employee).includes(filterDepartment)
-    return roleMatches && departmentMatches
+    return statusMatches && searchMatches && roleMatches && departmentMatches
   })
   const sorted = [...filtered].sort((a, b) => {
     switch (sortBy) {
@@ -374,9 +431,18 @@ export function EmployeeTable() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2" aria-label="Employee status">
+          {(['active', 'archived', 'all'] as const).map(value => (
+            <Button key={value} variant={status === value ? 'default' : 'outline'} size="sm"
+              aria-pressed={status === value} onClick={() => setStatus(value)}>
+              {value === 'active' ? 'Active' : value === 'archived' ? 'Archived' : 'All'}
+              {' '}({employees.filter(employee => value === 'all' || (value === 'active' ? employee.is_active : !employee.is_active)).length})
+            </Button>
+          ))}
+        </div>
         <div className="flex flex-wrap items-center justify-end gap-3">
+          <Input className="w-56" aria-label="Search employees" placeholder="Search name, email, phone" value={search} onChange={event => setSearch(event.target.value)} />
           <Select value={filterDepartment} onValueChange={(v: string | null) => v && setFilterDepartment(v)}>
             <SelectTrigger className="w-36">
               <span className={filterDepartment === 'all' ? 'text-muted-foreground' : ''}>
@@ -429,10 +495,14 @@ export function EmployeeTable() {
         </div>
       </div>
 
+      {notice && <p role="status" className="mb-4 rounded-md border bg-muted px-3 py-2 text-sm">{notice}</p>}
+      {saveError && !dialogOpen && <p role="alert" className="mb-4 text-sm text-red-600">{saveError}</p>}
+      {status === 'archived' && <p className="mb-4 text-sm text-muted-foreground">Review archived employee profiles or reactivate them with their saved settings.</p>}
+
       {loading ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : (
-        <Table className="min-w-[900px] table-fixed">
+        <Table className="min-w-[1000px] table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-32">Name</TableHead>
@@ -445,7 +515,7 @@ export function EmployeeTable() {
               <TableHead className="w-20">Tips</TableHead>
               <TableHead className="w-20">Payroll</TableHead>
               <TableHead className="w-28">Birthday</TableHead>
-              <TableHead className="w-20 text-right">Actions</TableHead>
+              <TableHead className="w-40 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -458,6 +528,7 @@ export function EmployeeTable() {
                         <Gift className="w-4 h-4 shrink-0 text-pink-500" />
                       )}
                     </span>
+                    {!emp.is_active && <Badge variant="outline" className="mt-1">Archived</Badge>}
                   </TableCell>
                   <TableCell>
                     <span className="rounded-full px-2 py-0.5 text-xs font-medium" style={getRoleColorTheme(emp.role, roleDefinitions).badgeStyle}>
@@ -487,14 +558,16 @@ export function EmployeeTable() {
                   <TableCell>
                     {emp.birth_date ? format(new Date(emp.birth_date + 'T00:00:00'), 'MMM d, yyyy') : '—'}
                   </TableCell>
-                  <TableCell className="w-20 pr-2">
-                    <div className="grid grid-cols-2 justify-end gap-1">
-                      <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openEdit(emp)} title="Edit employee">
-                        <Pencil className="w-4 h-4" />
+                  <TableCell className="w-40 pr-2">
+                    <div className="flex justify-end gap-1">
+                      <Button size="icon-sm" variant="ghost" className="h-7 w-7" onClick={() => openEdit(emp)} title={emp.is_active ? 'Edit employee' : 'View archived profile'} aria-label={`${emp.is_active ? 'Edit' : 'View profile for'} ${emp.name}`}>
+                        {emp.is_active ? <Pencil className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </Button>
-                      <Button size="icon-sm" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => handleArchive(emp)} title="Archive employee">
+                      {emp.is_active ? <Button size="icon-sm" variant="ghost" className="h-7 w-7 text-red-500 hover:text-red-700" disabled={archivingId !== null} onClick={() => handleArchive(emp)} title="Archive employee" aria-label={`Archive ${emp.name}`}>
                         <Archive className="w-4 h-4" />
-                      </Button>
+                      </Button> : <Button size="sm" variant="outline" onClick={() => { setReactivateTarget(emp); setReactivatePin(emp.pin_code ?? ''); setReactivateError(null) }}>
+                        <ArchiveRestore className="w-4 h-4" /> Reactivate
+                      </Button>}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -513,10 +586,12 @@ export function EmployeeTable() {
       <Dialog open={dialogOpen} onOpenChange={v => { if (!v) { setDialogOpen(false); setDepartmentDropdownOpen(false) } }}>
         <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1.5rem)] !max-w-6xl flex-col overflow-hidden p-6">
           <DialogHeader>
-            <DialogTitle>{editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
+            <DialogTitle>{viewingArchived ? 'Archived Employee Profile' : editTarget ? 'Edit Employee' : 'Add Employee'}</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 overflow-y-auto pr-1">
+            {viewingArchived && <p className="text-sm text-muted-foreground">This profile is archived. Reactivate the employee from the Archived list to make changes.</p>}
+            <fieldset disabled={viewingArchived} className="min-w-0 space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
               <div>
                 <Label>First Name *</Label>
@@ -733,21 +808,40 @@ export function EmployeeTable() {
                 />
               )}
             </div>
+            </fieldset>
             {saveError && (
               <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
                 {saveError}
               </p>
             )}
             <div className="flex gap-2 pt-2">
-              <Button variant="outline" className="flex-1" onClick={() => { setDialogOpen(false); setSaveError(null) }}>Cancel</Button>
-              <Button
+              <Button variant="outline" className="flex-1" onClick={() => { setDialogOpen(false); setSaveError(null) }}>{viewingArchived ? 'Close' : 'Cancel'}</Button>
+              {!viewingArchived && <Button
                 className="flex-1"
                 onClick={handleSave}
                 disabled={saving || !canSaveEmployee}
               >
                 {saving ? 'Saving…' : editTarget ? 'Save Changes' : 'Add Employee'}
-              </Button>
+              </Button>}
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reactivateTarget !== null} onOpenChange={open => { if (!open && !reactivating) setReactivateTarget(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Reactivate {reactivateTarget?.name}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Restore their saved role, departments, and pay settings. App login stays off until you enable it in Edit Employee.</p>
+          <div className="space-y-2">
+            <Label htmlFor="reactivate-pin">4-digit PIN</Label>
+            <Input id="reactivate-pin" inputMode="numeric" autoComplete="off" maxLength={4} value={reactivatePin}
+              disabled={reactivating} onChange={event => setReactivatePin(event.target.value.replace(/\D/g, '').slice(0, 4))} />
+            <p className="text-xs text-muted-foreground">Confirm or replace their PIN. It must be different from every active employee’s PIN.</p>
+          </div>
+          {reactivateError && <p role="alert" className="text-sm text-red-600">{reactivateError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" disabled={reactivating} onClick={() => setReactivateTarget(null)}>Cancel</Button>
+            <Button disabled={reactivating || !/^\d{4}$/.test(reactivatePin)} onClick={handleReactivate}>{reactivating ? 'Reactivating…' : 'Reactivate Employee'}</Button>
           </div>
         </DialogContent>
       </Dialog>
