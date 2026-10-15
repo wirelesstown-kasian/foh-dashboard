@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     if (reset_sheet) {
       const { data, error } = await supabaseAdmin
         .from('shift_clocks')
-        .select('*, employee:employees(name, role, primary_department, schedule_departments)')
+        .select('*, employee:employees!shift_clocks_employee_id_fkey(name, role, primary_department, schedule_departments)')
         .order('session_date', { ascending: false })
         .order('clock_in_at', { ascending: false })
 
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await supabaseAdmin
       .from('shift_clocks')
-      .select('*, employee:employees(name, role, primary_department, schedule_departments)')
+      .select('*, employee:employees!shift_clocks_employee_id_fkey(name, role, primary_department, schedule_departments)')
       .eq('id', record_id)
       .single()
 

@@ -36,20 +36,33 @@ export async function GET(req: NextRequest) {
   const results = []
 
   for (const publication of pendingPublications) {
-    const result = await sendWeeklyScheduleEmails({
-      weekStart: publication.week_start,
-      weekEnd: publication.week_end,
-      appUrl,
-    })
-
-    if (result.success) {
-      await supabaseAdmin
-        .from('schedule_publications')
-        .update({ email_sent_at: new Date().toISOString() })
-        .eq('week_start', publication.week_start)
+    try {
+      const result = await sendWeeklyScheduleEmails({
+        weekStart: publication.week_start,
+        weekEnd: publication.week_end,
+        appUrl,
+      })
+      if (result.success && result.sent > 0) {
+        const marked = await supabaseAdmin
+          .from('schedule_publications')
+          .update({ email_sent_at: new Date().toISOString() })
+          .eq('week_start', publication.week_start)
+        if (marked.error) throw new Error(`Emails sent, but failed to record sent status: ${marked.error.message}`)
+      }
+      results.push({
+        week_start: publication.week_start,
+        scheduled_send_at: publication.scheduled_send_at,
+        ...result,
+        success: result.success && result.sent > 0,
+      })
+    } catch (error) {
+      results.push({
+        week_start: publication.week_start,
+        scheduled_send_at: publication.scheduled_send_at,
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to send queued schedule emails',
+      })
     }
-
-    results.push({ week_start: publication.week_start, scheduled_send_at: publication.scheduled_send_at, ...result })
   }
 
   const hasErrors = results.some(result => !result.success)

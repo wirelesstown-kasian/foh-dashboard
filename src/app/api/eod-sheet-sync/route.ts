@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { resetEodSheetInGoogleSheet, syncEodReportToGoogleSheet, syncEodCashCountToGoogleSheet } from '@/lib/eodGoogleSheet'
 import { getDashboardViewer } from '@/lib/routeAuth'
-import { getBusinessDateString } from '@/lib/dateUtils'
+import { businessDateInChicago } from '@/lib/dashboardDataAccess'
 
 export async function POST(req: NextRequest) {
   const viewer = await getDashboardViewer()
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
         .select('session_date')
         .eq('id', report_id)
         .maybeSingle()
-      if (authorizedReport?.session_date !== getBusinessDateString()) {
+      if (authorizedReport?.session_date !== businessDateInChicago()) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
       }
     }

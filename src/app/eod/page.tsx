@@ -688,7 +688,7 @@ export default function EodPage() {
         throw new Error(data.errors?.length ? data.errors.join(' | ') : data.error || 'One or more EOD emails failed to send.')
       }
       const sentCount = typeof data.sent === 'number' ? data.sent : null
-      setSubmitResult({ success: true, message: `EOD report sent${sentCount !== null ? ` — ${sentCount} email${sentCount !== 1 ? 's' : ''} delivered` : ''}.` })
+      setSubmitResult({ success: true, message: `EOD report sent${sentCount !== null ? ` — ${sentCount} email${sentCount !== 1 ? 's' : ''} sent` : ''}.` })
       setSubmissionComplete(true)
       setShowConfirm(false)
     } catch (error) {

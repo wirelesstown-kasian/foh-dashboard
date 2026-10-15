@@ -14,7 +14,7 @@ function load(file, overrides = {}) {
   }).outputText
   vm.runInNewContext(code, {
     exports, require: name => overrides[name] ?? (name.startsWith('@/') ? load(`src/${name.slice(2)}.ts`, overrides) : require(name)),
-    process: { env: { RESEND_API_KEY: 'fake-test-key' } }, Error, Date, Intl, URL, Headers, Request, Response,
+    process: { env: { RESEND_API_KEY: 'fake-test-key' } }, Error, Date: overrides.Date ?? Date, Intl, URL, Headers, Request, Response,
     setTimeout: callback => callback(),
   }, { filename: file })
   return exports
@@ -142,8 +142,14 @@ function fakeDatabase(tables) {
   return { from(table) {
     const filters = []
     let single = false
+    let relationshipError = null
     const builder = {
-      select() { return this }, order() { return this },
+      select(columns) {
+        if (table === 'shift_clocks' && /employee:employees\(/.test(columns)) {
+          relationshipError = { code: 'PGRST201', message: "Could not embed because more than one relationship was found for 'shift_clocks' and 'employees'" }
+        }
+        return this
+      }, order() { return this },
       eq(key, value) { filters.push(row => row[key] === value); return this },
       gte(key, value) { filters.push(row => row[key] >= value); return this },
       lte(key, value) { filters.push(row => row[key] <= value); return this },
@@ -152,28 +158,38 @@ function fakeDatabase(tables) {
       single() { single = true; return this }, maybeSingle() { single = true; return this },
       then(resolve) {
         const data = (tables[table] ?? []).filter(row => filters.every(filter => filter(row)))
-        return Promise.resolve(tables.errorTable === table ? { data: null, error: { message: 'Test database error' } } : { data: single ? data[0] ?? null : data, error: null }).then(resolve)
+        return Promise.resolve(relationshipError ? { data: null, error: relationshipError } : tables.errorTable === table ? { data: null, error: { message: 'Test database error' } } : { data: single ? data[0] ?? null : data, error: null }).then(resolve)
       },
     }
     return builder
   } }
 }
-function emailSetup(file, tables = {}) {
+function emailSetup(file, tables = {}, options = {}) {
   const emails = []
   let sheetRows
+  let clockSheetRows
+  let clockSheetRecord
   const supabaseAdmin = fakeDatabase({ employees, eod_reports: reports, shift_clocks: clocks, schedules: [], ...tables })
-  const settings = { eod_tip_emails_enabled: true, wage_report_emails_enabled: true, weekly_summary_emails_enabled: true, weekly_summary_recipient: 'manager@example.invalid', from_name: 'Test', role_definitions: [] }
+  const settings = { eod_tip_emails_enabled: true, eod_admin_summary_enabled: true, eod_report_email: 'owner@example.invalid', wage_report_emails_enabled: true, weekly_summary_emails_enabled: true, weekly_summary_recipient: 'manager@example.invalid', from_name: 'Test', role_definitions: [] }
   const loadedModule = load(file, {
+    Date: options.Date ?? Date,
     '@/lib/supabaseAdmin': { supabaseAdmin },
     'next/headers': { cookies: async () => ({ get: () => ({ value: 'test-manager' }) }) },
     '@/lib/adminSession': { ADMIN_SESSION_COOKIE: 'manager', hasManagerAccess: async () => true },
-    '@/lib/routeAuth': { getDashboardViewer: async () => ({ isManager: true }) },
+    '@/lib/routeAuth': { getDashboardViewer: async () => options.viewer ?? ({ isManager: true }) },
     '@/lib/appSettings': { getEmailSettings: async () => settings, getAppSettings: async () => settings },
     '@/lib/emailUtils': { buildEmailDocument: (logo, title, html) => html, renderEmailShell: (logo, html) => html, escapeHtml: value => String(value), formatTime: value => value ?? '', sendEmail: async email => { emails.push(email) } },
-    '@/lib/eodGoogleSheet': { resetWageReportSheetInGoogleSheet: async (rows) => { sheetRows = rows; return { success: true } } },
+    '@/lib/eodGoogleSheet': {
+      resetWageReportSheetInGoogleSheet: async rows => { sheetRows = rows; return { success: true } },
+      resetClockRecordsSheetInGoogleSheet: async rows => { clockSheetRows = rows; return { success: true } },
+      syncClockRecordToGoogleSheet: async record => { clockSheetRecord = record; return { success: true } },
+      syncEodReportToGoogleSheet: async () => ({ success: true }),
+      syncEodCashCountToGoogleSheet: async () => ({ success: true }),
+    },
   })
   const post = payload => loadedModule.POST(new NextRequest('http://app.test/api/test', { method: 'POST', body: JSON.stringify(payload), headers: { 'content-type': 'application/json' } }))
-  return { module: loadedModule, post, emails, sheetRows: () => sheetRows }
+  return { module: loadedModule, post, emails, sheetRows: () => sheetRows,
+    clockSheetRows: () => clockSheetRows, clockSheetRecord: () => clockSheetRecord }
 }
 
 test('server wage email includes calculated tips and approved wages on days without an EOD', async () => {
@@ -218,6 +234,8 @@ test('EOD email weekly totals include its unsaved distribution day', async () =>
   const email = setup.emails.find(email => email.to === alice.email)
   assert.ok(email)
   assert.match(email.html, /\$212\.50/)
+  assert.equal(setup.emails.filter(email => email.subject.startsWith('Your Tip')).length, 2)
+  assert.equal(setup.emails.filter(email => email.to === 'owner@example.invalid').length, 1)
 })
 
 test('worksheet employee refresh and add keep the full pool and select the intended employee', () => {
@@ -296,4 +314,35 @@ test('paid clock details stay in the worked department for staff assigned to mul
     department: 'server', startDate: '2026-10-13', endDate: '2026-10-14', schedules: [] })
   assert.equal(records.length, 1)
   assert.equal(records[0].session_date, '2026-10-13')
+})
+
+test('clock-sheet reset and single-record sync select the worked employee relationship', async () => {
+  const setup = emailSetup('src/app/api/clock-records-sheet-sync/route.ts')
+  assert.equal((await setup.post({ reset_sheet: true })).status, 200)
+  assert.equal(setup.clockSheetRows().length, 4)
+  assert.equal((await setup.post({ record_id: clocks[0].id })).status, 200)
+  assert.equal(setup.clockSheetRecord().employee.id, 'alice')
+})
+
+test('staff can send and sync their Chicago business-day EOD after the UTC date changes', async () => {
+  const previousTimezone = process.env.TZ
+  process.env.TZ = 'UTC'
+  const instant = '2026-10-15T04:30:00Z' // October 14, 11:30 p.m. in Chicago.
+  class FixedDate extends Date {
+    constructor(...args) { super(...(args.length > 0 ? args : [instant])) }
+    static now() { return new Date(instant).getTime() }
+  }
+  try {
+    const options = { Date: FixedDate, viewer: { isManager: false, employeeId: 'alice', role: 'server' } }
+    const email = emailSetup('src/app/api/send-eod-email/route.ts', {}, options)
+    assert.equal((await email.post({ eod_report_id: reports[1].id })).status, 200)
+    assert.equal(email.emails.length, 3)
+    const sync = emailSetup('src/app/api/eod-sheet-sync/route.ts', {}, options)
+    assert.equal((await sync.post({ report_id: reports[1].id })).status, 200)
+    assert.equal((await email.post({ eod_report_id: reports[0].id })).status, 403)
+    assert.equal((await sync.post({ report_id: reports[0].id })).status, 403)
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ
+    else process.env.TZ = previousTimezone
+  }
 })

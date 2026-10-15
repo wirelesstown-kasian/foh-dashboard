@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { escapeHtml, formatTime, renderEmailShell, sendEmail } from '@/lib/emailUtils'
 import { getEmailSettings } from '@/lib/appSettings'
 import { getDashboardViewer } from '@/lib/routeAuth'
-import { getBusinessDateString } from '@/lib/dateUtils'
+import { businessDateInChicago } from '@/lib/dashboardDataAccess'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
         .select('session_date')
         .eq('id', eod_report_id)
         .maybeSingle()
-      if (authorizedReport?.session_date !== getBusinessDateString()) {
+      if (authorizedReport?.session_date !== businessDateInChicago()) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
       }
     }
@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
         .eq('date', report.session_date),
       supabaseAdmin
         .from('shift_clocks')
-        .select('*, employee:employees(id, name, email, role, primary_department, schedule_departments, tip_pool_hourly_rate, tip_eligible)')
+        .select('*, employee:employees!shift_clocks_employee_id_fkey(id, name, email, role, primary_department, schedule_departments, tip_pool_hourly_rate, tip_eligible)')
         .eq('session_date', report.session_date),
     ])
     if (sessionSchedulesRes.error) throw new Error(sessionSchedulesRes.error.message)
