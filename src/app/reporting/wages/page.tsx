@@ -15,12 +15,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { clockMatchesWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { clockMatchesWorkDepartment, getClockWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getDepartmentLabel, getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { exportReportToExcel, type ExcelColumn, type ExcelReportSheet } from '@/lib/reportExcel'
 import { calculateDailyTipPreview, getSavedDailyTips, shouldRecalculateTips } from '@/lib/dailyTips'
 import { getDailyGuaranteeTopUp, getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
+import { reconcileWageRows, summarizeRestaurantTips, wageDetailMatchesPayroll } from '@/lib/wageReportReconciliation'
 import type { Employee, PaymentMethod, Schedule, ShiftClock } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
@@ -38,6 +39,8 @@ type ReportPaymentMethod = PaymentMethod | 'unknown'
 
 type WageDetailRow = {
   date: string
+  workDepartment?: string
+  sourceRunId?: string
   hours: number
   mealBreakMinutes: number
   tips: number
@@ -65,6 +68,8 @@ type WageSummaryRow = {
   hasAutoClockOut: boolean
   hasOpenClock: boolean
   hasMissingMealBreak: boolean
+  pendingEarnings?: number
+  legacyEarnings?: number
 }
 
 type DailyTipPreview = {
@@ -86,7 +91,7 @@ function formatPaymentBreakdown(breakdown: Record<ReportPaymentMethod, number>) 
     .filter(method => breakdown[method] > 0)
     .map(method => `${paymentMethodLabel(method)} ${formatCurrency(breakdown[method])}`)
   if (breakdown.unknown > 0) parts.push(`Unknown ${formatCurrency(breakdown.unknown)}`)
-  return parts.length > 0 ? parts.join(' + ') : 'Unknown'
+  return parts.length > 0 ? parts.join(' + ') : 'Not recorded'
 }
 
 function formatMealBreakMinutes(minutes: number) {
@@ -158,6 +163,10 @@ function getDailyWageDetail({
 
   return {
     date,
+    workDepartment: department !== 'all' ? department : (() => {
+      const departments = new Set(matchingClockRecords.map(record => getClockWorkDepartment(record, emp, schedules)))
+      return departments.size === 1 ? [...departments][0] : undefined
+    })(),
     hours,
     mealBreakMinutes,
     tips,
@@ -192,6 +201,7 @@ export default function WageReportPage() {
   const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null)
   const [expandedDetailGroupKey, setExpandedDetailGroupKey] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
+  const [unmatchedOpen, setUnmatchedOpen] = useState(false)
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -354,22 +364,6 @@ export default function WageReportPage() {
     return firstWorksheetRun
   }, [payrollRuns, todayDate])
 
-  const payoutStatus = useMemo(() => {
-    if (matchingPayrollRun && matchingPayrollRun.pay_date <= todayDate) return 'created'
-    if (completedPayrollRuns.length > 0) return 'partial'
-    return 'preview'
-  }, [completedPayrollRuns.length, matchingPayrollRun, todayDate])
-
-  const payoutStatusTotals = useMemo(() => {
-    const sourceRuns = matchingPayrollRun && matchingPayrollRun.pay_date <= todayDate ? [matchingPayrollRun] : completedPayrollRuns
-    return sourceRuns.reduce((totals, run) => ({
-      cash: totals.cash + Number(run.total_cash ?? 0),
-      check: totals.check + Number(run.total_check ?? 0),
-      ach: totals.ach + Number(run.total_ach ?? 0),
-      net: totals.net + Number(run.total_net ?? 0),
-    }), { cash: 0, check: 0, ach: 0, net: 0 })
-  }, [completedPayrollRuns, matchingPayrollRun, todayDate])
-
   const detailRowsByEmployeeId = useMemo(() => {
     const rangeReports = eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate)
     const reportByDate = new Map(rangeReports.map(report => [report.session_date, report]))
@@ -455,11 +449,15 @@ export default function WageReportPage() {
     for (const run of completedPayrollRuns) {
       for (const item of run.payroll_run_items ?? []) {
         if (department !== 'all' && item.department !== department) continue
-        if (detailMap.get(item.employee_id ?? '')?.length) continue
+        const key = item.employee_id ?? item.id
+        const existingDetails = detailMap.get(key) ?? []
+        if (existingDetails.some(detail => !detail.sourceRunId)) continue
         const savedAmount = Number(item.hours ?? 0) + Number(item.tips ?? 0) + Number(item.base_wages ?? 0) + Number(item.guarantee_top_up ?? 0) + Number(item.commission ?? 0)
         if (savedAmount <= 0) continue
-        detailMap.set(item.employee_id ?? item.id, [{
+        detailMap.set(key, [...existingDetails, {
           date: run.pay_date,
+          sourceRunId: run.id,
+          workDepartment: item.department,
           hours: Number(item.hours ?? 0),
           mealBreakMinutes: 0,
           tips: Number(item.tips ?? 0),
@@ -517,8 +515,7 @@ export default function WageReportPage() {
       })
     }
 
-    if (savedItemsByEmployee.size > 0) {
-      return [...savedItemsByEmployee.values()].map(item => {
+    const paidRows: WageSummaryRow[] = [...savedItemsByEmployee.values()].map(item => {
           const existingEmployee = employees.find(employee => employee.id === item.employee_id)
           const emp: Employee = existingEmployee ?? {
             id: item.employee_id ?? item.id,
@@ -563,11 +560,11 @@ export default function WageReportPage() {
             hasMissingMealBreak: matchingClocks.some(record => shouldWarnMissingMealBreak(record, emp)),
           }
         })
-    }
 
-    return filteredEmployees
+    const previewRows: WageSummaryRow[] = filteredEmployees
       .map(emp => {
-        const detailRows = detailRowsByEmployeeId.get(emp.id) ?? []
+        const detailRows = (detailRowsByEmployeeId.get(emp.id) ?? []).filter(detail =>
+          !completedPayrollRuns.some(run => wageDetailMatchesPayroll(detail, emp.id, run, department)))
         const hours = detailRows.reduce((sum, row) => sum + row.hours, 0)
         const tips = detailRows.reduce((sum, row) => sum + row.tips, 0)
         const mealBreakMinutes = detailRows.reduce((sum, row) => sum + row.mealBreakMinutes, 0)
@@ -592,14 +589,13 @@ export default function WageReportPage() {
           commission: 0,
           deductions: 0,
           totalEarnings,
+          pendingEarnings: normalizeMoney(detailRows.filter(detail => !legacyWageCutoffDate || detail.date >= legacyWageCutoffDate).reduce((sum, detail) => sum + detail.totalEarnings, 0)),
+          legacyEarnings: normalizeMoney(detailRows.filter(detail => legacyWageCutoffDate && detail.date < legacyWageCutoffDate).reduce((sum, detail) => sum + detail.totalEarnings, 0)),
           tipRate: hours > 0 ? tips / hours : null,
           effectiveRate: hours > 0 ? totalEarnings / hours : null,
           paymentMethod: getReportPaymentMethod(emp.payment_method),
           paymentBreakdown: {
-            cash: emp.payment_method === 'cash' ? totalEarnings : 0,
-            check: emp.payment_method === 'check' ? totalEarnings : 0,
-            ach: emp.payment_method === 'ach' ? totalEarnings : 0,
-            unknown: emp.payment_method ? 0 : totalEarnings,
+            cash: 0, check: 0, ach: 0, unknown: 0,
           },
           hasAutoClockOut: matchingClocks.some(record => record.auto_clock_out),
           hasOpenClock: matchingClocks.some(record => !record.clock_out_at || isClockPending(record)),
@@ -607,13 +603,25 @@ export default function WageReportPage() {
         }
       })
       .filter(row => row.hours > 0 || row.tips > 0 || row.baseWages > 0)
-  }, [clockRecords, completedPayrollRuns, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, schedules, startDate])
+    const combined = new Map(paidRows.map(row => [row.emp.id, row]))
+    for (const preview of previewRows) {
+      const paid = combined.get(preview.emp.id)
+      if (!paid) { combined.set(preview.emp.id, preview); continue }
+      const merged = { ...paid, pendingEarnings: preview.pendingEarnings, legacyEarnings: preview.legacyEarnings }
+      for (const key of ['hours', 'mealBreakMinutes', 'tips', 'baseWages', 'guaranteeTopUp', 'commission', 'deductions', 'totalEarnings'] as const) merged[key] = paid[key] + preview[key]
+      merged.tipRate = merged.hours > 0 ? merged.tips / merged.hours : null
+      merged.effectiveRate = merged.hours > 0 ? merged.totalEarnings / merged.hours : null
+      combined.set(preview.emp.id, merged)
+    }
+    return [...combined.values()]
+  }, [clockRecords, completedPayrollRuns, department, detailRowsByEmployeeId, employees, filteredEmployees, endDate, legacyWageCutoffDate, schedules, startDate])
 
   const buildWageReportHtml = (row: WageSummaryRow) => {
     const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
     return `
       <h1>${row.emp.name} Wage Report</h1>
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
+      <p class="muted">Summary: full saved pay periods plus unmatched work in the selected dates. Daily rows use clock/EOD calculations; saved salary, commissions, and adjustments may differ. Snapshot-only rows are dated by pay date.</p>
       <div class="summary">
         <div class="card"><strong>Hours</strong><div class="metric">${row.hours.toFixed(2)} hrs</div></div>
         <div class="card"><strong>Paid By</strong><div class="metric">${formatPaymentBreakdown(row.paymentBreakdown)}</div></div>
@@ -625,7 +633,7 @@ export default function WageReportPage() {
       </div>
       <h3>Comp Summary</h3>
       <p>
-        ${row.emp.name} worked ${row.hours.toFixed(2)} hours for this period and earned ${formatCurrency(row.tips)} in tips.
+        Included saved pay periods and unmatched work total ${row.hours.toFixed(2)} hours and ${formatCurrency(row.tips)} in tips for ${row.emp.name}.
         ${view === 'earnings' ? ` Combined wages and guaranteed top-up brought total earnings to ${formatCurrency(row.totalEarnings)}.` : ''}
       </p>
       <table class="compact-table">
@@ -694,41 +702,24 @@ export default function WageReportPage() {
     [displayedRows]
   )
   const unpaidTotal = useMemo(() => {
-    const visibleEmployees = employeeFilter === 'all'
-      ? filteredEmployees
-      : filteredEmployees.filter(employee => employee.id === employeeFilter)
-
-    return normalizeMoney(visibleEmployees.reduce((total, employee) => {
-        const employeeRuns = completedPayrollRuns.filter(run =>
-        (run.payroll_run_items ?? []).some(item => item.employee_id === employee.id)
-      )
-      const unpaidEarnings = (detailRowsByEmployeeId.get(employee.id) ?? [])
-        .filter(detail => {
-          if (legacyWageCutoffDate && detail.date < legacyWageCutoffDate) return false
-          return !employeeRuns.some(run => (
-            (detail.date >= run.start_date && detail.date <= run.end_date) ||
-            detail.date === run.pay_date
-          ))
-        })
-        .reduce((sum, detail) => sum + detail.totalEarnings, 0)
-
-      return total + unpaidEarnings
-    }, 0))
-  }, [completedPayrollRuns, detailRowsByEmployeeId, employeeFilter, filteredEmployees, legacyWageCutoffDate])
-  const tipSummary = useMemo(() => {
-    const totalCollected = eodReports
-      .filter(report => report.session_date >= startDate && report.session_date <= endDate)
-      .reduce((sum, report) => sum + Number(report.tip_total ?? 0), 0)
-    const houseTip = totalCollected * 0.15
-    const totalTipOut = displayedRows.reduce((sum, row) => sum + row.tips, 0)
-
-    return {
-      totalCollected,
-      houseTip,
-      totalTipOut,
-      distributionTotal: houseTip + totalTipOut,
-    }
-  }, [displayedRows, eodReports, endDate, startDate])
+    return normalizeMoney(displayedRows.reduce((sum, row) => sum + (row.pendingEarnings ?? 0), 0))
+  }, [displayedRows])
+  const wageReconciliation = useMemo(() => reconcileWageRows(displayedRows), [displayedRows])
+  const scopedPayrollRuns = completedPayrollRuns.filter(run => (run.payroll_run_items ?? []).some(item =>
+    (department === 'all' || item.department === department)
+    && (employeeFilter === 'all' || item.employee_id === employeeFilter)))
+  const hasMatchingScopedRun = matchingPayrollRun && scopedPayrollRuns.some(run => run.id === matchingPayrollRun.id)
+  const payoutStatus = hasMatchingScopedRun && unpaidTotal === 0
+    ? 'created' : scopedPayrollRuns.length > 0 ? 'partial' : 'preview'
+  const payoutStatusTotals = { ...displayedPaymentTotals, net: wageReconciliation.recordedPayout }
+  const boundaryPayrollRuns = scopedPayrollRuns.filter(run => run.start_date < startDate || run.end_date > endDate)
+  const unmatchedDetails = displayedRows.flatMap(row => (detailRowsByEmployeeId.get(row.emp.id) ?? [])
+    .filter(detail => (!legacyWageCutoffDate || detail.date >= legacyWageCutoffDate)
+      && !completedPayrollRuns.some(run => wageDetailMatchesPayroll(detail, row.emp.id, run, department)))
+    .map(detail => ({ ...detail, employee: row.emp.name })))
+  const tipSummary = useMemo(() => summarizeRestaurantTips({
+    reports: eodReports, employees, clocks: clockRecords, schedules, startDate, endDate,
+  }), [eodReports, employees, clockRecords, schedules, startDate, endDate])
   const detailTarget = displayedRows.find(row => row.emp.id === detailEmployeeId) ?? null
   const detailRows = useMemo(
     () => detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : [],
@@ -737,14 +728,13 @@ export default function WageReportPage() {
   const detailPayoutGroups = useMemo(() => {
     if (!detailTarget) return []
     const assignedDates = new Set<string>()
+    const detailKey = (detail: WageDetailRow) => `${detail.date}|${detail.workDepartment ?? 'all'}|${detail.sourceRunId ?? ''}`
     const paidGroups = [...completedPayrollRuns]
       .filter(run => (run.payroll_run_items ?? []).some(item => item.employee_id === detailTarget.emp.id))
       .sort((left, right) => right.pay_date.localeCompare(left.pay_date))
       .map(run => {
-        const groupRows = detailRows.filter(detail => (
-          (detail.date >= run.start_date && detail.date <= run.end_date) || detail.date === run.pay_date
-        ) && !assignedDates.has(detail.date))
-        groupRows.forEach(detail => assignedDates.add(detail.date))
+        const groupRows = detailRows.filter(detail => wageDetailMatchesPayroll(detail, detailTarget.emp.id, run, department) && !assignedDates.has(detailKey(detail)))
+        groupRows.forEach(detail => assignedDates.add(detailKey(detail)))
         return {
           key: run.id,
           title: `Pay date ${formatReportDate(run.pay_date)}`,
@@ -754,7 +744,7 @@ export default function WageReportPage() {
         }
       })
       .filter(group => group.rows.length > 0)
-    const unpaidRows = detailRows.filter(detail => !assignedDates.has(detail.date))
+    const unpaidRows = detailRows.filter(detail => !assignedDates.has(detailKey(detail)))
     const legacyRows = legacyWageCutoffDate
       ? unpaidRows.filter(detail => detail.date < legacyWageCutoffDate)
       : []
@@ -763,9 +753,9 @@ export default function WageReportPage() {
       ? [{ key: 'legacy-paid', title: 'Legacy paid', subtitle: 'Recorded before payroll worksheet tracking began', paid: true, rows: legacyRows }]
       : []
     return currentUnpaidRows.length > 0
-      ? [{ key: 'unpaid', title: 'Pending Payroll', subtitle: 'Calculated earnings not yet included in a saved payout', paid: false, rows: currentUnpaidRows }, ...legacyGroup, ...paidGroups]
+      ? [{ key: 'unpaid', title: 'Unmatched Earnings', subtitle: 'Work not matched to a saved payout; review before paying', paid: false, rows: currentUnpaidRows }, ...legacyGroup, ...paidGroups]
       : [...legacyGroup, ...paidGroups]
-  }, [completedPayrollRuns, detailRows, detailTarget, legacyWageCutoffDate])
+  }, [completedPayrollRuns, department, detailRows, detailTarget, legacyWageCutoffDate])
   const selectedEmployeeName = employeeFilter === 'all'
     ? 'All Staff'
     : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
@@ -784,11 +774,13 @@ export default function WageReportPage() {
         ['Department', getDepartmentLabel(department, departmentDefinitions)], ['Staff', staff],
         ['View', view === 'earnings' ? 'Earnings' : 'Tip Only'],
         ['Payout Status', payoutStatus === 'created' ? 'Payout Created' : payoutStatus === 'partial' ? 'Partial Payout Created' : 'Preview Only'],
+        ['Summary Basis', 'Full saved pay-period snapshots plus unmatched work in the selected dates. Saved periods may cross the selected range.'],
+        ['Daily Details Basis', 'Clock/EOD calculations in the selected work dates; saved salary, commissions, and adjustments may differ.'],
       ]
       const paymentMethods = (row: WageSummaryRow) => (['cash', 'check', 'ach', 'unknown'] as const)
         .filter(method => row.paymentBreakdown[method] > 0)
         .map(method => method === 'unknown' ? 'Unknown' : paymentMethodLabel(method))
-        .join(' + ') || 'Unknown'
+        .join(' + ') || 'Not recorded'
       await exportReportToExcel(`wage_report_${view}_${department}_${staff}_${startDate}_${endDate}`, [
         {
           name: 'Wage Summary', title: 'Wage Report', metadata,
@@ -813,11 +805,12 @@ export default function WageReportPage() {
           name: 'Daily Details', title: 'Wage Report — Daily Details', metadata,
           columns: [
             { label: 'Name' }, { label: 'Date' }, { label: 'Hours', format: 'decimal' },
-            { label: 'Meal Break (minutes)', format: 'integer' }, { label: 'Tips', format: 'money' }, ...earningsColumns,
+            { label: 'Meal Break (minutes)', format: 'integer' }, { label: 'Tips', format: 'money' }, ...earningsColumns, { label: 'Source' },
           ],
           rows: exportRows.flatMap(row => (detailRowsByEmployeeId.get(row.emp.id) ?? []).map(detail => [
             row.emp.name, detail.date, detail.hours, detail.mealBreakMinutes, detail.tips,
             ...(view === 'earnings' ? [detail.baseWages, detail.guaranteeTopUp, detail.commission, detail.deductions, detail.totalEarnings] : []),
+            detail.sourceRunId ? 'Saved payroll snapshot (pay date)' : 'Clock / EOD (work date)',
           ])),
         },
       ])
@@ -865,7 +858,7 @@ export default function WageReportPage() {
     <div className="relative left-1/2 w-[calc(100vw-1rem)] max-w-[1800px] -translate-x-1/2 p-4 sm:w-[calc(100vw-2rem)] sm:p-6">
       <AdminSubpageHeader
         title="Wage Report"
-        subtitle={payoutStatus === 'created' ? 'Saved payroll worksheet payout is driving this range.' : 'Preview wages before creating payroll payout.'}
+        subtitle="Reconcile saved pay periods, recorded payouts, and unmatched work."
         backHref="/admin"
         backLabel="Back to Admin Board"
       />
@@ -930,8 +923,13 @@ export default function WageReportPage() {
           }
         />
         <p className="mb-4 text-xs text-muted-foreground">
-          Report totals follow the selected work-period dates. Pay dates group the daily history; Paid By shows actual cash, check, and ACH payouts after cash rounding.
+          Saved payroll amounts keep their full pay-period snapshots. Unmatched work uses the selected dates. Paid By shows recorded payouts after cash rounding; Total Earnings is before rounding.
         </p>
+        {boundaryPayrollRuns.length > 0 && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <p className="font-medium">Saved pay periods cross this date range</p>
+          <p>Table totals include these full saved periods, not a prorated calendar-month amount: {boundaryPayrollRuns.map(run => `${formatReportDate(run.start_date)}–${formatReportDate(run.end_date)}`).join(', ')}.</p>
+          <p className="mt-1 text-xs">The restaurant tip cards below use only {startDate} through {endDate}. Saved payroll tips can therefore differ.</p>
+        </div>}
         <div className={[
           'mb-4 rounded-xl border px-4 py-3',
           payoutStatus === 'created' ? 'border-emerald-200 bg-emerald-50' : payoutStatus === 'partial' ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50',
@@ -956,19 +954,19 @@ export default function WageReportPage() {
                   {payoutStatus === 'created'
                     ? 'This report is using a saved Wage Worksheet payout.'
                     : payoutStatus === 'partial'
-                      ? 'Some payouts exist for this date range, but this view is still showing calculated report data.'
+                      ? 'Saved payouts are shown with any unmatched work in the selected dates.'
                       : 'This is calculated from clock records, EOD tips, and staffing settings. No payout has been saved yet.'}
                 </span>
               </div>
-              {matchingPayrollRun && matchingPayrollRun.pay_date <= todayDate ? (
+              {matchingPayrollRun && hasMatchingScopedRun ? (
                 <p className="mt-1 text-xs text-slate-600">
                   Run created {format(new Date(matchingPayrollRun.created_at), 'MMM d, yyyy h:mm a')} · Pay date {matchingPayrollRun.pay_date} · {matchingPayrollRun.department === 'all' ? 'All Staff' : matchingPayrollRun.department}
                 </p>
-              ) : completedPayrollRuns.length > 0 ? (
+              ) : scopedPayrollRuns.length > 0 ? (
                 <p className="mt-1 text-xs text-slate-600">
-                  Saved runs in this range: {completedPayrollRuns.map(run => `${run.department} ${formatCurrency(Number(run.total_net ?? 0))}`).join(', ')}
+                  Included saved periods: {scopedPayrollRuns.map(run => `${run.department} ${formatReportDate(run.start_date)}–${formatReportDate(run.end_date)}`).join(', ')}
                 </p>
-              ) : periodPayrollRuns.length > 0 ? (
+              ) : periodPayrollRuns.some(run => run.pay_date > todayDate && (run.payroll_run_items ?? []).some(item => employeeFilter === 'all' || item.employee_id === employeeFilter)) ? (
                 <p className="mt-1 text-xs text-slate-600">Payroll runs are pending their pay date. Daily earnings remain pending until payday.</p>
               ) : (
                 <p className="mt-1 text-xs text-slate-600">Save from Wage Worksheet when payroll is actually paid or ready to record.</p>
@@ -989,13 +987,15 @@ export default function WageReportPage() {
                   <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.ach)}</p>
                 </div>
                 <div className="rounded-lg border bg-white px-3 py-2">
-                  <p className="text-[11px] font-medium uppercase text-slate-500">Total</p>
+                  <p className="text-[11px] font-medium uppercase text-slate-500">Recorded Payout</p>
                   <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.net)}</p>
                 </div>
               </div>
             )}
           </div>
         </div>
+        <p className="mb-2 text-sm font-semibold">Restaurant tip allocation · All departments · {startDate} to {endDate}</p>
+        <p className="mb-3 text-xs text-muted-foreground">These EOD totals stay the same when filtering employees or departments. They are allocations, not payroll payments.</p>
         <div className="mb-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border bg-emerald-50 p-3">
             <p className="text-xs font-medium uppercase text-emerald-700">Total Tip Collected</p>
@@ -1003,21 +1003,23 @@ export default function WageReportPage() {
             <p className="mt-0.5 text-[11px] text-emerald-700">EOD total tips in range</p>
           </div>
           <div className="rounded-lg border bg-slate-50 p-3">
-            <p className="text-xs font-medium uppercase text-slate-500">15% House Tip</p>
+            <p className="text-xs font-medium uppercase text-slate-500">House Tips Allocated</p>
             <p className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(tipSummary.houseTip)}</p>
-            <p className="mt-0.5 text-[11px] text-slate-500">House share from collected tips</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">Saved house deductions; 15% for unsaved previews</p>
           </div>
           <div className="rounded-lg border bg-blue-50 p-3">
-            <p className="text-xs font-medium uppercase text-blue-700">Total Tip Out</p>
+            <p className="text-xs font-medium uppercase text-blue-700">Staff Tips Allocated</p>
             <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(tipSummary.totalTipOut)}</p>
-            <p className="mt-0.5 text-[11px] text-blue-700">Displayed wage rows</p>
+            <p className="mt-0.5 text-[11px] text-blue-700">All staff EOD allocations in the selected dates</p>
           </div>
           <div className="rounded-lg border bg-violet-50 p-3">
             <p className="text-xs font-medium uppercase text-violet-700">Distribution Summary</p>
             <p className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(tipSummary.distributionTotal)}</p>
-            <p className="mt-0.5 text-[11px] text-violet-700">House + tip out</p>
+            <p className="mt-0.5 text-[11px] text-violet-700">House + staff allocations, all departments</p>
           </div>
         </div>
+        <p className="mb-4 text-xs text-muted-foreground">Collected minus allocated: {formatCurrency(tipSummary.difference)}. {tipSummary.difference !== 0 ? 'Review unallocated tips or rounding in Tip Distribution Editor.' : 'Restaurant tip allocations reconcile.'}</p>
+        <p className="mb-2 text-sm font-semibold">Selected payroll · {getDepartmentLabel(department, departmentDefinitions)} · {selectedEmployeeName}</p>
         <div className="mb-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-lg border bg-emerald-50 p-3">
             <p className="text-xs font-medium uppercase text-emerald-700">Cash Pay Out</p>
@@ -1032,10 +1034,16 @@ export default function WageReportPage() {
             <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(displayedPaymentTotals.ach)}</p>
           </div>
           <div className="rounded-lg border bg-amber-50 p-3">
-            <p className="text-xs font-medium uppercase text-amber-700">Pending Payroll Total</p>
+            <p className="text-xs font-medium uppercase text-amber-700">Unmatched Earnings</p>
             <p className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(unpaidTotal)}</p>
-            <p className="mt-0.5 text-[11px] text-amber-700">Calculated earnings not yet included in a saved payout</p>
+            <p className="mt-0.5 text-[11px] text-amber-700">Work not matched to a saved payout; review before paying</p>
+            {unmatchedDetails.length > 0 && <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setUnmatchedOpen(true)}>Review unmatched work</Button>}
           </div>
+        </div>
+        <div className="mb-4 rounded-lg border bg-slate-50 p-3 text-sm" data-wage-reconciliation>
+          <p className="font-semibold">Table earnings {formatCurrency(wageReconciliation.earnings)} = recorded payouts {formatCurrency(wageReconciliation.recordedPayout)} + rounding / payout adjustment {formatCurrency(wageReconciliation.payoutAdjustment)} + unmatched earnings {formatCurrency(wageReconciliation.pending)}{wageReconciliation.legacy !== 0 && ` + legacy estimated earnings ${formatCurrency(wageReconciliation.legacy)}`}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Tips in this table: {formatCurrency(wageReconciliation.tips)}. Saved payroll tips follow the included pay periods; the restaurant cards above follow EOD work dates.</p>
+          {displayedPaymentTotals.unknown > 0 && <p className="mt-1 text-xs text-muted-foreground">Recorded payout includes {formatCurrency(displayedPaymentTotals.unknown)} with an unknown payment method.</p>}
         </div>
         <Table className={view === 'earnings' ? 'min-w-[1560px]' : 'min-w-[920px]'}>
           <TableHeader><TableRow>
@@ -1058,11 +1066,26 @@ export default function WageReportPage() {
         </Table>
       </div>
 
+      <Dialog open={unmatchedOpen} onOpenChange={setUnmatchedOpen}>
+        <DialogContent className="max-h-[85vh] overflow-auto sm:max-w-4xl">
+          <DialogHeader><DialogTitle>Unmatched work · {formatCurrency(unpaidTotal)}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">These employee/work-date entries have no matching saved payout in this department. Amounts use approved clocks, EOD tips, and current Staffing pay settings. Check for external payments or corrections before treating them as money owed.</p>
+          <Table>
+            <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Work Date</TableHead><TableHead>Department</TableHead><TableHead>Hours</TableHead><TableHead>Base Wages</TableHead><TableHead>Tips</TableHead><TableHead>Top-Up</TableHead><TableHead>Earnings</TableHead></TableRow></TableHeader>
+            <TableBody>{unmatchedDetails.map((detail, index) => <TableRow key={`${detail.employee}-${detail.date}-${index}`}>
+              <TableCell>{detail.employee}</TableCell><TableCell>{detail.date}</TableCell><TableCell>{detail.workDepartment ?? department}</TableCell><TableCell>{detail.hours.toFixed(2)}</TableCell>
+              <TableCell>{formatCurrency(detail.baseWages)}</TableCell><TableCell>{formatCurrency(detail.tips)}</TableCell><TableCell>{formatCurrency(detail.guaranteeTopUp)}</TableCell><TableCell>{formatCurrency(detail.totalEarnings)}</TableCell>
+            </TableRow>)}</TableBody>
+          </Table>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) { setDetailEmployeeId(null); setExpandedDetailGroupKey(null) } }}>
         <DialogContent className="w-[calc(100vw-3rem)] max-w-none sm:max-w-none max-h-[90vh] overflow-y-auto p-7">
           <DialogHeader>
             <DialogTitle>{detailTarget?.emp.name} Wage Detail</DialogTitle>
           </DialogHeader>
+          <p className="text-xs text-muted-foreground">Summary totals preserve saved payroll snapshots plus unmatched work. Daily history shows clock/EOD calculations for the selected dates and can differ because of manual salary, commission, or payroll adjustments. Snapshot-only rows use the pay date.</p>
           {detailTarget && (() => {
             const perf = employeePerfStats.get(detailTarget.emp.id)
             return (

@@ -120,7 +120,7 @@ test('wage payment methods remain filterable for ACH, mixed unknown, and unpaid 
   const method = headers.indexOf('Paid By')
   assert.equal(ach[method], 'ACH')
   assert.equal(mixed[method], 'Cash + Unknown')
-  assert.equal(unpaid[method], 'Unknown')
+  assert.equal(unpaid[method], 'Not recorded')
   assert.equal(total[headers.indexOf('ACH Amount')], 50)
   assert.equal(total[headers.indexOf('Unknown Amount')], 20)
 })
