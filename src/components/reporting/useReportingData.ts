@@ -110,17 +110,28 @@ export function useTasks() {
 
 export function useEodReports() {
   const [eodReports, setEodReports] = useState<(EodReport & { tip_distributions: (TipDistribution & { employee: Employee })[] })[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
 
     const load = async () => {
-      const res = await supabase
-        .from('eod_reports')
-        .select(`*, tip_distributions(*, employee:employees(${EMPLOYEE_PUBLIC_SELECT}))`)
-        .order('session_date', { ascending: false })
-      if (!mounted) return
-      setEodReports(res.data ?? [])
+      setLoading(true)
+      try {
+        const res = await supabase
+          .from('eod_reports')
+          .select(`*, tip_distributions(*, employee:employees(${EMPLOYEE_PUBLIC_SELECT}))`)
+          .order('session_date', { ascending: false })
+        if (res.error) throw new Error('EOD reports could not be loaded. Dashboard totals are incomplete.')
+        if (!mounted) return
+        setEodReports(res.data ?? [])
+        setError(null)
+      } catch (loadError) {
+        if (mounted) setError(loadError instanceof Error ? loadError.message : 'EOD reports could not be loaded.')
+      } finally {
+        if (mounted) setLoading(false)
+      }
     }
 
     void load()
@@ -134,7 +145,7 @@ export function useEodReports() {
     }
   }, [])
 
-  return { eodReports, setEodReports }
+  return { eodReports, setEodReports, loading, error }
 }
 
 export function useScheduledDepartmentIds(startDate: string, endDate: string) {

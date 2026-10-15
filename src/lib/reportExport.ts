@@ -1,6 +1,6 @@
 const PRINT_ID = '__foh_print_root'
 
-function buildScopedStyles(id: string) {
+function buildScopedStyles(id: string, flow = false) {
   const s = `#${id}`
   return `
     @page { size: letter landscape; margin: 0.45in; }
@@ -24,11 +24,12 @@ function buildScopedStyles(id: string) {
     ${s} .report-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.9fr); gap: 14px; align-items: start; }
     ${s} .compact-table th, ${s} .compact-table td { padding-top: 5px; padding-bottom: 5px; }
     @media print {
+      ${flow ? 'html, body { height: auto !important; overflow: visible !important; } body { display: block !important; }' : ''}
       body > *:not(#${id}) { display: none !important; }
       #${id} {
         display: block !important;
-        position: fixed;
-        inset: 0;
+        position: ${flow ? 'static' : 'fixed'};
+        ${flow ? 'padding: 0; height: auto;' : 'inset: 0;'}
         overflow: visible;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -37,7 +38,7 @@ function buildScopedStyles(id: string) {
   `
 }
 
-export function exportReportToPdf(title: string, bodyHtml: string) {
+export function exportReportToPdf(title: string, bodyHtml: string, options: { flow?: boolean } = {}) {
   if (typeof window === 'undefined') return
 
   // Remove any leftover print elements from a previous call
@@ -46,14 +47,17 @@ export function exportReportToPdf(title: string, bodyHtml: string) {
 
   const styleEl = document.createElement('style')
   styleEl.id = PRINT_ID + '_style'
-  styleEl.textContent = buildScopedStyles(PRINT_ID)
+  styleEl.textContent = buildScopedStyles(PRINT_ID, options.flow)
 
   const container = document.createElement('div')
   container.id = PRINT_ID
   container.style.display = 'none'
   container.innerHTML = `<div class="report-shell">${bodyHtml}</div>`
+  const previousTitle = document.title
+  document.title = title
 
   const cleanup = () => {
+    document.title = previousTitle
     window.setTimeout(() => {
       styleEl.remove()
       container.remove()

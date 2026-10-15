@@ -16,7 +16,8 @@ import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { CashBalanceEntry, EodReport, PayrollRun, PayrollRunItem, TipDistribution } from '@/lib/types'
 import { getPayrollPaymentBreakdown } from '@/lib/payroll'
-import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, ReceiptText, Truck, Wallet } from 'lucide-react'
+import { exportDashboardToPdf } from '@/lib/dashboardPdf'
+import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, Download, ReceiptText, Truck, Wallet } from 'lucide-react'
 
 type DashboardPeriod = 'weekly' | 'monthly' | 'yearly' | 'custom'
 
@@ -421,10 +422,10 @@ function MainTrendChart({ points, average, monthly, label, color, formatValue = 
     : Math.abs(v) >= 1000 ? `${v < 0 ? '-' : ''}$${(Math.abs(v) / 1000).toFixed(1)}k` : `${v < 0 ? '-' : ''}$${Math.round(Math.abs(v))}`
 
   return (
-    <div className="rounded-xl border bg-white p-4">
+    <div className="rounded-xl border bg-white p-4" data-pdf-section="trend">
       {monthly && <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-slate-900">{label} by month</p>
-        <p className="text-xs text-muted-foreground">Select a data card to change this chart</p>
+        <p className="text-xs text-muted-foreground" data-pdf-exclude>Select a data card to change this chart</p>
       </div>}
       <svg viewBox={`0 0 ${width} ${height}`} className="h-72 w-full" role="img" aria-label={`${monthly ? 'Monthly' : 'Daily'} ${label} chart`}>
         <defs>
@@ -543,7 +544,8 @@ function MixBar({ label, value, total, color, onSelect, selected = false }: {
 }
 
 export default function ReportingDashboardPage() {
-  const { eodReports } = useEodReports()
+  const dashboardRef = useRef<HTMLDivElement>(null)
+  const { eodReports, loading: eodLoading, error: eodError } = useEodReports()
   const { clockRecords } = useClockRecords()
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
@@ -559,6 +561,8 @@ export default function ReportingDashboardPage() {
   const [cashEntries, setCashEntries] = useState<CashBalanceEntry[]>([])
   const [historical, setHistorical] = useState<HistoricalAdjustments | null>(null)
   const [historicalError, setHistoricalError] = useState<string | null>(null)
+  const [cashLoading, setCashLoading] = useState(true)
+  const [cashError, setCashError] = useState<string | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -608,15 +612,24 @@ export default function ReportingDashboardPage() {
 
   useEffect(() => {
     let mounted = true
+    setCashLoading(true)
     void (async () => {
-      const res = await supabase
-        .from('cash_balance_entries')
-        .select('*')
-        .gte('entry_date', previousStartDate)
-        .lte('entry_date', endDate)
-        .order('entry_date', { ascending: true })
-      if (!mounted) return
-      setCashEntries((res.data ?? []) as CashBalanceEntry[])
+      try {
+        const res = await supabase
+          .from('cash_balance_entries')
+          .select('*')
+          .gte('entry_date', previousStartDate)
+          .lte('entry_date', endDate)
+          .order('entry_date', { ascending: true })
+        if (res.error) throw new Error('Cash entries could not be loaded. Cash In / Out totals are incomplete.')
+        if (!mounted) return
+        setCashEntries((res.data ?? []) as CashBalanceEntry[])
+        setCashError(null)
+      } catch (error) {
+        if (mounted) setCashError(error instanceof Error ? error.message : 'Cash entries could not be loaded.')
+      } finally {
+        if (mounted) setCashLoading(false)
+      }
     })()
     return () => {
       mounted = false
@@ -1023,17 +1036,28 @@ export default function ReportingDashboardPage() {
     : dailyAverage
 
   return (
-    <div className="p-6">
+    <div className="p-6" ref={dashboardRef}>
+      <div data-pdf-exclude>
       <AdminSubpageHeader
         title="Reporting Dashboard"
         subtitle="Revenue trends, forecast pace, and operating signals."
         backHref="/admin"
         backLabel="Back to Admin Board"
+        rightSlot={<Button variant="outline" disabled={payrollLoading || eodLoading || cashLoading || (!historical && !historicalError)} title="Print or save the current dashboard as a PDF" onClick={() => {
+          if (dashboardRef.current) exportDashboardToPdf(dashboardRef.current, {
+            label: dateLabel, startDate, endDate, previousStartDate, previousEndDate,
+            closedDays: closedDays.map(day => DAY_LABELS[day]), chartLabel: activeChart.label,
+          })
+        }}><Download className="h-4 w-4" /> Export PDF</Button>}
       />
+      </div>
 
       <MissingTipDistributionNotice reports={eodReports} startDate={startDate} endDate={endDate} />
       {historicalError && <p className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{historicalError} Dashboard totals below are incomplete.</p>}
-      <div className="mb-5 rounded-xl border bg-white p-4">
+      {eodError && <p role="alert" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{eodError}</p>}
+      {cashError && <p role="alert" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{cashError}</p>}
+      {importedPayrollConflicts > 0 && <p role="alert" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{importedPayrollConflicts} overlapping payroll period(s) excluded pending reconciliation.</p>}
+      <div className="mb-5 rounded-xl border bg-white p-4" data-pdf-exclude>
         <div className="flex flex-wrap items-center gap-3">
           <div className="inline-flex h-9 overflow-hidden rounded-lg border bg-background">
             {([
@@ -1099,11 +1123,10 @@ export default function ReportingDashboardPage() {
         {historical && <p className="mt-3 text-xs text-muted-foreground">
           2026 totals include the imported missing-period sales and payroll amounts when the selected range covers their full source period.
           Yearly charts use the same monthly imported totals. Day and week charts show only dated EOD and payout records.
-          {importedPayrollConflicts > 0 && ` ${importedPayrollConflicts} overlapping payroll period is excluded pending reconciliation.`}
         </p>}
       </div>
 
-      <div className="mb-5 rounded-xl border bg-white p-4">
+      <div className="mb-5 rounded-xl border bg-white p-4" data-pdf-section="overview">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-medium uppercase text-muted-foreground">Monthly Overview</p>
@@ -1111,9 +1134,9 @@ export default function ReportingDashboardPage() {
           </div>
           <Badge variant="outline">Rev / Payroll</Badge>
         </div>
-        {period === 'yearly' && <p className="mb-3 text-xs text-muted-foreground">Select a month to open its monthly dashboard.</p>}
+        {period === 'yearly' && <p className="mb-3 text-xs text-muted-foreground" data-pdf-exclude>Select a month to open its monthly dashboard.</p>}
         {yearlyMonthlyOverview.length > 0 ? (
-          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6" data-pdf-grid="overview">
             {yearlyMonthlyOverview.map(month => (
               <button
                 key={month.key}
@@ -1147,9 +1170,9 @@ export default function ReportingDashboardPage() {
         )}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]">
+      <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]" data-pdf-layout="main">
         <div>
-          <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4" data-pdf-grid="summary">
             <button type="button" disabled={period !== 'yearly'} onClick={() => selectYearlyChart('net')}
               aria-pressed={period === 'yearly' && selectedYearlyChart === 'net'}
               className={`rounded-xl border bg-white p-4 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'net' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
@@ -1187,7 +1210,7 @@ export default function ReportingDashboardPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border bg-white p-4">
+        <div className="rounded-xl border bg-white p-4" data-pdf-section="mix">
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-medium uppercase text-muted-foreground">Revenue Mix</p>
@@ -1208,7 +1231,7 @@ export default function ReportingDashboardPage() {
               onSelect={period === 'yearly' ? () => selectYearlyChart('delivery') : undefined}
               selected={period === 'yearly' && selectedYearlyChart === 'delivery'} />
           </div>
-          <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <div className="mt-5 grid gap-2 sm:grid-cols-2" data-pdf-grid="mix">
             {([
               { label: 'Total Tips Collected (gross)', value: currentTotals.collectedTip, note: `EOD and imported business periods: ${dateLabel}`, chartKey: 'collectedTip' },
               { label: 'House Tip (15%)', value: houseCollectedTip, chartKey: 'houseTip' },
@@ -1270,7 +1293,7 @@ export default function ReportingDashboardPage() {
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4" data-pdf-grid="metrics">
         {metricCards.map(card => (
           <MetricCard
             key={card.key}
@@ -1286,7 +1309,7 @@ export default function ReportingDashboardPage() {
         ))}
       </div>
 
-      <div className="mt-5 rounded-xl border bg-white p-4">
+      <div className="mt-5 rounded-xl border bg-white p-4" data-pdf-section="departments">
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-xs font-medium uppercase text-muted-foreground">Payroll By Department</p>
@@ -1295,7 +1318,7 @@ export default function ReportingDashboardPage() {
           <Badge variant="outline">Saved + imported</Badge>
         </div>
         {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-4" data-pdf-grid="departments">
             {payrollByDepartment.map(([dept, amount]) => (
               <div key={dept} className="rounded-lg border bg-slate-50 p-3">
                 <div className="text-xs font-medium uppercase text-slate-500">{dept}</div>
