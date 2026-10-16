@@ -923,10 +923,10 @@ export default function WageReportPage() {
             </>
           }
         />
-        <section aria-labelledby="payroll-overview-heading" className="mb-6 space-y-4">
+        <section aria-labelledby="payroll-overview-heading" className="mb-4 space-y-2.5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 id="payroll-overview-heading" className="text-lg font-semibold text-slate-950">Payroll overview</h2>
+              <h2 id="payroll-overview-heading" className="text-base font-semibold text-slate-950">Payroll overview</h2>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
                 <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-900">{getDepartmentLabel(department, departmentDefinitions)}</span>
                 <span>{selectedEmployeeName}</span>
@@ -943,42 +943,40 @@ export default function WageReportPage() {
               {unpaidTotal > 0 ? 'Unmatched work to review' : scopedPayrollRuns.length > 0 ? 'Saved payouts included' : 'Preview only'}
             </span>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="min-w-0 rounded-xl bg-slate-900 p-5 text-white">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="min-w-0 rounded-lg bg-slate-900 px-3 py-3 text-white">
               <p className="text-sm font-medium text-slate-200">Total earnings</p>
-              <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">{overviewCurrency.format(wageReconciliation.earnings)}</p>
-              <p className="mt-2 text-xs leading-relaxed text-slate-300">{view === 'earnings' ? 'Matches Total Earnings in the table below.' : 'Wages, tips and payroll adjustments combined.'}</p>
-              <p className="mt-3 border-t border-white/15 pt-3 text-xs text-slate-300">Includes <span className="font-medium tabular-nums text-white">{overviewCurrency.format(wageReconciliation.tips)}</span> in payroll tips</p>
+              <p className="mt-1 text-xl font-semibold tracking-tight tabular-nums lg:text-2xl">{overviewCurrency.format(wageReconciliation.earnings)}</p>
+              <p className="mt-1 text-xs text-slate-300">Includes <span className="font-medium tabular-nums text-white">{overviewCurrency.format(wageReconciliation.tips)}</span> in payroll tips</p>
             </div>
-            <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-5">
+            <div className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-3">
               <p className="text-sm font-medium text-slate-600">Recorded payouts</p>
-              <p className="mt-2 text-2xl font-semibold tracking-tight text-emerald-800 tabular-nums lg:text-3xl">{overviewCurrency.format(wageReconciliation.recordedPayout)}</p>
-              <p className="mt-2 text-xs leading-relaxed text-slate-600">Saved payroll payments after cash rounding.</p>
-              <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500">Payment methods shown below</p>
+              <p className="mt-1 text-xl font-semibold tracking-tight text-emerald-800 tabular-nums lg:text-2xl">{overviewCurrency.format(wageReconciliation.recordedPayout)}</p>
+              <p className="mt-1 text-xs leading-snug text-slate-600">Saved payroll payments after cash rounding.</p>
             </div>
             <div className={[
-              'min-w-0 rounded-xl border p-5',
+              'min-w-0 rounded-lg border px-3 py-3',
               unpaidTotal > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50',
             ].join(' ')}>
               <p className="text-sm font-medium text-slate-600">Unmatched earnings</p>
-              <p className={['mt-2 text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl', unpaidTotal > 0 ? 'text-amber-950' : 'text-slate-950'].join(' ')}>{overviewCurrency.format(unpaidTotal)}</p>
-              <p className="mt-2 text-xs leading-relaxed text-slate-600">{unpaidTotal > 0 ? 'Work without a matching saved payout. Review before paying.' : 'No unmatched earnings in this selection.'}</p>
-              {unmatchedDetails.length > 0 && <Button variant="link" size="sm" className="mt-3 h-auto p-0 font-semibold text-amber-950 underline underline-offset-4" onClick={() => setUnmatchedOpen(true)}>Review unmatched work</Button>}
+              <p className={['mt-1 text-xl font-semibold tracking-tight tabular-nums lg:text-2xl', unpaidTotal > 0 ? 'text-amber-950' : 'text-slate-950'].join(' ')}>{overviewCurrency.format(unpaidTotal)}</p>
+              <p className="mt-1 text-xs leading-snug text-slate-600">{unpaidTotal > 0 ? 'Work without a matching saved payout. Review before paying.' : 'No unmatched earnings in this selection.'}</p>
+              {unmatchedDetails.length > 0 && <Button variant="link" size="sm" className="mt-1 h-auto p-0 text-xs font-semibold text-amber-950 underline underline-offset-4" onClick={() => setUnmatchedOpen(true)}>Review unmatched work</Button>}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-slate-200 px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs">
             <span className="font-medium text-slate-500">Recorded payouts by method</span>
             {(['cash', 'check', 'ach'] as const).map(method => (
               <span key={method} className="flex items-baseline gap-2 text-slate-600">{paymentMethodLabel(method)} <span className="font-semibold text-slate-950 tabular-nums">{overviewCurrency.format(displayedPaymentTotals[method])}</span></span>
             ))}
             {displayedPaymentTotals.unknown > 0 && <span className="flex items-baseline gap-2 text-slate-600">Unknown <span className="font-semibold text-slate-950 tabular-nums">{overviewCurrency.format(displayedPaymentTotals.unknown)}</span></span>}
           </div>
-          {boundaryPayrollRuns.length > 0 && <div className="rounded-lg border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          {boundaryPayrollRuns.length > 0 && <div className="rounded-lg border-l-4 border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-950">
             <p className="font-semibold">Saved pay periods cross this date range</p>
             <p className="mt-1 text-xs leading-relaxed">Payroll includes full saved pay periods, including work outside these dates. Restaurant tips below use only the selected work dates.</p>
           </div>}
           <details className="group rounded-lg border border-slate-200" data-wage-reconciliation>
-            <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-medium text-slate-700 outline-offset-4 marker:text-slate-400">
+            <summary className="cursor-pointer rounded-lg px-3 py-2 text-xs font-medium text-slate-700 outline-offset-4 marker:text-slate-400">
               Payroll details &amp; pay periods
               {wageReconciliation.payoutAdjustment !== 0 && <span className="mt-1 block pl-4 text-xs font-normal text-slate-500 sm:ml-3 sm:mt-0 sm:inline sm:pl-0">Rounding / adjustment: {overviewCurrency.format(wageReconciliation.payoutAdjustment)}</span>}
             </summary>
@@ -1012,30 +1010,30 @@ export default function WageReportPage() {
             </div>
           </details>
         </section>
-        <section aria-labelledby="restaurant-tips-heading" className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+        <section aria-labelledby="restaurant-tips-heading" className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 id="restaurant-tips-heading" className="text-base font-semibold text-slate-950">Restaurant tips</h2>
             <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">All departments · All staff</span>
           </div>
           <p className="mt-1 text-xs leading-relaxed text-slate-600">EOD work dates: {formatReportDate(startDate)} – {formatReportDate(endDate)}. These totals stay the same when you filter departments or staff.</p>
-          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <div>
               <p className="text-sm text-slate-600">Tips collected</p>
-              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.totalCollected)}</p>
+              <p className="mt-0.5 text-xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.totalCollected)}</p>
               <p className="mt-1 text-xs text-slate-500">Total tips reported in EOD</p>
             </div>
             <div>
               <p className="text-sm text-slate-600">Allocated to staff</p>
-              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.totalTipOut)}</p>
+              <p className="mt-0.5 text-xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.totalTipOut)}</p>
               <p className="mt-1 text-xs text-slate-500">Tip allocations, before payroll payments</p>
             </div>
             <div>
               <p className="text-sm text-slate-600">Allocated to house</p>
-              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.houseTip)}</p>
+              <p className="mt-0.5 text-xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.houseTip)}</p>
               <p className="mt-1 text-xs text-slate-500">Saved deductions; 15% for unsaved previews</p>
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-2 text-xs">
             <p className="text-slate-600">Staff + house allocations <span className="ml-1 font-semibold text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.distributionTotal)}</span></p>
             <p className={tipSummary.difference === 0 ? 'font-medium text-emerald-800' : 'font-medium text-amber-900'}>
               {tipSummary.difference === 0 ? 'Balanced · collected tips fully allocated'
@@ -1043,7 +1041,7 @@ export default function WageReportPage() {
             </p>
           </div>
         </section>
-        <h2 className="mb-3 text-base font-semibold text-slate-950">Staff breakdown <span className="ml-2 text-sm font-normal text-slate-500">{view === 'earnings' ? 'Earnings' : 'Tips only'}</span></h2>
+        <h2 className="mb-2 text-sm font-semibold text-slate-950">Staff breakdown <span className="ml-2 text-sm font-normal text-slate-500">{view === 'earnings' ? 'Earnings' : 'Tips only'}</span></h2>
         <Table className={view === 'earnings' ? 'min-w-[1560px]' : 'min-w-[920px]'}>
           <TableHeader><TableRow>
             <TableHead>Name</TableHead><TableHead>Role</TableHead><TableHead>Paid By</TableHead><TableHead>Clock Status</TableHead>
