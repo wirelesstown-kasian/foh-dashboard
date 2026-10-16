@@ -102,6 +102,8 @@ function formatReportDate(value: string) {
   return format(new Date(`${value}T00:00:00`), 'M/d/yyyy')
 }
 
+const overviewCurrency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
+
 function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
   const relatedEmployee = record.employee as Employee | Employee[] | undefined
   if (Array.isArray(relatedEmployee)) {
@@ -711,7 +713,6 @@ export default function WageReportPage() {
   const hasMatchingScopedRun = matchingPayrollRun && scopedPayrollRuns.some(run => run.id === matchingPayrollRun.id)
   const payoutStatus = hasMatchingScopedRun && unpaidTotal === 0
     ? 'created' : scopedPayrollRuns.length > 0 ? 'partial' : 'preview'
-  const payoutStatusTotals = { ...displayedPaymentTotals, net: wageReconciliation.recordedPayout }
   const boundaryPayrollRuns = scopedPayrollRuns.filter(run => run.start_date < startDate || run.end_date > endDate)
   const unmatchedDetails = displayedRows.flatMap(row => (detailRowsByEmployeeId.get(row.emp.id) ?? [])
     .filter(detail => (!legacyWageCutoffDate || detail.date >= legacyWageCutoffDate)
@@ -922,129 +923,127 @@ export default function WageReportPage() {
             </>
           }
         />
-        <p className="mb-4 text-xs text-muted-foreground">
-          Saved payroll amounts keep their full pay-period snapshots. Unmatched work uses the selected dates. Paid By shows recorded payouts after cash rounding; Total Earnings is before rounding.
-        </p>
-        {boundaryPayrollRuns.length > 0 && <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-          <p className="font-medium">Saved pay periods cross this date range</p>
-          <p>Table totals include these full saved periods, not a prorated calendar-month amount: {boundaryPayrollRuns.map(run => `${formatReportDate(run.start_date)}–${formatReportDate(run.end_date)}`).join(', ')}.</p>
-          <p className="mt-1 text-xs">The restaurant tip cards below use only {startDate} through {endDate}. Saved payroll tips can therefore differ.</p>
-        </div>}
-        <div className={[
-          'mb-4 rounded-xl border px-4 py-3',
-          payoutStatus === 'created' ? 'border-emerald-200 bg-emerald-50' : payoutStatus === 'partial' ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50',
-        ].join(' ')}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <section aria-labelledby="payroll-overview-heading" className="mb-6 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className={[
-                'text-xs font-semibold uppercase',
-                payoutStatus === 'created' ? 'text-emerald-700' : payoutStatus === 'partial' ? 'text-amber-700' : 'text-slate-500',
-              ].join(' ')}>
-                Payout Status
-              </p>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                {payoutStatus === 'created' ? (
-                  <Badge variant="outline" className="border-emerald-300 bg-white text-emerald-800">Payout Created</Badge>
-                ) : payoutStatus === 'partial' ? (
-                  <Badge variant="outline" className="border-amber-300 bg-white text-amber-800">Partial Payout Created</Badge>
-                ) : (
-                  <Badge variant="outline" className="border-slate-300 bg-white text-slate-700">Preview Only</Badge>
-                )}
-                <span className="text-sm font-medium text-slate-950">
-                  {payoutStatus === 'created'
-                    ? 'This report is using a saved Wage Worksheet payout.'
-                    : payoutStatus === 'partial'
-                      ? 'Saved payouts are shown with any unmatched work in the selected dates.'
-                      : 'This is calculated from clock records, EOD tips, and staffing settings. No payout has been saved yet.'}
-                </span>
+              <h2 id="payroll-overview-heading" className="text-lg font-semibold text-slate-950">Payroll overview</h2>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-900">{getDepartmentLabel(department, departmentDefinitions)}</span>
+                <span>{selectedEmployeeName}</span>
+                <span aria-hidden="true" className="text-slate-300">·</span>
+                <span>{formatReportDate(startDate)} – {formatReportDate(endDate)}</span>
               </div>
-              {matchingPayrollRun && hasMatchingScopedRun ? (
-                <p className="mt-1 text-xs text-slate-600">
-                  Run created {format(new Date(matchingPayrollRun.created_at), 'MMM d, yyyy h:mm a')} · Pay date {matchingPayrollRun.pay_date} · {matchingPayrollRun.department === 'all' ? 'All Staff' : matchingPayrollRun.department}
-                </p>
-              ) : scopedPayrollRuns.length > 0 ? (
-                <p className="mt-1 text-xs text-slate-600">
-                  Included saved periods: {scopedPayrollRuns.map(run => `${run.department} ${formatReportDate(run.start_date)}–${formatReportDate(run.end_date)}`).join(', ')}
-                </p>
-              ) : periodPayrollRuns.some(run => run.pay_date > todayDate && (run.payroll_run_items ?? []).some(item => employeeFilter === 'all' || item.employee_id === employeeFilter)) ? (
-                <p className="mt-1 text-xs text-slate-600">Payroll runs are pending their pay date. Daily earnings remain pending until payday.</p>
-              ) : (
-                <p className="mt-1 text-xs text-slate-600">Save from Wage Worksheet when payroll is actually paid or ready to record.</p>
-              )}
             </div>
-            {payoutStatus !== 'preview' && (
-              <div className="grid grid-cols-2 gap-2 text-right sm:grid-cols-4 lg:min-w-[480px]">
-                <div className="rounded-lg border bg-white px-3 py-2">
-                  <p className="text-[11px] font-medium uppercase text-slate-500">Cash</p>
-                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.cash)}</p>
-                </div>
-                <div className="rounded-lg border bg-white px-3 py-2">
-                  <p className="text-[11px] font-medium uppercase text-slate-500">Check</p>
-                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.check)}</p>
-                </div>
-                <div className="rounded-lg border bg-white px-3 py-2">
-                  <p className="text-[11px] font-medium uppercase text-slate-500">ACH</p>
-                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.ach)}</p>
-                </div>
-                <div className="rounded-lg border bg-white px-3 py-2">
-                  <p className="text-[11px] font-medium uppercase text-slate-500">Recorded Payout</p>
-                  <p className="font-semibold text-slate-950">{formatCurrency(payoutStatusTotals.net)}</p>
-                </div>
+            <span className={[
+              'rounded-full border px-3 py-1 text-xs font-semibold',
+              unpaidTotal > 0 ? 'border-amber-200 bg-amber-50 text-amber-900'
+                : scopedPayrollRuns.length > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : 'border-slate-200 bg-slate-50 text-slate-600',
+            ].join(' ')}>
+              {unpaidTotal > 0 ? 'Unmatched work to review' : scopedPayrollRuns.length > 0 ? 'Saved payouts included' : 'Preview only'}
+            </span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="min-w-0 rounded-xl bg-slate-900 p-5 text-white">
+              <p className="text-sm font-medium text-slate-200">Total earnings</p>
+              <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">{overviewCurrency.format(wageReconciliation.earnings)}</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-300">{view === 'earnings' ? 'Matches Total Earnings in the table below.' : 'Wages, tips and payroll adjustments combined.'}</p>
+              <p className="mt-3 border-t border-white/15 pt-3 text-xs text-slate-300">Includes <span className="font-medium tabular-nums text-white">{overviewCurrency.format(wageReconciliation.tips)}</span> in payroll tips</p>
+            </div>
+            <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-5">
+              <p className="text-sm font-medium text-slate-600">Recorded payouts</p>
+              <p className="mt-2 text-2xl font-semibold tracking-tight text-emerald-800 tabular-nums lg:text-3xl">{overviewCurrency.format(wageReconciliation.recordedPayout)}</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-600">Saved payroll payments after cash rounding.</p>
+              <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500">Payment methods shown below</p>
+            </div>
+            <div className={[
+              'min-w-0 rounded-xl border p-5',
+              unpaidTotal > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50',
+            ].join(' ')}>
+              <p className="text-sm font-medium text-slate-600">Unmatched earnings</p>
+              <p className={['mt-2 text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl', unpaidTotal > 0 ? 'text-amber-950' : 'text-slate-950'].join(' ')}>{overviewCurrency.format(unpaidTotal)}</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-600">{unpaidTotal > 0 ? 'Work without a matching saved payout. Review before paying.' : 'No unmatched earnings in this selection.'}</p>
+              {unmatchedDetails.length > 0 && <Button variant="link" size="sm" className="mt-3 h-auto p-0 font-semibold text-amber-950 underline underline-offset-4" onClick={() => setUnmatchedOpen(true)}>Review unmatched work</Button>}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-slate-200 px-4 py-3 text-sm">
+            <span className="font-medium text-slate-500">Recorded payouts by method</span>
+            {(['cash', 'check', 'ach'] as const).map(method => (
+              <span key={method} className="flex items-baseline gap-2 text-slate-600">{paymentMethodLabel(method)} <span className="font-semibold text-slate-950 tabular-nums">{overviewCurrency.format(displayedPaymentTotals[method])}</span></span>
+            ))}
+            {displayedPaymentTotals.unknown > 0 && <span className="flex items-baseline gap-2 text-slate-600">Unknown <span className="font-semibold text-slate-950 tabular-nums">{overviewCurrency.format(displayedPaymentTotals.unknown)}</span></span>}
+          </div>
+          {boundaryPayrollRuns.length > 0 && <div className="rounded-lg border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <p className="font-semibold">Saved pay periods cross this date range</p>
+            <p className="mt-1 text-xs leading-relaxed">Payroll includes full saved pay periods, including work outside these dates. Restaurant tips below use only the selected work dates.</p>
+          </div>}
+          <details className="group rounded-lg border border-slate-200" data-wage-reconciliation>
+            <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-medium text-slate-700 outline-offset-4 marker:text-slate-400">
+              Payroll details &amp; pay periods
+              {wageReconciliation.payoutAdjustment !== 0 && <span className="mt-1 block pl-4 text-xs font-normal text-slate-500 sm:ml-3 sm:mt-0 sm:inline sm:pl-0">Rounding / adjustment: {overviewCurrency.format(wageReconciliation.payoutAdjustment)}</span>}
+            </summary>
+            <div className="grid gap-5 border-t border-slate-200 px-4 py-4 text-sm lg:grid-cols-2">
+              <div>
+                <h3 className="mb-3 font-semibold text-slate-950">How the table total adds up</h3>
+                <dl className="space-y-2 text-slate-600">
+                  <div className="flex justify-between gap-4"><dt>Recorded payouts</dt><dd className="font-medium text-slate-950 tabular-nums">{overviewCurrency.format(wageReconciliation.recordedPayout)}</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Rounding / payout adjustment</dt><dd className="font-medium text-slate-950 tabular-nums">{overviewCurrency.format(wageReconciliation.payoutAdjustment)}</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Unmatched earnings</dt><dd className="font-medium text-slate-950 tabular-nums">{overviewCurrency.format(wageReconciliation.pending)}</dd></div>
+                  {wageReconciliation.legacy !== 0 && <div className="flex justify-between gap-4"><dt>Legacy estimated earnings</dt><dd className="font-medium text-slate-950 tabular-nums">{overviewCurrency.format(wageReconciliation.legacy)}</dd></div>}
+                  <div className="flex justify-between gap-4 border-t border-slate-200 pt-2 font-semibold text-slate-950"><dt>Total earnings</dt><dd className="tabular-nums">{overviewCurrency.format(wageReconciliation.earnings)}</dd></div>
+                </dl>
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">Tips in this table: {overviewCurrency.format(wageReconciliation.tips)}. These follow the included pay periods and can differ from restaurant tips by work date.</p>
+                {displayedPaymentTotals.unknown > 0 && <p className="mt-2 text-xs text-slate-500">An unknown payment method means the payout was saved without a payment method.</p>}
               </div>
-            )}
+              <div>
+                <h3 className="mb-3 font-semibold text-slate-950">Included saved pay periods</h3>
+                {scopedPayrollRuns.length > 0 ? (
+                  <ul className="max-h-40 space-y-2 overflow-y-auto text-xs text-slate-600">
+                    {scopedPayrollRuns.map(run => <li key={run.id}>
+                      <span className="font-medium text-slate-800">{formatReportDate(run.start_date)} – {formatReportDate(run.end_date)}</span>
+                      <span className="mt-0.5 block">{getDepartmentLabel(run.department, departmentDefinitions)} · Pay date {formatReportDate(run.pay_date)}</span>
+                    </li>)}
+                  </ul>
+                ) : <p className="text-xs leading-relaxed text-slate-600">No saved payout matches this selection. Earnings use clock records, EOD tips and Staffing pay settings.</p>}
+                {matchingPayrollRun && hasMatchingScopedRun && <p className="mt-3 text-xs text-slate-500">Run created {format(new Date(matchingPayrollRun.created_at), 'MMM d, yyyy h:mm a')}.</p>}
+                {periodPayrollRuns.some(run => run.pay_date > todayDate && (run.payroll_run_items ?? []).some(item => employeeFilter === 'all' || item.employee_id === employeeFilter)) && <p className="mt-3 text-xs text-slate-500">A saved payroll run has a future pay date. Its payout will appear when that date is reached.</p>}
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">Saved amounts include full pay periods without prorating. Unmatched work uses only the selected dates. Review external payments or corrections before treating unmatched work as money owed.</p>
+              </div>
+            </div>
+          </details>
+        </section>
+        <section aria-labelledby="restaurant-tips-heading" className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="restaurant-tips-heading" className="text-base font-semibold text-slate-950">Restaurant tips</h2>
+            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600">All departments · All staff</span>
           </div>
-        </div>
-        <p className="mb-2 text-sm font-semibold">Restaurant tip allocation · All departments · {startDate} to {endDate}</p>
-        <p className="mb-3 text-xs text-muted-foreground">These EOD totals stay the same when filtering employees or departments. They are allocations, not payroll payments.</p>
-        <div className="mb-4 grid gap-3 md:grid-cols-4">
-          <div className="rounded-lg border bg-emerald-50 p-3">
-            <p className="text-xs font-medium uppercase text-emerald-700">Total Tip Collected</p>
-            <p className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(tipSummary.totalCollected)}</p>
-            <p className="mt-0.5 text-[11px] text-emerald-700">EOD total tips in range</p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">EOD work dates: {formatReportDate(startDate)} – {formatReportDate(endDate)}. These totals stay the same when you filter departments or staff.</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <p className="text-sm text-slate-600">Tips collected</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.totalCollected)}</p>
+              <p className="mt-1 text-xs text-slate-500">Total tips reported in EOD</p>
+            </div>
+            <div>
+              <p className="text-sm text-slate-600">Allocated to staff</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.totalTipOut)}</p>
+              <p className="mt-1 text-xs text-slate-500">Tip allocations, before payroll payments</p>
+            </div>
+            <div>
+              <p className="text-sm text-slate-600">Allocated to house</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.houseTip)}</p>
+              <p className="mt-1 text-xs text-slate-500">Saved deductions; 15% for unsaved previews</p>
+            </div>
           </div>
-          <div className="rounded-lg border bg-slate-50 p-3">
-            <p className="text-xs font-medium uppercase text-slate-500">House Tips Allocated</p>
-            <p className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(tipSummary.houseTip)}</p>
-            <p className="mt-0.5 text-[11px] text-slate-500">Saved house deductions; 15% for unsaved previews</p>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs">
+            <p className="text-slate-600">Staff + house allocations <span className="ml-1 font-semibold text-slate-950 tabular-nums">{overviewCurrency.format(tipSummary.distributionTotal)}</span></p>
+            <p className={tipSummary.difference === 0 ? 'font-medium text-emerald-800' : 'font-medium text-amber-900'}>
+              {tipSummary.difference === 0 ? 'Balanced · collected tips fully allocated'
+                : `${overviewCurrency.format(Math.abs(tipSummary.difference))} ${tipSummary.difference > 0 ? 'unallocated' : 'over-allocated'} · review Tip Distribution Editor`}
+            </p>
           </div>
-          <div className="rounded-lg border bg-blue-50 p-3">
-            <p className="text-xs font-medium uppercase text-blue-700">Staff Tips Allocated</p>
-            <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(tipSummary.totalTipOut)}</p>
-            <p className="mt-0.5 text-[11px] text-blue-700">All staff EOD allocations in the selected dates</p>
-          </div>
-          <div className="rounded-lg border bg-violet-50 p-3">
-            <p className="text-xs font-medium uppercase text-violet-700">Distribution Summary</p>
-            <p className="mt-1 text-xl font-bold text-violet-950">{formatCurrency(tipSummary.distributionTotal)}</p>
-            <p className="mt-0.5 text-[11px] text-violet-700">House + staff allocations, all departments</p>
-          </div>
-        </div>
-        <p className="mb-4 text-xs text-muted-foreground">Collected minus allocated: {formatCurrency(tipSummary.difference)}. {tipSummary.difference !== 0 ? 'Review unallocated tips or rounding in Tip Distribution Editor.' : 'Restaurant tip allocations reconcile.'}</p>
-        <p className="mb-2 text-sm font-semibold">Selected payroll · {getDepartmentLabel(department, departmentDefinitions)} · {selectedEmployeeName}</p>
-        <div className="mb-4 grid gap-3 md:grid-cols-4">
-          <div className="rounded-lg border bg-emerald-50 p-3">
-            <p className="text-xs font-medium uppercase text-emerald-700">Cash Pay Out</p>
-            <p className="mt-1 text-xl font-bold text-emerald-950">{formatCurrency(displayedPaymentTotals.cash)}</p>
-          </div>
-          <div className="rounded-lg border bg-slate-50 p-3">
-            <p className="text-xs font-medium uppercase text-slate-500">Check Pay Out</p>
-            <p className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(displayedPaymentTotals.check)}</p>
-          </div>
-          <div className="rounded-lg border bg-blue-50 p-3">
-            <p className="text-xs font-medium uppercase text-blue-700">ACH Pay Out</p>
-            <p className="mt-1 text-xl font-bold text-blue-950">{formatCurrency(displayedPaymentTotals.ach)}</p>
-          </div>
-          <div className="rounded-lg border bg-amber-50 p-3">
-            <p className="text-xs font-medium uppercase text-amber-700">Unmatched Earnings</p>
-            <p className="mt-1 text-xl font-bold text-amber-950">{formatCurrency(unpaidTotal)}</p>
-            <p className="mt-0.5 text-[11px] text-amber-700">Work not matched to a saved payout; review before paying</p>
-            {unmatchedDetails.length > 0 && <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setUnmatchedOpen(true)}>Review unmatched work</Button>}
-          </div>
-        </div>
-        <div className="mb-4 rounded-lg border bg-slate-50 p-3 text-sm" data-wage-reconciliation>
-          <p className="font-semibold">Table earnings {formatCurrency(wageReconciliation.earnings)} = recorded payouts {formatCurrency(wageReconciliation.recordedPayout)} + rounding / payout adjustment {formatCurrency(wageReconciliation.payoutAdjustment)} + unmatched earnings {formatCurrency(wageReconciliation.pending)}{wageReconciliation.legacy !== 0 && ` + legacy estimated earnings ${formatCurrency(wageReconciliation.legacy)}`}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Tips in this table: {formatCurrency(wageReconciliation.tips)}. Saved payroll tips follow the included pay periods; the restaurant cards above follow EOD work dates.</p>
-          {displayedPaymentTotals.unknown > 0 && <p className="mt-1 text-xs text-muted-foreground">Recorded payout includes {formatCurrency(displayedPaymentTotals.unknown)} with an unknown payment method.</p>}
-        </div>
+        </section>
+        <h2 className="mb-3 text-base font-semibold text-slate-950">Staff breakdown <span className="ml-2 text-sm font-normal text-slate-500">{view === 'earnings' ? 'Earnings' : 'Tips only'}</span></h2>
         <Table className={view === 'earnings' ? 'min-w-[1560px]' : 'min-w-[920px]'}>
           <TableHeader><TableRow>
             <TableHead>Name</TableHead><TableHead>Role</TableHead><TableHead>Paid By</TableHead><TableHead>Clock Status</TableHead>

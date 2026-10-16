@@ -79,10 +79,10 @@ function card(tree, label) {
 test('restaurant September allocations stay constant across Server, Cook, Kitchen, and employee filters', () => {
   for (const [department, filter] of [['server', 'all'], ['cook', 'all'], ['kitchen', 'all'], ['cook', 'cook']]) {
     const {tree} = fixture(department, filter).render()
-    assert.match(text(card(tree, 'Total Tip Collected')), /\$300\.00/)
-    assert.match(text(card(tree, 'House Tips Allocated')), /\$45\.00/)
-    assert.match(text(card(tree, 'Staff Tips Allocated')), /\$255\.00/)
-    assert.match(text(card(tree, 'Distribution Summary')), /\$300\.00/)
+    assert.match(text(card(tree, 'Tips collected')), /\$300\.00/)
+    assert.match(text(card(tree, 'Allocated to house')), /\$45\.00/)
+    assert.match(text(card(tree, 'Allocated to staff')), /\$255\.00/)
+    assert.match(text(tree), /Staff \+ house allocations \$300\.00/)
   }
 })
 
@@ -92,7 +92,7 @@ test('saved pay periods, commissions, cash rounding, and selected table tips rem
   assert.match(html, /8\/31\/2026/)
   assert.match(html, /10\/4\/2026/)
   const equation = elements(tree).find(node => 'data-wage-reconciliation' in node.props)
-  assert.match(text(equation), /Table earnings \$430\.75 = recorded payouts \$430\.00 \+ rounding \/ payout adjustment \$0\.75 \+ unmatched earnings \$0\.00/)
+  assert.match(text(equation), /Recorded payouts\$430\.00Rounding \/ payout adjustment\$0\.75Unmatched earnings\$0\.00Total earnings\$430\.75/)
   assert.match(text(equation), /Tips in this table: \$300\.00/)
   const footer = elements(tree).find(node => node.type === 'tfoot')
   assert.match(text(footer), /\$430\.75$/)
@@ -103,9 +103,9 @@ test('unmatched Cook work stays visible alongside saved payouts and can be trace
   const ui = fixture('cook')
   let {tree, html} = ui.render()
   assert.match(html, /Fixture unmatched/)
-  assert.match(text(card(tree, 'Unmatched Earnings')), /\$109\.60/)
+  assert.match(text(card(tree, 'Unmatched earnings')), /\$109\.60/)
   const equation = elements(tree).find(node => 'data-wage-reconciliation' in node.props)
-  assert.match(text(equation), /Table earnings \$310\.00 = recorded payouts \$200\.00 \+ rounding \/ payout adjustment \$0\.40 \+ unmatched earnings \$109\.60/)
+  assert.match(text(equation), /Recorded payouts\$200\.00Rounding \/ payout adjustment\$0\.40Unmatched earnings\$109\.60Total earnings\$310\.00/)
   assert.match(text(elements(tree).find(node => node.type === 'tfoot')), /\$310\.00$/)
   elements(tree).find(node => node.props.onClick && text(node) === 'Review unmatched work').props.onClick()
   ;({html} = ui.render())
@@ -118,17 +118,17 @@ test('Kitchen and individual employee totals use the same payout scope as their 
   for (const [department, filter, expected] of [['kitchen', 'all', '300.65'], ['cook', 'cook', '200.40']]) {
     const {tree} = fixture(department, filter).render()
     const equation = elements(tree).find(node => 'data-wage-reconciliation' in node.props)
-    assert.ok(text(equation).includes(`Table earnings $${expected}`))
-    assert.match(text(card(tree, 'Unmatched Earnings')), /\$0\.00/)
+    assert.ok(text(equation).includes(`Total earnings$${expected}`))
+    assert.match(text(card(tree, 'Unmatched earnings')), /\$0\.00/)
     assert.ok(text(elements(tree).find(node => node.type === 'tfoot')).endsWith(`$${expected}`))
   }
   const {tree} = fixture('all').render()
-  assert.match(text(card(tree, 'Unmatched Earnings')), /\$109\.60/)
+  assert.match(text(card(tree, 'Unmatched earnings')), /\$109\.60/)
   assert.match(text(elements(tree).find(node => node.type === 'tfoot')), /\$2041\.40$/)
   const selectedUnmatched = fixture('cook', 'unmatched').render()
-  assert.match(text(card(selectedUnmatched.tree, 'Unmatched Earnings')), /\$109\.60/)
-  assert.match(selectedUnmatched.html, /Preview Only/)
-  assert.doesNotMatch(selectedUnmatched.html, /Included saved periods:/)
+  assert.match(text(card(selectedUnmatched.tree, 'Unmatched earnings')), /\$109\.60/)
+  assert.match(selectedUnmatched.html, /No saved payout matches this selection/)
+  assert.doesNotMatch(selectedUnmatched.html, /Saved payouts included/)
 })
 
 test('payday itself and another department do not falsely mark a worked day paid', () => {
