@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { APP_SESSION_COOKIE } from '@/lib/appAuth'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { loadLegacyDashboardPayroll } from '@/lib/loadLegacyDashboardPayroll'
+import type { HistoricalAdjustments } from '@/lib/historicalDashboardTotals'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,5 +52,10 @@ export async function GET() {
     || value.version !== 1 || !Array.isArray(value.sales) || !Array.isArray(value.payroll)) {
     return NextResponse.json({ data: null }, { headers: { 'cache-control': 'no-store' } })
   }
-  return NextResponse.json({ data: value }, { headers: { 'cache-control': 'no-store' } })
+  try {
+    const legacyPayroll = await loadLegacyDashboardPayroll((value as HistoricalAdjustments).payroll)
+    return NextResponse.json({ data: { ...value, legacy_payroll: legacyPayroll } }, { headers: { 'cache-control': 'no-store' } })
+  } catch {
+    return NextResponse.json({ data: { ...value, legacy_error: 'Legacy Wage Report earnings could not be loaded. Payroll totals are incomplete.' } }, { headers: { 'cache-control': 'no-store' } })
+  }
 }

@@ -19,16 +19,16 @@ export function load(file, overrides = {}, globals = {}) {
 }
 
 export function dashboardFixture(options = {}) {
-  const reports = Array.from({length: 12}, (_, index) => ({
+  const reports = options.reports ?? Array.from({length: 12}, (_, index) => ({
     id: `fixture-${index}`, session_date: `2026-${String(index + 1).padStart(2, '0')}-14`,
     revenue_total: 2000 + index * 100, sales_tax: 150, tip_total: 300, cash_total: 500,
     batch_total: 1500 + index * 100, delivery_order_amount: 100,
     tip_distributions: [{employee_id: 'fixture-employee', net_tip: 255}],
   }))
-  const payrollRuns = [{id: 'fixture-run', pay_date: '2026-10-14', total_cash: 0, total_check: 1000, total_ach: 0,
+  const payrollRuns = options.payrollRuns ?? [{id: 'fixture-run', pay_date: '2026-10-14', total_cash: 0, total_check: 1000, total_ach: 0,
     payroll_run_items: [{tips: 255, payout_amount: 1000, net_pay: 1000, payment_method: 'check', department: 'server'}]}]
-  const state = [options.period ?? 'monthly', new Date('2026-10-15T12:00:00'), options.chart ?? 'net',
-    options.start ?? '', options.end ?? '', [1], [], {version: 1, sales: [], payroll: []}, options.historicalError ?? null,
+  const state = [options.period ?? 'monthly', new Date(options.refDate ?? '2026-10-15T12:00:00'), options.chart ?? 'net',
+    options.start ?? '', options.end ?? '', [1], [], options.historical ?? {version: 1, sales: [], payroll: []}, options.historicalError ?? null,
     options.cashLoading ?? false, options.cashError ?? null]
   let cursor = 0, refIndex = 0
   const calls = []

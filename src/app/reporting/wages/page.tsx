@@ -15,13 +15,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmployeeInDepartment } from '@/lib/reporting'
-import { clockMatchesWorkDepartment, getClockWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
+import { clockMatchesWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getDepartmentLabel, getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
 import { escapeHtml } from '@/lib/emailUtils'
 import { exportReportToExcel, type ExcelColumn, type ExcelReportSheet } from '@/lib/reportExcel'
 import { calculateDailyTipPreview, getSavedDailyTips, shouldRecalculateTips } from '@/lib/dailyTips'
-import { getDailyGuaranteeTopUp, getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
+import { getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
+import { calculateDailyWageDetail } from '@/lib/dailyWages'
 import { reconcileWageRows, summarizeRestaurantTips, wageDetailMatchesPayroll } from '@/lib/wageReportReconciliation'
 import { buildWagePayoutGroups, wagePaymentMethods, type WageWorkDetail } from '@/lib/wageReportDetails'
 import type { Employee, PaymentMethod, Schedule, ShiftClock } from '@/lib/types'
@@ -63,16 +64,6 @@ type WageSummaryRow = {
   legacyEarnings?: number
 }
 
-type DailyTipPreview = {
-  hours: number
-  tips: number
-}
-
-type SavedDailyTip = {
-  hours: number
-  tips: number
-}
-
 function getReportPaymentMethod(paymentMethod: PaymentMethod | null | undefined): ReportPaymentMethod {
   return paymentMethod ?? 'unknown'
 }
@@ -112,63 +103,8 @@ function recordMatchesDepartment(
   return clockMatchesWorkDepartment(record, department, employee, schedules)
 }
 
-function getDailyWageDetail({
-  emp,
-  date,
-  clockRecordsByEmployeeDate,
-  employees,
-  department,
-  schedules,
-  report,
-  calculatedTip,
-  savedTip,
-  useCalculatedTips,
-}: {
-  emp: Employee
-  date: string
-  clockRecordsByEmployeeDate: Map<string, ShiftClock[]>
-  employees: Employee[]
-  department: ReportDepartment
-  schedules: Schedule[]
-  report?: ReturnType<typeof useEodReports>['eodReports'][number]
-  calculatedTip?: DailyTipPreview
-  savedTip?: SavedDailyTip
-  useCalculatedTips: boolean
-}): WageDetailRow | null {
-  const matchingClockRecords = (clockRecordsByEmployeeDate.get(`${emp.id}:${date}`) ?? [])
-    .filter(record => recordMatchesDepartment(record, getClockRecordEmployee(record, employees) ?? emp, department, schedules))
-  const clockHours = matchingClockRecords.reduce((sum, record) => sum + getEffectiveClockHours(record), 0)
-  const mealBreakMinutes = matchingClockRecords.reduce((sum, record) => sum + getMealBreakState(record).minutes, 0)
-  const hasDepartmentClock = matchingClockRecords.length > 0
-  const calculatedHours = calculatedTip?.hours ?? 0
-  const savedHours = savedTip?.hours ?? 0
-  const hours = useCalculatedTips
-    ? (clockHours > 0 ? clockHours : hasDepartmentClock ? calculatedHours : 0)
-    : (hasDepartmentClock && savedHours > 0 ? savedHours : clockHours)
-  const tips = report
-    ? hasDepartmentClock ? (useCalculatedTips ? (calculatedTip?.tips ?? 0) : (savedTip?.tips ?? 0)) : 0
-    : 0
-
-  if (hours <= 0 && tips <= 0) return null
-
-  const baseWages = hours * Number(emp.hourly_wage ?? 0)
-  const guaranteeTopUp = getDailyGuaranteeTopUp(emp, hours, tips)
-
-  return {
-    date,
-    workDepartment: department !== 'all' ? department : (() => {
-      const departments = new Set(matchingClockRecords.map(record => getClockWorkDepartment(record, emp, schedules)))
-      return departments.size === 1 ? [...departments][0] : undefined
-    })(),
-    hours,
-    mealBreakMinutes,
-    tips,
-    baseWages,
-    guaranteeTopUp,
-    commission: 0,
-    deductions: 0,
-    totalEarnings: baseWages + tips + guaranteeTopUp,
-  }
+function getDailyWageDetail(args: Parameters<typeof calculateDailyWageDetail>[0]): WageDetailRow | null {
+  return calculateDailyWageDetail(args)
 }
 
 export default function WageReportPage() {

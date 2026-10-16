@@ -16,8 +16,11 @@ import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { CashBalanceEntry, EodReport, PayrollRun, PayrollRunItem, TipDistribution } from '@/lib/types'
 import { getPayrollPaymentBreakdown } from '@/lib/payroll'
+import { summarizeLegacyPayroll, type LegacyPayrollDay } from '@/lib/legacyDashboardPayroll'
 import { exportDashboardToPdf } from '@/lib/dashboardPdf'
 import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, Download, ReceiptText, Truck, Wallet } from 'lucide-react'
+
+type DashboardHistoricalData = HistoricalAdjustments & { legacy_payroll?: LegacyPayrollDay[]; legacy_error?: string }
 
 type DashboardPeriod = 'weekly' | 'monthly' | 'yearly' | 'custom'
 
@@ -321,6 +324,14 @@ function buildPayrollRunSeries(
   }))
 }
 
+function mergeLegacyPayrollSeries(points: SeriesPoint[], days: LegacyPayrollDay[], key: 'tipOut' | 'payrollOut' | 'totalPayrollOut'): SeriesPoint[] {
+  const byDate = new Map<string, SeriesPoint>()
+  for (const point of [...points, ...days.map(day => ({ date: day.date, label: day.date, value: day[key], closed: false }))]) {
+    byDate.set(point.date, { ...point, value: (byDate.get(point.date)?.value ?? 0) + point.value })
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
 function toMonthlySeries(points: Array<{ date: string; value: number }>): SeriesPoint[] {
   return points.map(point => ({
     ...point,
@@ -559,7 +570,7 @@ export default function ReportingDashboardPage() {
   const [customEnd, setCustomEnd] = useState('')
   const [closedDays, setClosedDays] = useState<number[]>(loadClosedDays)
   const [cashEntries, setCashEntries] = useState<CashBalanceEntry[]>([])
-  const [historical, setHistorical] = useState<HistoricalAdjustments | null>(null)
+  const [historical, setHistorical] = useState<DashboardHistoricalData | null>(null)
   const [historicalError, setHistoricalError] = useState<string | null>(null)
   const [cashLoading, setCashLoading] = useState(true)
   const [cashError, setCashError] = useState<string | null>(null)
@@ -571,7 +582,7 @@ export default function ReportingDashboardPage() {
         if (!response.ok) throw new Error(response.status === 401
           ? 'Sign in with a manager email account to include the imported 2026 totals.'
           : 'Imported 2026 totals could not be loaded.')
-        return response.json() as Promise<{ data: HistoricalAdjustments | null }>
+        return response.json() as Promise<{ data: DashboardHistoricalData | null }>
       })
       .then(result => {
         if (!result.data) throw new Error('Imported 2026 totals are missing.')
@@ -666,7 +677,12 @@ export default function ReportingDashboardPage() {
   const previousImportedSales = useMemo(() => periodRows(importedSales, previousStartDate, previousEndDate), [importedSales, previousEndDate, previousStartDate])
   const currentImportedPayroll = useMemo(() => periodRows(importedPayroll, startDate, endDate), [endDate, importedPayroll, startDate])
   const previousImportedPayroll = useMemo(() => periodRows(importedPayroll, previousStartDate, previousEndDate), [importedPayroll, previousEndDate, previousStartDate])
-  const hasCurrentSavedPayroll = currentPayrollRuns.length > 0 || currentImportedPayroll.length > 0
+  const legacyPayroll = useMemo(() => historical?.legacy_payroll ?? [], [historical])
+  const currentLegacyPayroll = useMemo(() => legacyPayroll.filter(day => day.date >= startDate && day.date <= endDate), [legacyPayroll, startDate, endDate])
+  const previousLegacyPayroll = useMemo(() => legacyPayroll.filter(day => day.date >= previousStartDate && day.date <= previousEndDate), [legacyPayroll, previousStartDate, previousEndDate])
+  const currentLegacyTotals = useMemo(() => summarizeLegacyPayroll(currentLegacyPayroll), [currentLegacyPayroll])
+  const previousLegacyTotals = useMemo(() => summarizeLegacyPayroll(previousLegacyPayroll), [previousLegacyPayroll])
+  const hasCurrentSavedPayroll = currentPayrollRuns.length > 0 || currentImportedPayroll.length > 0 || currentLegacyPayroll.length > 0
   const currentImportedRevenueTotals = useMemo(() => historicalRevenue(currentImportedSales), [currentImportedSales])
   const previousImportedRevenueTotals = useMemo(() => historicalRevenue(previousImportedSales), [previousImportedSales])
   const currentImportedPayrollTotals = useMemo(() => historicalPayroll(currentImportedPayroll), [currentImportedPayroll])
@@ -676,24 +692,24 @@ export default function ReportingDashboardPage() {
     const saved = summarizePayrollRuns(currentPayrollRuns)
     return {
       ...saved,
-      tipOut: saved.tipOut + currentImportedPayrollTotals.tipOut,
-      payrollOut: saved.payrollOut + currentImportedPayrollTotals.payrollOut,
-      totalPayrollOut: saved.totalPayrollOut + currentImportedPayrollTotals.totalPayrollOut,
+      tipOut: saved.tipOut + currentImportedPayrollTotals.tipOut + currentLegacyTotals.tipOut,
+      payrollOut: saved.payrollOut + currentImportedPayrollTotals.payrollOut + currentLegacyTotals.payrollOut,
+      totalPayrollOut: saved.totalPayrollOut + currentImportedPayrollTotals.totalPayrollOut + currentLegacyTotals.totalPayrollOut,
       cashPayrollOut: saved.cashPayrollOut + currentImportedPayrollTotals.cashPayrollOut,
       checkPayrollOut: saved.checkPayrollOut + currentImportedPayrollTotals.checkPayrollOut,
     }
-  }, [currentImportedPayrollTotals, currentPayrollRuns])
+  }, [currentImportedPayrollTotals, currentPayrollRuns, currentLegacyTotals])
   const previousPayrollSummary = useMemo(() => {
     const saved = summarizePayrollRuns(previousPayrollRuns)
     return {
       ...saved,
-      tipOut: saved.tipOut + previousImportedPayrollTotals.tipOut,
-      payrollOut: saved.payrollOut + previousImportedPayrollTotals.payrollOut,
-      totalPayrollOut: saved.totalPayrollOut + previousImportedPayrollTotals.totalPayrollOut,
+      tipOut: saved.tipOut + previousImportedPayrollTotals.tipOut + previousLegacyTotals.tipOut,
+      payrollOut: saved.payrollOut + previousImportedPayrollTotals.payrollOut + previousLegacyTotals.payrollOut,
+      totalPayrollOut: saved.totalPayrollOut + previousImportedPayrollTotals.totalPayrollOut + previousLegacyTotals.totalPayrollOut,
       cashPayrollOut: saved.cashPayrollOut + previousImportedPayrollTotals.cashPayrollOut,
       checkPayrollOut: saved.checkPayrollOut + previousImportedPayrollTotals.checkPayrollOut,
     }
-  }, [previousImportedPayrollTotals, previousPayrollRuns])
+  }, [previousImportedPayrollTotals, previousPayrollRuns, previousLegacyTotals])
   const overviewYearDate = useMemo(
     () => period === 'custom' && customStart ? toDate(customStart) : refDate,
     [customStart, period, refDate],
@@ -713,6 +729,7 @@ export default function ReportingDashboardPage() {
       const monthImportedPayroll = periodRows(importedPayroll, monthStart, monthEnd)
       const importedRevenue = historicalRevenue(monthImportedSales)
       const importedPay = historicalPayroll(monthImportedPayroll)
+      const legacyPay = summarizeLegacyPayroll(legacyPayroll.filter(day => day.date >= monthStart && day.date <= monthEnd))
       const revenue = monthReports.reduce((sum, report) => sum + getNetRevenue(report), 0) + importedRevenue.net
 
       return {
@@ -721,13 +738,13 @@ export default function ReportingDashboardPage() {
         hasData: monthReports.length > 0 || monthPayrollRuns.length > 0 || monthClockRecords.length > 0
           || monthImportedSales.length > 0 || monthImportedPayroll.length > 0,
         revenue,
-        payroll: monthPayrollSummary.totalPayrollOut + importedPay.totalPayrollOut,
-        source: monthImportedSales.length + monthImportedPayroll.length > 0
+        payroll: monthPayrollSummary.totalPayrollOut + importedPay.totalPayrollOut + legacyPay.totalPayrollOut,
+        source: legacyPay.totalPayrollOut > 0 ? 'Incl. legacy' : monthImportedSales.length + monthImportedPayroll.length > 0
           ? monthReports.length + monthPayrollRuns.length > 0 ? 'Saved + import' : 'Imported'
           : 'Paid out',
       }
     }).filter(month => month.hasData)
-  }, [clockRecords, eodReports, importedPayroll, importedSales, overviewYearDate, payrollRuns])
+  }, [clockRecords, eodReports, importedPayroll, importedSales, overviewYearDate, payrollRuns, legacyPayroll])
   const payrollByDepartment = useMemo(() => {
     const map = new Map<string, number>()
     for (const run of currentPayrollRuns) {
@@ -743,8 +760,12 @@ export default function ReportingDashboardPage() {
     })) {
       if (amount > 0) map.set(department, (map.get(department) ?? 0) + amount)
     }
+    for (const day of currentLegacyPayroll) {
+      const department = day.department ?? 'server'
+      map.set(department, (map.get(department) ?? 0) + day.totalPayrollOut)
+    }
     return [...map.entries()].sort((a, b) => b[1] - a[1])
-  }, [currentImportedPayrollTotals, currentPayrollRuns])
+  }, [currentImportedPayrollTotals, currentPayrollRuns, currentLegacyPayroll])
   const payrollPanel = useMemo(() => {
     const totals = {
       kitchen: 0,
@@ -772,15 +793,16 @@ export default function ReportingDashboardPage() {
       }
     }
 
+    for (const day of currentLegacyPayroll) totals[day.department ?? 'server'] += day.payrollOut
     totals.server += currentImportedPayrollTotals.serverWages
     totals.kitchen += currentImportedPayrollTotals.kitchen
     totals.manager += currentImportedPayrollTotals.manager
-    totals.tipOut += currentImportedPayrollTotals.tipOut
-    totals.payroll += currentImportedPayrollTotals.payrollOut
-    totals.payrollWithTip += currentImportedPayrollTotals.totalPayrollOut
+    totals.tipOut += currentImportedPayrollTotals.tipOut + currentLegacyTotals.tipOut
+    totals.payroll += currentImportedPayrollTotals.payrollOut + currentLegacyTotals.payrollOut
+    totals.payrollWithTip += currentImportedPayrollTotals.totalPayrollOut + currentLegacyTotals.totalPayrollOut
 
     return totals
-  }, [currentImportedPayrollTotals, currentPayrollRuns])
+  }, [currentImportedPayrollTotals, currentPayrollRuns, currentLegacyTotals, currentLegacyPayroll])
 
   const currentTotals = useMemo(() => {
     const saved = sumReports(currentReports, currentCashEntries, currentPayrollSummary, 0, true)
@@ -863,7 +885,8 @@ export default function ReportingDashboardPage() {
     type PayrollMetric = 'tipOut' | 'payrollOut' | 'totalPayrollOut' | 'cashPayrollOut'
       | 'checkPayrollOut' | 'achPayrollOut' | 'unknownPayrollOut'
     const seriesFor = (key: PayrollMetric) => toMonthlySeries(monthlyTrendValues(
-      saved.map(run => ({ date: run.date, value: run.totals[key] })),
+      [...saved.map(run => ({ date: run.date, value: run.totals[key] })),
+        ...currentLegacyPayroll.map(day => ({ date: day.date, value: key === 'tipOut' || key === 'payrollOut' || key === 'totalPayrollOut' ? day[key] : 0 }))],
       imported.map(row => ({ start_date: row.start_date, end_date: row.end_date, value: row.totals[key] })),
     ))
     const savedDepartments = currentPayrollRuns.flatMap(run => (run.payroll_run_items ?? []).map(item => {
@@ -881,7 +904,8 @@ export default function ReportingDashboardPage() {
       }
     }))
     const departmentSeriesFor = (key: 'kitchen' | 'server' | 'manager' | 'commission') => toMonthlySeries(monthlyTrendValues(
-      savedDepartments.map(item => ({ date: item.date, value: item[key] })),
+      [...savedDepartments.map(item => ({ date: item.date, value: item[key] })),
+        ...currentLegacyPayroll.map(day => ({ date: day.date, value: key === (day.department ?? 'server') ? day.payrollOut : 0 }))],
       imported.map(row => ({
         start_date: row.start_date,
         end_date: row.end_date,
@@ -896,7 +920,7 @@ export default function ReportingDashboardPage() {
       kitchenPayroll: departmentSeriesFor('kitchen'), serverPayroll: departmentSeriesFor('server'),
       managerPayroll: departmentSeriesFor('manager'), commission: departmentSeriesFor('commission'),
     }
-  }, [currentImportedPayroll, currentPayrollRuns, period])
+  }, [currentImportedPayroll, currentPayrollRuns, currentLegacyPayroll, period])
 
   const netSeries = useMemo(
     () => yearlySalesSeries?.net ?? buildSeries(currentDates, reportsByDate, closedDays, period, getNetRevenue),
@@ -907,8 +931,8 @@ export default function ReportingDashboardPage() {
     [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const tipOutSeries = useMemo(
-    () => yearlyPayrollSeries?.tipOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.tipOut),
-    [currentPayrollRuns, yearlyPayrollSeries]
+    () => yearlyPayrollSeries?.tipOut ?? mergeLegacyPayrollSeries(buildPayrollRunSeries(currentPayrollRuns, summary => summary.tipOut), currentLegacyPayroll, 'tipOut'),
+    [currentPayrollRuns, currentLegacyPayroll, yearlyPayrollSeries]
   )
   const taxSeries = useMemo(
     () => yearlySalesSeries?.tax ?? buildSeries(currentDates, reportsByDate, closedDays, period, report => Number(report.sales_tax ?? 0)),
@@ -927,11 +951,11 @@ export default function ReportingDashboardPage() {
     [closedDays, currentDates, period, reportsByDate, yearlySalesSeries]
   )
   const payrollOutSeries = useMemo(() => {
-    return yearlyPayrollSeries?.payrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.payrollOut)
-  }, [currentPayrollRuns, yearlyPayrollSeries])
+    return yearlyPayrollSeries?.payrollOut ?? mergeLegacyPayrollSeries(buildPayrollRunSeries(currentPayrollRuns, summary => summary.payrollOut), currentLegacyPayroll, 'payrollOut')
+  }, [currentPayrollRuns, currentLegacyPayroll, yearlyPayrollSeries])
   const totalPayrollOutSeries = useMemo(() => {
-    return yearlyPayrollSeries?.totalPayrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.totalPayrollOut)
-  }, [currentPayrollRuns, yearlyPayrollSeries])
+    return yearlyPayrollSeries?.totalPayrollOut ?? mergeLegacyPayrollSeries(buildPayrollRunSeries(currentPayrollRuns, summary => summary.totalPayrollOut), currentLegacyPayroll, 'totalPayrollOut')
+  }, [currentPayrollRuns, currentLegacyPayroll, yearlyPayrollSeries])
   const cashPayrollOutSeries = useMemo(
     () => yearlyPayrollSeries?.cashPayrollOut ?? buildPayrollRunSeries(currentPayrollRuns, summary => summary.cashPayrollOut),
     [currentPayrollRuns, yearlyPayrollSeries]
@@ -1054,6 +1078,7 @@ export default function ReportingDashboardPage() {
 
       <MissingTipDistributionNotice reports={eodReports} startDate={startDate} endDate={endDate} />
       {historicalError && <p className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{historicalError} Dashboard totals below are incomplete.</p>}
+      {historical?.legacy_error && <p role="alert" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{historical.legacy_error}</p>}
       {eodError && <p role="alert" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{eodError}</p>}
       {cashError && <p role="alert" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{cashError}</p>}
       {importedPayrollConflicts > 0 && <p role="alert" className="mb-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{importedPayrollConflicts} overlapping payroll period(s) excluded pending reconciliation.</p>}
@@ -1122,9 +1147,15 @@ export default function ReportingDashboardPage() {
         </div>
         {historical && <p className="mt-3 text-xs text-muted-foreground">
           2026 totals include the imported missing-period sales and payroll amounts when the selected range covers their full source period.
-          Yearly charts use the same monthly imported totals. Day and week charts show only dated EOD and payout records.
+          Yearly charts use the same monthly imported totals. Day and week charts show dated EOD, payout, and legacy earnings records.
         </p>}
       </div>
+
+      {legacyPayroll.length > 0 && <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950" data-pdf-section="legacy-payroll">
+        Payroll includes legacy FOH earnings from Wage Report for work before saved payroll began, using current wage settings and saved or recalculated EOD tips.
+        {currentLegacyTotals.totalPayrollOut > 0 && <> This range includes <strong>{formatCurrency(currentLegacyTotals.totalPayrollOut)}</strong> in legacy estimates ({formatCurrency(currentLegacyTotals.payrollOut)} wages + {formatCurrency(currentLegacyTotals.tipOut)} tips).</>}
+        {' '}Legacy estimates use work dates; saved payouts use pay dates. Cash, check, and ACH totals show recorded payments only.
+      </div>}
 
       <div className="mb-5 rounded-xl border bg-white p-4" data-pdf-section="overview">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -1269,15 +1300,15 @@ export default function ReportingDashboardPage() {
             </button>
           </div>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-            <p>Collected tips use EOD and imported business periods. Saved tip payouts use pay dates; imported tip payouts use the sheet period.</p>
+            <p>Collected tips use EOD and imported business periods. Saved tip payouts use pay dates; imported tips use sheet periods; legacy tip estimates use work dates.</p>
             <p>{payrollLoading
               ? 'Loading paid payroll summaries...'
               : payrollError
                 ? `Payroll payout data could not be loaded: ${payrollError}`
                 : hasCurrentSavedPayroll
-                  ? 'Saved paid payouts use pay dates; imported missing-period totals use the sheet dates.'
+                  ? 'Saved payouts use pay dates; imports use sheet dates; legacy estimates use work dates.'
                   : 'No saved payout or imported payroll total is recorded for this range.'}</p>
-            <p>Payroll cards include saved payouts and non-overlapping imported totals. Clocked hours and unpaid worksheet estimates are excluded.</p>
+            <p>Payroll cards include saved payouts, imported totals, and uncovered legacy FOH earnings from Wage Report. Newer unsaved worksheet estimates are excluded.</p>
             {currentTotals.net <= 0 && <p>Payroll / Net Sales is unavailable when net sales are zero or negative.</p>}
             {netSalesWithTips <= 0 && <p>Total Payroll / (Net Sales + Total Tips) is unavailable when net sales plus collected tips are zero or negative.</p>}
           </div>
@@ -1315,7 +1346,7 @@ export default function ReportingDashboardPage() {
             <p className="text-xs font-medium uppercase text-muted-foreground">Payroll By Department</p>
             <h2 className="text-lg font-semibold text-slate-950">Payroll by department (including tips)</h2>
           </div>
-          <Badge variant="outline">Saved + imported</Badge>
+          <Badge variant="outline">{currentLegacyTotals.totalPayrollOut > 0 ? 'Includes legacy estimate' : 'Saved + imported'}</Badge>
         </div>
         {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-4" data-pdf-grid="departments">

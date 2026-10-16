@@ -95,7 +95,7 @@ test('daily guarantee totals match Wage Report and Payroll Worksheet without off
   assert.equal(aliceRow.tips, 212.5)
   assert.equal(aliceRow.guarantee_top_up, 7.5)
   assert.equal(aliceRow.net_pay, 320)
-  const wage = extract('src/app/reporting/wages/page.tsx', ['getClockRecordEmployee', 'recordMatchesDepartment', 'getDailyWageDetail'], { ...clockUtils, ...payroll })
+  const wage = extract('src/app/reporting/wages/page.tsx', ['getClockRecordEmployee', 'recordMatchesDepartment', 'getDailyWageDetail'], { ...clockUtils, ...payroll, ...load('src/lib/dailyWages.ts') })
   const byEmployeeDate = new Map(clocks.map(record => [`${record.employee_id}:${record.session_date}`, [record]]))
   let wageTotal = 0
   for (const report of reports) {
