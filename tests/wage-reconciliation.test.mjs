@@ -37,7 +37,7 @@ const runs = [
 
 function fixture(department, filter = 'all', options = {}) {
   const pdfCalls = []
-  const states = [department, 'monthly', new Date('2026-09-15T12:00:00'), '', '', 'earnings', filter]
+  const states = [department, 'monthly', new Date('2026-09-15T12:00:00'), '', '', options.view ?? 'earnings', filter]
   let cursor = 0
   const blocks = names => Object.fromEntries(names.map(name => [name, ({children}) => React.createElement('div', null, children)]))
   const tableBlocks = load('src/components/ui/table.tsx')
@@ -240,4 +240,17 @@ test('saved payout receipts preserve deductions, manual splits, zero hours and h
   salaried.payroll_run_items[0].employee_id = null
   assert.equal(buildWagePayoutGroups({runs: [salaried], employee, department: 'all', details: [], legacyCutoff: null}).length, 1)
   assert.equal(buildWagePayoutGroups({runs: [salaried], employee, department: 'server', details: [], legacyCutoff: null}).length, 0)
+})
+
+
+test('Tip Only PDF keeps wage, commission and payout amounts out of the tip-only export', () => {
+  const ui = fixture('server', 'all', {view: 'tips'})
+  let {tree} = ui.render()
+  elements(staffTable(tree)).find(node => node.props['aria-label'] === 'View payout details for Fixture server').props.onClick()
+  ;({tree} = ui.render())
+  elements(tree).find(node => node.props.onClick && text(node) === 'PDF Export').props.onClick()
+  const html = ui.pdfCalls[0][1]
+  assert.match(html, /<strong>Tips<\/strong>/)
+  assert.doesNotMatch(html, /<th>Commission<\/th>|<strong>Commission<\/strong>|Saved payout details/)
+  assert.doesNotMatch(html, /\$160\.75|\$430\.75/)
 })

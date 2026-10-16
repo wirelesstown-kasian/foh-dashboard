@@ -635,7 +635,7 @@ export default function WageReportPage() {
         ${view === 'earnings' ? `<div class="card"><strong>Deductions</strong><div class="metric">${formatCurrency(row.deductions)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Total Earnings</strong><div class="metric">${formatCurrency(row.totalEarnings)}</div></div>` : ''}
       </div>
-      ${savedPayoutHtml ? `<h3>Saved payout details</h3><table class="compact-table"><thead><tr><th>Pay date / period</th><th>Department</th><th>Hours</th><th>Base / salary</th><th>Tips</th><th>Top-up</th><th>Commission</th><th>Deductions</th><th>Total earnings</th><th>Payment details</th><th>Recorded payout</th></tr></thead><tbody>${savedPayoutHtml}</tbody></table>` : ''}
+      ${view === 'earnings' && savedPayoutHtml ? `<h3>Saved payout details</h3><table class="compact-table"><thead><tr><th>Pay date / period</th><th>Department</th><th>Hours</th><th>Base / salary</th><th>Tips</th><th>Top-up</th><th>Commission</th><th>Deductions</th><th>Total earnings</th><th>Payment details</th><th>Recorded payout</th></tr></thead><tbody>${savedPayoutHtml}</tbody></table>` : ''}
       <h3>Work-date history</h3>
       <p>
         Included saved pay periods and unmatched work total ${row.hours.toFixed(2)} hours and ${formatCurrency(row.tips)} in tips for ${escapeHtml(row.emp.name)}.
