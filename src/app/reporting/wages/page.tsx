@@ -18,10 +18,12 @@ import { ReportDepartment, ReportPeriod, formatCurrency, getReportRange, isEmplo
 import { clockMatchesWorkDepartment, getClockWorkDepartment, getMealBreakState, shouldWarnMissingMealBreak, getEffectiveClockHours, isClockPending } from '@/lib/clockUtils'
 import { getDepartmentLabel, getRoleLabel } from '@/lib/organization'
 import { exportReportToPdf } from '@/lib/reportExport'
+import { escapeHtml } from '@/lib/emailUtils'
 import { exportReportToExcel, type ExcelColumn, type ExcelReportSheet } from '@/lib/reportExcel'
 import { calculateDailyTipPreview, getSavedDailyTips, shouldRecalculateTips } from '@/lib/dailyTips'
 import { getDailyGuaranteeTopUp, getPayrollPaymentBreakdown, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
 import { reconcileWageRows, summarizeRestaurantTips, wageDetailMatchesPayroll } from '@/lib/wageReportReconciliation'
+import { buildWagePayoutGroups, wagePaymentMethods, type WageWorkDetail } from '@/lib/wageReportDetails'
 import type { Employee, PaymentMethod, Schedule, ShiftClock } from '@/lib/types'
 
 function getRankMap<T>(items: T[], getValue: (item: T) => number, getId: (item: T) => string) {
@@ -36,20 +38,9 @@ function scoreFromRank(rank: number, count: number) {
 
 type TipReportView = 'earnings' | 'tips'
 type ReportPaymentMethod = PaymentMethod | 'unknown'
+type WageSortKey = 'name' | 'role' | 'paymentMethod' | 'hours' | 'tips' | 'baseWages' | 'guaranteeTopUp' | 'commission' | 'deductions' | 'totalEarnings'
 
-type WageDetailRow = {
-  date: string
-  workDepartment?: string
-  sourceRunId?: string
-  hours: number
-  mealBreakMinutes: number
-  tips: number
-  baseWages: number
-  guaranteeTopUp: number
-  commission: number
-  deductions: number
-  totalEarnings: number
-}
+type WageDetailRow = WageWorkDetail
 
 type WageSummaryRow = {
   emp: Employee
@@ -204,6 +195,8 @@ export default function WageReportPage() {
   const [expandedDetailGroupKey, setExpandedDetailGroupKey] = useState<string | null>(null)
   const [emailingEmployeeId, setEmailingEmployeeId] = useState<string | null>(null)
   const [unmatchedOpen, setUnmatchedOpen] = useState(false)
+  const [sortKey, setSortKey] = useState<WageSortKey>('name')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
   const [startDate, endDate] = useMemo(
     () => getReportRange(period, refDate, customStart, customEnd),
@@ -620,22 +613,32 @@ export default function WageReportPage() {
 
   const buildWageReportHtml = (row: WageSummaryRow) => {
     const details = detailRowsByEmployeeId.get(row.emp.id) ?? []
+    const payoutGroups = buildWagePayoutGroups({ runs: completedPayrollRuns, employee: row.emp, department, details, legacyCutoff: legacyWageCutoffDate })
+    const savedPayoutHtml = payoutGroups.filter(group => group.kind === 'saved').map(group => `
+      <tr><td>${group.run ? `${formatReportDate(group.run.pay_date)}<br>${formatReportDate(group.run.start_date)} – ${formatReportDate(group.run.end_date)}` : ''}</td>
+        <td>${escapeHtml([...new Set(group.items.map(item => getDepartmentLabel(item.department, departmentDefinitions)))].join(', '))}</td>
+        <td class="right">${group.totals.hours.toFixed(2)}</td><td class="right">${formatCurrency(group.totals.baseWages)}</td>
+        <td class="right">${formatCurrency(group.totals.tips)}</td><td class="right">${formatCurrency(group.totals.guaranteeTopUp)}</td>
+        <td class="right">${formatCurrency(group.totals.commission)}</td><td class="right">${formatCurrency(group.totals.deductions)}</td>
+        <td class="right">${formatCurrency(group.totals.totalEarnings)}</td><td>${formatPaymentBreakdown(group.payments)}</td>
+        <td class="right">${formatCurrency(group.payout)}</td></tr>`).join('')
     return `
-      <h1>${row.emp.name} Wage Report</h1>
+      <h1>${escapeHtml(row.emp.name)} Wage Report</h1>
       <p class="muted">${startDate === endDate ? startDate : `${startDate} - ${endDate}`}</p>
       <p class="muted">Summary: full saved pay periods plus unmatched work in the selected dates. Daily rows use clock/EOD calculations; saved salary, commissions, and adjustments may differ. Snapshot-only rows are dated by pay date.</p>
       <div class="summary">
         <div class="card"><strong>Hours</strong><div class="metric">${row.hours.toFixed(2)} hrs</div></div>
-        <div class="card"><strong>Paid By</strong><div class="metric">${formatPaymentBreakdown(row.paymentBreakdown)}</div></div>
+        <div class="card"><strong>Paid By</strong><div class="metric">${wagePaymentMethods(row.paymentBreakdown)}</div></div>
         <div class="card"><strong>Tips</strong><div class="metric">${formatCurrency(row.tips)}</div></div>
         ${view === 'earnings' ? `<div class="card"><strong>Base Wages</strong><div class="metric">${formatCurrency(row.baseWages)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Commission</strong><div class="metric">${formatCurrency(row.commission)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Deductions</strong><div class="metric">${formatCurrency(row.deductions)}</div></div>` : ''}
         ${view === 'earnings' ? `<div class="card"><strong>Total Earnings</strong><div class="metric">${formatCurrency(row.totalEarnings)}</div></div>` : ''}
       </div>
-      <h3>Comp Summary</h3>
+      ${savedPayoutHtml ? `<h3>Saved payout details</h3><table class="compact-table"><thead><tr><th>Pay date / period</th><th>Department</th><th>Hours</th><th>Base / salary</th><th>Tips</th><th>Top-up</th><th>Commission</th><th>Deductions</th><th>Total earnings</th><th>Payment details</th><th>Recorded payout</th></tr></thead><tbody>${savedPayoutHtml}</tbody></table>` : ''}
+      <h3>Work-date history</h3>
       <p>
-        Included saved pay periods and unmatched work total ${row.hours.toFixed(2)} hours and ${formatCurrency(row.tips)} in tips for ${row.emp.name}.
+        Included saved pay periods and unmatched work total ${row.hours.toFixed(2)} hours and ${formatCurrency(row.tips)} in tips for ${escapeHtml(row.emp.name)}.
         ${view === 'earnings' ? ` Combined wages and guaranteed top-up brought total earnings to ${formatCurrency(row.totalEarnings)}.` : ''}
       </p>
       <table class="compact-table">
@@ -689,10 +692,18 @@ export default function WageReportPage() {
     }
   }
 
-  const displayedRows = useMemo(
-    () => (employeeFilter === 'all' ? rows : rows.filter(row => row.emp.id === employeeFilter)),
-    [employeeFilter, rows]
-  )
+  const displayedRows = useMemo(() => {
+    const selected = employeeFilter === 'all' ? rows : rows.filter(row => row.emp.id === employeeFilter)
+    const sortValue = (row: WageSummaryRow) => sortKey === 'name' ? row.emp.name
+      : sortKey === 'role' ? getRoleLabel(row.emp.role, roleDefinitions)
+        : sortKey === 'paymentMethod' ? wagePaymentMethods(row.paymentBreakdown) : row[sortKey]
+    return [...selected].sort((a, b) => {
+      const left = sortValue(a), right = sortValue(b)
+      const comparison = typeof left === 'number' && typeof right === 'number'
+        ? left - right : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' })
+      return (sortDirection === 'asc' ? comparison : -comparison) || a.emp.name.localeCompare(b.emp.name) || a.emp.id.localeCompare(b.emp.id)
+    })
+  }, [employeeFilter, rows, sortKey, sortDirection, roleDefinitions])
   const displayedPaymentTotals = useMemo(
     () => displayedRows.reduce<Record<ReportPaymentMethod, number>>((totals, row) => {
       totals.cash += row.paymentBreakdown.cash
@@ -726,37 +737,9 @@ export default function WageReportPage() {
     () => detailTarget ? (detailRowsByEmployeeId.get(detailTarget.emp.id) ?? []) : [],
     [detailRowsByEmployeeId, detailTarget]
   )
-  const detailPayoutGroups = useMemo(() => {
-    if (!detailTarget) return []
-    const assignedDates = new Set<string>()
-    const detailKey = (detail: WageDetailRow) => `${detail.date}|${detail.workDepartment ?? 'all'}|${detail.sourceRunId ?? ''}`
-    const paidGroups = [...completedPayrollRuns]
-      .filter(run => (run.payroll_run_items ?? []).some(item => item.employee_id === detailTarget.emp.id))
-      .sort((left, right) => right.pay_date.localeCompare(left.pay_date))
-      .map(run => {
-        const groupRows = detailRows.filter(detail => wageDetailMatchesPayroll(detail, detailTarget.emp.id, run, department) && !assignedDates.has(detailKey(detail)))
-        groupRows.forEach(detail => assignedDates.add(detailKey(detail)))
-        return {
-          key: run.id,
-          title: `Pay date ${formatReportDate(run.pay_date)}`,
-          subtitle: `${formatReportDate(run.start_date)} – ${formatReportDate(run.end_date)}`,
-          paid: true,
-          rows: groupRows,
-        }
-      })
-      .filter(group => group.rows.length > 0)
-    const unpaidRows = detailRows.filter(detail => !assignedDates.has(detailKey(detail)))
-    const legacyRows = legacyWageCutoffDate
-      ? unpaidRows.filter(detail => detail.date < legacyWageCutoffDate)
-      : []
-    const currentUnpaidRows = unpaidRows.filter(detail => !legacyRows.some(row => row.date === detail.date))
-    const legacyGroup = legacyRows.length > 0
-      ? [{ key: 'legacy-paid', title: 'Legacy paid', subtitle: 'Recorded before payroll worksheet tracking began', paid: true, rows: legacyRows }]
-      : []
-    return currentUnpaidRows.length > 0
-      ? [{ key: 'unpaid', title: 'Unmatched Earnings', subtitle: 'Work not matched to a saved payout; review before paying', paid: false, rows: currentUnpaidRows }, ...legacyGroup, ...paidGroups]
-      : [...legacyGroup, ...paidGroups]
-  }, [completedPayrollRuns, department, detailRows, detailTarget, legacyWageCutoffDate])
+  const detailPayoutGroups = useMemo(() => detailTarget ? buildWagePayoutGroups({
+    runs: completedPayrollRuns, employee: detailTarget.emp, department, details: detailRows, legacyCutoff: legacyWageCutoffDate,
+  }) : [], [completedPayrollRuns, department, detailRows, detailTarget, legacyWageCutoffDate])
   const selectedEmployeeName = employeeFilter === 'all'
     ? 'All Staff'
     : filteredEmployees.find(employee => employee.id === employeeFilter)?.name ?? 'Select staff'
@@ -1041,8 +1024,22 @@ export default function WageReportPage() {
             </p>
           </div>
         </section>
-        <h2 className="mb-2 text-sm font-semibold text-slate-950">Staff breakdown <span className="ml-2 text-sm font-normal text-slate-500">{view === 'earnings' ? 'Earnings' : 'Tips only'}</span></h2>
-        <Table className={view === 'earnings' ? 'min-w-[1560px]' : 'min-w-[920px]'}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-950">Staff breakdown <span className="ml-2 font-normal text-slate-500">{view === 'earnings' ? 'Earnings' : 'Tips only'}</span></h2>
+          <div className="flex items-center gap-2">
+            <span id="wage-sort-label" className="text-xs text-slate-500">Sort by</span>
+            <Select value={sortKey} onValueChange={(value: string | null) => value && setSortKey(value as WageSortKey)}>
+              <SelectTrigger aria-labelledby="wage-sort-label" className="h-7 w-36 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Name</SelectItem><SelectItem value="role">Role</SelectItem><SelectItem value="paymentMethod">Payment method</SelectItem>
+                <SelectItem value="hours">Hours</SelectItem><SelectItem value="tips">Tips</SelectItem><SelectItem value="baseWages">Base wages</SelectItem>
+                <SelectItem value="guaranteeTopUp">Guaranteed top-up</SelectItem><SelectItem value="commission">Commission</SelectItem><SelectItem value="deductions">Deductions</SelectItem><SelectItem value="totalEarnings">Total earnings</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" className="text-xs" aria-label="Toggle sort direction" onClick={() => setSortDirection(current => current === 'asc' ? 'desc' : 'asc')}>{sortDirection === 'asc' ? 'Ascending ↑' : 'Descending ↓'}</Button>
+          </div>
+        </div>
+        <Table data-wage-staff-table className={`${view === 'earnings' ? 'min-w-[1100px]' : 'min-w-[800px]'} text-xs [&_th]:h-8 [&_th]:whitespace-normal [&_th]:px-2 [&_td]:px-2 [&_td]:py-1.5`}>
           <TableHeader><TableRow>
             <TableHead>Name</TableHead><TableHead>Role</TableHead><TableHead>Paid By</TableHead><TableHead>Clock Status</TableHead>
             <TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal Break</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Tips / Hr</TableHead>
@@ -1052,7 +1049,7 @@ export default function WageReportPage() {
             {displayedRows.map(row => <TableRow key={row.emp.id}>
               <TableCell><button type="button" className="font-medium text-left hover:underline" onClick={() => { setExpandedDetailGroupKey(null); setDetailEmployeeId(row.emp.id) }}>{row.emp.name}</button></TableCell>
               <TableCell className="text-muted-foreground">{getRoleLabel(row.emp.role, roleDefinitions)}</TableCell>
-              <TableCell>{formatPaymentBreakdown(row.paymentBreakdown)}</TableCell>
+              <TableCell><button type="button" className="text-left font-medium text-blue-700 underline decoration-blue-200 underline-offset-4 hover:decoration-blue-700" aria-label={`View payout details for ${row.emp.name}`} onClick={() => { setExpandedDetailGroupKey(null); setDetailEmployeeId(row.emp.id) }}>{wagePaymentMethods(row.paymentBreakdown)}</button></TableCell>
               <TableCell>{row.hasOpenClock ? <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Clock Out Needed</Badge> : row.hasAutoClockOut ? <Badge variant="outline" className="border-orange-300 bg-orange-50 text-orange-800">Auto Clock-Out</Badge> : <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-800">Verified</Badge>}</TableCell>
               <TableCell className="text-right">{row.hours.toFixed(2)}h</TableCell><TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(row.mealBreakMinutes)}</TableCell><TableCell className="text-right font-semibold text-green-700">{formatCurrency(row.tips)}</TableCell><TableCell className="text-right">{row.tipRate !== null ? formatCurrency(row.tipRate) : '—'}</TableCell>
               {view === 'earnings' && <><TableCell className="text-right">{formatCurrency(row.baseWages)}</TableCell><TableCell className="text-right text-violet-700">{formatCurrency(row.guaranteeTopUp)}</TableCell><TableCell className="text-right">{formatCurrency(row.commission)}</TableCell><TableCell className="text-right text-red-700">{formatCurrency(row.deductions)}</TableCell><TableCell className="text-right font-bold">{formatCurrency(row.totalEarnings)}</TableCell></>}
@@ -1078,95 +1075,73 @@ export default function WageReportPage() {
       </Dialog>
 
       <Dialog open={!!detailTarget} onOpenChange={(open) => { if (!open) { setDetailEmployeeId(null); setExpandedDetailGroupKey(null) } }}>
-        <DialogContent className="w-[calc(100vw-3rem)] max-w-none sm:max-w-none max-h-[90vh] overflow-y-auto p-7">
-          <DialogHeader>
+        <DialogContent data-wage-detail-dialog className="w-[calc(100vw-2rem)] max-w-[1400px] gap-3 p-4 sm:max-w-[1400px] max-h-[calc(100svh-2rem)] overflow-y-auto">
+          <DialogHeader className="gap-1 pr-8">
             <DialogTitle>{detailTarget?.emp.name} Wage Detail</DialogTitle>
+            <p className="text-xs text-slate-500">{getDepartmentLabel(department, departmentDefinitions)} · {formatReportDate(startDate)} – {formatReportDate(endDate)}</p>
           </DialogHeader>
-          <p className="text-xs text-muted-foreground">Summary totals preserve saved payroll snapshots plus unmatched work. Daily history shows clock/EOD calculations for the selected dates and can differ because of manual salary, commission, or payroll adjustments. Snapshot-only rows use the pay date.</p>
-          {detailTarget && (() => {
-            const perf = employeePerfStats.get(detailTarget.emp.id)
-            return (
-            <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Performance Score</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf?.score ?? '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">monthly weighted KPI</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Overall Rank</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{perf ? `#${perf.overallRank}` : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">{perf ? `of ${perf.staffCount} staff` : 'no data'}</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips / Hr</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Effective Rate</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">total earnings / hr</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Hours Worked</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{detailTarget.hours.toFixed(2)}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">hrs this period</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Tips</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.tips)}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Base Wages</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.baseWages)}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Commission</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.commission)}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">this period</div>
-                </div>
-                <div className="rounded-2xl border bg-white p-5">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total Earnings</div>
-                  <div className="mt-2 text-2xl font-bold text-slate-700">{formatCurrency(detailTarget.totalEarnings)}</div>
-                  <div className="mt-0.5 text-xs text-slate-400">net earnings for this work period</div>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => void handleExcelExport([detailTarget], detailTarget.emp.name)} disabled={exportingExcel}>
-                  {exportingExcel ? 'Exporting…' : 'Export Excel'}
-                </Button>
-                <Button variant="outline" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Wage Report`, buildWageReportHtml(detailTarget))}>
-                  PDF Export
-                </Button>
-                <Button onClick={() => void handleEmailReport(detailTarget.emp.id)} disabled={emailingEmployeeId === detailTarget.emp.id}>
-                  {emailingEmployeeId === detailTarget.emp.id ? 'Sending…' : 'Email Report'}
-                </Button>
-              </div>
-              <div className="space-y-3">
-                {detailPayoutGroups.map(group => {
-                  const expanded = expandedDetailGroupKey === group.key
-                  const groupHours = group.rows.reduce((sum, row) => sum + row.hours, 0)
-                  const groupTips = group.rows.reduce((sum, row) => sum + row.tips, 0)
-                  const groupTotal = group.rows.reduce((sum, row) => sum + row.totalEarnings, 0)
-                  return <div key={group.key} className={`rounded-xl border ${group.paid ? 'border-emerald-200' : 'border-amber-300'}`}>
-                    <button type="button" className={`flex w-full flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 text-left ${group.paid ? 'bg-emerald-50' : 'bg-amber-50'}`} onClick={() => setExpandedDetailGroupKey(expanded ? null : group.key)}>
-                      <div><div className="font-semibold text-slate-950">{group.title}</div><div className="text-xs text-muted-foreground">{group.subtitle}</div></div>
-                      <div className="flex flex-wrap gap-4 text-sm"><span>{groupHours.toFixed(2)}h</span><span>{formatCurrency(groupTips)} tips</span><span className="font-semibold">{formatCurrency(groupTotal)}</span><span className="text-blue-700">{expanded ? 'Collapse' : 'View daily details'}</span></div>
-                    </button>
-                    {expanded && <div className="overflow-x-auto border-t bg-white"><Table>
-                      <TableHeader><TableRow><TableHead>Date</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal Break</TableHead><TableHead className="text-right">Tips</TableHead>{view === 'earnings' && <><TableHead className="text-right">Base Wages</TableHead><TableHead className="text-right">Top-Up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Total</TableHead></>}</TableRow></TableHeader>
-                      <TableBody>{group.rows.map(detail => <TableRow key={detail.date}><TableCell>{detail.date}</TableCell><TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell><TableCell className="text-right text-muted-foreground">{formatMealBreakMinutes(detail.mealBreakMinutes)}</TableCell><TableCell className="text-right">{formatCurrency(detail.tips)}</TableCell>{view === 'earnings' && <><TableCell className="text-right">{formatCurrency(detail.baseWages)}</TableCell><TableCell className="text-right">{formatCurrency(detail.guaranteeTopUp)}</TableCell><TableCell className="text-right">{formatCurrency(detail.commission)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(detail.totalEarnings)}</TableCell></>}</TableRow>)}</TableBody>
-                    </Table></div>}
-                  </div>
-                })}
-                {detailPayoutGroups.length === 0 && <div className="rounded-xl border p-4 text-sm text-muted-foreground">No daily wage details for this range.</div>}
+          {detailTarget && <>
+            <dl className="grid grid-cols-3 gap-2 rounded-lg border bg-slate-50 p-2 sm:grid-cols-5 xl:grid-cols-9" data-wage-detail-summary>
+              {[
+                ['Hours', `${detailTarget.hours.toFixed(2)}h`], ['Tips', overviewCurrency.format(detailTarget.tips)],
+                ['Base / salary', overviewCurrency.format(detailTarget.baseWages)], ['Top-up', overviewCurrency.format(detailTarget.guaranteeTopUp)],
+                ['Commission', overviewCurrency.format(detailTarget.commission)], ['Deductions', overviewCurrency.format(detailTarget.deductions)],
+                ['Total earnings', overviewCurrency.format(detailTarget.totalEarnings)],
+                ['Recorded payouts', overviewCurrency.format(Object.values(detailTarget.paymentBreakdown).reduce((sum, amount) => sum + amount, 0))],
+                ['Unmatched', overviewCurrency.format(detailTarget.pendingEarnings ?? 0)],
+              ].map(([label, value]) => <div key={label} className="min-w-0 px-1 py-1"><dt className="text-[11px] text-slate-500">{label}</dt><dd className="mt-0.5 text-sm font-semibold text-slate-950 tabular-nums">{value}</dd></div>)}
+            </dl>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Payout details</h3>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => void handleExcelExport([detailTarget], detailTarget.emp.name)} disabled={exportingExcel}>{exportingExcel ? 'Exporting…' : 'Export Excel'}</Button>
+                <Button variant="outline" size="sm" onClick={() => exportReportToPdf(`${detailTarget.emp.name} Wage Report`, buildWageReportHtml(detailTarget))}>PDF Export</Button>
+                <Button size="sm" onClick={() => void handleEmailReport(detailTarget.emp.id)} disabled={emailingEmployeeId === detailTarget.emp.id}>{emailingEmployeeId === detailTarget.emp.id ? 'Sending…' : 'Email Report'}</Button>
               </div>
             </div>
-          )})()}
+            <p className="text-xs leading-snug text-slate-500">Saved payouts include full pay periods, commissions, salary and adjustments. Expand a pay date for work-date history. Recorded payouts are after cash rounding.</p>
+            <div className="max-h-[48vh] overflow-auto rounded-lg border" data-wage-payout-details>
+              <Table className="min-w-[1060px] text-xs [&_th]:h-8 [&_th]:whitespace-normal [&_th]:px-2 [&_td]:px-2 [&_td]:py-1.5">
+                <TableHeader className="sticky top-0 z-10 bg-slate-100"><TableRow>
+                  <TableHead>Pay date / period</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Base / salary</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Top-up</TableHead><TableHead className="text-right">Commission</TableHead><TableHead className="text-right">Deductions</TableHead><TableHead className="text-right">Total earnings</TableHead><TableHead>Payment details</TableHead><TableHead className="text-right">Recorded payout</TableHead>
+                </TableRow></TableHeader>
+                {detailPayoutGroups.map(group => {
+                  const expanded = expandedDetailGroupKey === group.key
+                  const label = group.run ? formatReportDate(group.run.pay_date) : group.kind === 'unmatched' ? 'Unmatched work' : 'Legacy paid'
+                  return <TableBody key={group.key} data-payout-group={group.key}>
+                    <TableRow className={group.kind === 'unmatched' ? 'bg-amber-50' : ''}>
+                      <TableCell>
+                        <button type="button" className="text-left font-semibold text-blue-700 hover:underline" aria-expanded={expanded} aria-label={`View daily history for ${label}`} onClick={() => setExpandedDetailGroupKey(expanded ? null : group.key)}>{expanded ? '▾' : '▸'} {label}</button>
+                        {group.run && <span className="ml-1 text-[10px] text-slate-500">{[...new Set(group.items.map(item => getDepartmentLabel(item.department, departmentDefinitions)))].join(', ')}</span>}
+                        <span className="mt-0.5 block text-[11px] text-slate-500">{group.run ? `${formatReportDate(group.run.start_date)} – ${formatReportDate(group.run.end_date)}` : 'Selected work dates'}</span>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{group.totals.hours.toFixed(2)}</TableCell><TableCell className="text-right tabular-nums">{overviewCurrency.format(group.totals.baseWages)}</TableCell><TableCell className="text-right tabular-nums">{overviewCurrency.format(group.totals.tips)}</TableCell><TableCell className="text-right tabular-nums">{overviewCurrency.format(group.totals.guaranteeTopUp)}</TableCell><TableCell className="text-right font-medium tabular-nums">{overviewCurrency.format(group.totals.commission)}</TableCell><TableCell className="text-right tabular-nums">{overviewCurrency.format(group.totals.deductions)}</TableCell><TableCell className="text-right font-semibold tabular-nums">{overviewCurrency.format(group.totals.totalEarnings)}</TableCell>
+                      <TableCell className="text-[11px]">{group.kind === 'saved' ? (['cash', 'check', 'ach', 'unknown'] as const).filter(method => group.payments[method] > 0).map(method => <span key={method} className="block">{method === 'unknown' ? 'Unknown' : paymentMethodLabel(method)} {overviewCurrency.format(group.payments[method])}</span>) : 'No saved payout'}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{group.kind === 'saved' ? overviewCurrency.format(group.payout) : '—'}{group.adjustment !== 0 && <span className="mt-0.5 block text-[10px] font-normal text-slate-500">{overviewCurrency.format(group.adjustment)} adjustment</span>}</TableCell>
+                    </TableRow>
+                    {expanded && <TableRow><TableCell colSpan={10} className="bg-slate-50 p-3">
+                      {group.items.map(item => <p key={item.id} className="mb-1 text-xs text-slate-600">{getDepartmentLabel(item.department, departmentDefinitions)} · Regular method: {item.payment_method ? paymentMethodLabel(item.payment_method) : 'Unknown'}{Number(item.commission) > 0 && ` · Commission method: ${paymentMethodLabel(item.commission_payment_method ?? item.payment_method)}`}{item.memo && ` · ${item.memo}`}</p>)}
+                      <p className="mb-2 text-[11px] text-slate-500">Work-date history uses clocks and EOD tips for the selected dates. Saved salary, commission and payroll adjustments are shown in the payout row above and are not prorated into these daily estimates.</p>
+                      {group.rows.length > 0 ? <Table className="text-xs [&_th]:h-7 [&_td]:py-1">
+                        <TableHeader><TableRow><TableHead>Work date</TableHead><TableHead className="text-right">Hours</TableHead><TableHead className="text-right">Meal break</TableHead><TableHead className="text-right">Tips</TableHead><TableHead className="text-right">Base wages</TableHead><TableHead className="text-right">Top-up</TableHead><TableHead className="text-right">Daily estimate</TableHead></TableRow></TableHeader>
+                        <TableBody>{group.rows.map((detail, index) => <TableRow key={`${detail.date}-${index}`}><TableCell>{formatReportDate(detail.date)}</TableCell><TableCell className="text-right">{detail.hours.toFixed(2)}h</TableCell><TableCell className="text-right">{formatMealBreakMinutes(detail.mealBreakMinutes)}</TableCell><TableCell className="text-right">{overviewCurrency.format(detail.tips)}</TableCell><TableCell className="text-right">{overviewCurrency.format(detail.baseWages)}</TableCell><TableCell className="text-right">{overviewCurrency.format(detail.guaranteeTopUp)}</TableCell><TableCell className="text-right">{overviewCurrency.format(detail.totalEarnings)}</TableCell></TableRow>)}</TableBody>
+                      </Table> : <p className="text-xs text-slate-500">No clock / EOD rows in the selected dates. The saved payout above is still included.</p>}
+                    </TableCell></TableRow>}
+                  </TableBody>
+                })}
+              </Table>
+              {detailPayoutGroups.length === 0 && <p className="p-3 text-xs text-slate-500">No payout or work-date details for this selection.</p>}
+            </div>
+            <details className="rounded-lg border px-3 py-2 text-xs text-slate-600">
+              <summary className="cursor-pointer font-medium">Rates &amp; monthly performance</summary>
+              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+                <span>Tips / hr: <strong>{detailTarget.tipRate !== null ? formatCurrency(detailTarget.tipRate) : '—'}</strong></span>
+                <span>Effective rate: <strong>{detailTarget.effectiveRate !== null ? formatCurrency(detailTarget.effectiveRate) : '—'}</strong></span>
+                <span>Performance score: <strong>{employeePerfStats.get(detailTarget.emp.id)?.score ?? '—'}</strong></span>
+                <span>Overall rank: <strong>{employeePerfStats.has(detailTarget.emp.id) ? `#${employeePerfStats.get(detailTarget.emp.id)?.overallRank} of ${employeePerfStats.get(detailTarget.emp.id)?.staffCount}` : '—'}</strong></span>
+              </div>
+            </details>
+          </>}
         </DialogContent>
       </Dialog>
     </div>
