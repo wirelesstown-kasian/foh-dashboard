@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Employee, DailySession, EodReport, TipDistribution, ShiftClock } from '@/lib/types'
 import { formatHours, getBusinessDate, getBusinessDateString } from '@/lib/dateUtils'
-import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
+import { formatClockTime, isoToTimeValue, getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { calculateTips } from '@/lib/tipCalc'
 import { insertTipDistributionsWithFallback } from '@/lib/tipDistributionWrite'
 import {
@@ -81,21 +81,6 @@ function aggregateClockTipRows(records: ShiftClock[], employees: Employee[]): Ti
 
   return [...grouped.values()]
 }
-
-function formatClockTime(iso: string) {
-  const d = new Date(iso)
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
-}
-
-function isoToTimeValue(value: string | null) {
-  if (!value) return '00:00:00'
-  const date = new Date(value)
-  const hours = String(date.getHours()).padStart(2, '0')
-  const minutes = String(date.getMinutes()).padStart(2, '0')
-  const seconds = String(date.getSeconds()).padStart(2, '0')
-  return `${hours}:${minutes}:${seconds}`
-}
-
 
 function getTipDraftKey(sessionDate: string) {
   return `eod-tip-distribution:${sessionDate}`

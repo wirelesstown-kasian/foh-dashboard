@@ -8,6 +8,25 @@ export type DailyTipReport = Pick<EodReport, 'session_date' | 'tip_total'> & {
   tip_distributions?: { employee_id: string; hours_worked?: number | null; net_tip: number }[]
 }
 
+export function getClockTipRecalculationDates({ previous, next, employees, schedules = [] }: {
+  previous?: ShiftClock | null
+  next?: ShiftClock | null
+  employees: Employee[]
+  schedules?: Schedule[]
+}) {
+  const contribution = (record: ShiftClock | null | undefined) => {
+    if (!record) return null
+    const employee = employees.find(item => item.id === record.employee_id)
+    if (!employee || !isTipEligibleForWork(employee, getClockWorkDepartment(record, employee, schedules))) return null
+    const hours = getEffectiveClockHours(record)
+    return hours > 0 ? { date: record.session_date, employeeId: record.employee_id, hours } : null
+  }
+  const before = contribution(previous)
+  const after = contribution(next)
+  if (before?.date === after?.date && before?.employeeId === after?.employeeId && before?.hours === after?.hours) return []
+  return [...new Set([before?.date, after?.date].filter((date): date is string => Boolean(date)))]
+}
+
 export function getSavedDailyTips(report: DailyTipReport) {
   const saved = new Map<string, DailyTipAmount>()
   for (const distribution of report.tip_distributions ?? []) {

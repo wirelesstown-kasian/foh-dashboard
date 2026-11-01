@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
+import { ClockTimeInput } from '@/components/reporting/ClockTimeInput'
 import { ReportingNav } from '@/components/reporting/ReportingNav'
 import { notifyReportingDataChanged, useClockRecords, useEmployees, useEodReports, usePayrollRuns, useSchedulesByRange } from '@/components/reporting/useReportingData'
 import { useAppSettings } from '@/components/useAppSettings'
@@ -15,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getClockWorkDepartment, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState } from '@/lib/clockUtils'
+import { formatClockTime, isoToTimeInput, isoToTimeValue, timeInputToIso, type ClockTimeOccurrence, calculateClockHoursAfterBreak, clockMatchesWorkDepartment, getClockBreakMinutes, getClockWorkDepartment, getEffectiveClockHours, getMealBreakState, getUnpaidBreakState } from '@/lib/clockUtils'
 import { calculatePayrollAmounts, formatPayrollPaymentSummary, getDailyGuaranteeTopUp, getPayrollTotals, normalizeMoney, paymentMethodLabel } from '@/lib/payroll'
 import { getDailyReportTips } from '@/lib/dailyTips'
 import { formatCurrency } from '@/lib/reporting'
@@ -29,7 +30,7 @@ import type { Employee, EodReport, PaymentMethod, PayrollRun, PayrollRunItem, Sc
 type SavedPayrollRun = PayrollRun & { payroll_run_items?: PayrollRunItem[] }
 type EodReportWithTips = EodReport & { tip_distributions: (TipDistribution & { employee: Employee })[] }
 type PayoutPeriod = 'week' | 'month' | 'custom'
-type ClockEditState = { clockIn: string; clockOut: string }
+type ClockEditState = { clockIn: string; clockOut: string; occurrences?: Partial<Record<'clockIn' | 'clockOut', ClockTimeOccurrence>> }
 type SaveResult = { success: boolean; title: string; details: string[] }
 type AdjustmentPaymentDirection = 'pay_out' | 'receive_credit'
 type TipDistributionReplacement = {
@@ -46,22 +47,7 @@ type TipDistributionReplacement = {
 }
 
 function formatTime(value: string | null | undefined) {
-  return value ? format(new Date(value), 'h:mm a') : ''
-}
-
-function isoToTimeInput(value: string | null | undefined) {
-  if (!value) return ''
-  const date = new Date(value)
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
-
-function timeInputToIso(sessionDate: string, value: string) {
-  if (!value) return null
-  const [hour = '0', minute = '0'] = value.split(':')
-  const date = new Date(`${sessionDate}T00:00:00`)
-  date.setHours(Number(hour), Number(minute), 0, 0)
-  if (Number(hour) < 3) date.setDate(date.getDate() + 1)
-  return date.toISOString()
+  return formatClockTime(value)
 }
 
 function getClockRecordEmployee(record: ShiftClock, employees: Employee[]) {
@@ -272,9 +258,9 @@ function calculateDailyPayout(row: Pick<PayrollRunItem, 'hours' | 'payout_amount
   return normalizeMoney(Number(row.payout_amount ?? 0) * (hours / Number(row.hours ?? 0)))
 }
 
-function getEditedClockHours(record: ShiftClock, edit?: { clockIn: string; clockOut: string }) {
-  const clockIn = edit?.clockIn ? timeInputToIso(record.session_date, edit.clockIn) : record.clock_in_at
-  const clockOut = edit?.clockOut ? timeInputToIso(record.session_date, edit.clockOut) : record.clock_out_at
+function getEditedClockHours(record: ShiftClock, edit?: ClockEditState) {
+  const clockIn = edit?.clockIn ? timeInputToIso(record.session_date, edit.clockIn, record.clock_in_at, edit.occurrences?.clockIn) : record.clock_in_at
+  const clockOut = edit?.clockOut ? timeInputToIso(record.session_date, edit.clockOut, record.clock_out_at, edit.occurrences?.clockOut) : record.clock_out_at
   if (!clockIn || !clockOut) return 0
   return calculateClockHoursAfterBreak(clockIn, clockOut, getClockBreakMinutes(record))
 }
@@ -340,15 +326,15 @@ function recalculateRowsForClockTimeChanges({
       const workDepartment = getClockWorkDepartment(record, employee, schedules)
       if (!isTipEligibleForWork(employee, workDepartment)) continue
       const editedRecord = changedRecords.some(changedRecord => changedRecord.id === record.id)
-      const editedClockIn = editedRecord ? timeInputToIso(record.session_date, clockEdits[record.id]?.clockIn ?? '') : record.clock_in_at
-      const editedClockOut = editedRecord ? timeInputToIso(record.session_date, clockEdits[record.id]?.clockOut ?? '') : record.clock_out_at
+      const editedClockIn = editedRecord ? timeInputToIso(record.session_date, clockEdits[record.id]?.clockIn ?? '', record.clock_in_at, clockEdits[record.id]?.occurrences?.clockIn) : record.clock_in_at
+      const editedClockOut = editedRecord ? timeInputToIso(record.session_date, clockEdits[record.id]?.clockOut ?? '', record.clock_out_at, clockEdits[record.id]?.occurrences?.clockOut) : record.clock_out_at
       const hours = changedRecords.some(changedRecord => changedRecord.id === record.id)
         ? getEditedClockHours(record, clockEdits[record.id])
         : getEffectiveClockHours(record)
       if (hours <= 0) continue
       const current = hoursByEmployee.get(record.employee_id)
-      const startTime = editedClockIn ? format(new Date(editedClockIn), 'HH:mm:ss') : null
-      const endTime = editedClockOut ? format(new Date(editedClockOut), 'HH:mm:ss') : null
+      const startTime = editedClockIn ? isoToTimeValue(editedClockIn) : null
+      const endTime = editedClockOut ? isoToTimeValue(editedClockOut) : null
       hoursByEmployee.set(record.employee_id, {
         employee_id: record.employee_id,
         hours_worked: normalizeMoney((current?.hours_worked ?? 0) + hours),
@@ -438,8 +424,10 @@ function recalculateRowsForClockTimeChanges({
 
 function clockEditChanged(record: ShiftClock, edit?: ClockEditState) {
   if (!edit) return false
-  return edit.clockIn !== isoToTimeInput(record.clock_in_at) ||
-    edit.clockOut !== isoToTimeInput(record.clock_out_at)
+  const start = timeInputToIso(record.session_date, edit.clockIn, record.clock_in_at, edit.occurrences?.clockIn)
+  const end = timeInputToIso(record.session_date, edit.clockOut, record.clock_out_at, edit.occurrences?.clockOut)
+  return Date.parse(start ?? '') !== Date.parse(record.clock_in_at) ||
+    (record.clock_out_at ? Date.parse(end ?? '') !== Date.parse(record.clock_out_at) : Boolean(end))
 }
 
 function getDateInputValue(date: Date) {
@@ -896,8 +884,8 @@ export default function PayrollPayoutsReportPage() {
       for (const record of selectedClockRecords) {
         const edit = clockEdits[record.id]
         if (!edit) continue
-        const nextClockInAt = timeInputToIso(record.session_date, edit.clockIn)
-        const nextClockOutAt = timeInputToIso(record.session_date, edit.clockOut)
+        const nextClockInAt = timeInputToIso(record.session_date, edit.clockIn, record.clock_in_at, edit.occurrences?.clockIn)
+        const nextClockOutAt = timeInputToIso(record.session_date, edit.clockOut, record.clock_out_at, edit.occurrences?.clockOut)
         if (!nextClockInAt || !nextClockOutAt) throw new Error(`Clock in and out are required for ${record.session_date}.`)
         if (new Date(nextClockOutAt).getTime() <= new Date(nextClockInAt).getTime()) throw new Error(`Clock out must be after clock in for ${record.session_date}.`)
         if (nextClockInAt === record.clock_in_at && nextClockOutAt === record.clock_out_at) continue
@@ -1469,7 +1457,7 @@ export default function PayrollPayoutsReportPage() {
                         const regularBreak = getUnpaidBreakState(record)
                         const edit = clockEdits[record.id]
                         const hours = getEditedClockHours(record, edit)
-                        return <TableRow key={record.id}><TableCell>{record.session_date}</TableCell><TableCell>{editing ? <Input className="h-8 w-28" type="time" value={edit?.clockIn ?? isoToTimeInput(record.clock_in_at)} onChange={event => updateClockEdit(record, { clockIn: event.target.value })} /> : formatTime(record.clock_in_at)}</TableCell><TableCell>{editing ? <Input className="h-8 w-28" type="time" value={edit?.clockOut ?? isoToTimeInput(record.clock_out_at)} onChange={event => updateClockEdit(record, { clockOut: event.target.value })} /> : formatTime(record.clock_out_at)}</TableCell><TableCell>{mealBreak.startedAt ? `${formatTime(mealBreak.startedAt)} - ${formatTime(mealBreak.endedAt)} (${mealBreak.minutes}m)` : ''}</TableCell><TableCell>{regularBreak.startedAt ? `${formatTime(regularBreak.startedAt)} - ${formatTime(regularBreak.endedAt)} (${regularBreak.minutes}m)` : ''}</TableCell><TableCell className="text-right">{getClockBreakMinutes(record)}</TableCell><TableCell className="text-right">{hours.toFixed(2)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(calculateDailyPayout(selectedItem, hours))}</TableCell></TableRow>
+                        return <TableRow key={record.id}><TableCell>{record.session_date}</TableCell><TableCell>{editing ? <ClockTimeInput className="h-8 w-28" label="Clock in" sessionDate={record.session_date} value={edit?.clockIn ?? isoToTimeInput(record.clock_in_at)} originalIso={record.clock_in_at} occurrence={edit?.occurrences?.clockIn} onChange={value => updateClockEdit(record, { clockIn: value })} onOccurrenceChange={occurrence => updateClockEdit(record, { occurrences: { ...edit?.occurrences, clockIn: occurrence } })} /> : formatTime(record.clock_in_at)}</TableCell><TableCell>{editing ? <ClockTimeInput className="h-8 w-28" label="Clock out" sessionDate={record.session_date} value={edit?.clockOut ?? isoToTimeInput(record.clock_out_at)} originalIso={record.clock_out_at} occurrence={edit?.occurrences?.clockOut} onChange={value => updateClockEdit(record, { clockOut: value })} onOccurrenceChange={occurrence => updateClockEdit(record, { occurrences: { ...edit?.occurrences, clockOut: occurrence } })} /> : formatTime(record.clock_out_at)}</TableCell><TableCell>{mealBreak.startedAt ? `${formatTime(mealBreak.startedAt)} - ${formatTime(mealBreak.endedAt)} (${mealBreak.minutes}m)` : ''}</TableCell><TableCell>{regularBreak.startedAt ? `${formatTime(regularBreak.startedAt)} - ${formatTime(regularBreak.endedAt)} (${regularBreak.minutes}m)` : ''}</TableCell><TableCell className="text-right">{getClockBreakMinutes(record)}</TableCell><TableCell className="text-right">{hours.toFixed(2)}</TableCell><TableCell className="text-right font-semibold">{formatCurrency(calculateDailyPayout(selectedItem, hours))}</TableCell></TableRow>
                       })}
                       {selectedClockRecords.length > 0 && <TableRow className="bg-slate-50 font-semibold"><TableCell colSpan={5}>Total</TableCell><TableCell className="text-right">{selectedClockRecords.reduce((sum, record) => sum + getClockBreakMinutes(record), 0)}</TableCell><TableCell className="text-right">{selectedClockRecords.reduce((sum, record) => sum + getEditedClockHours(record, clockEdits[record.id]), 0).toFixed(2)}</TableCell><TableCell className="text-right">{formatCurrency(selectedClockRecords.reduce((sum, record) => sum + calculateDailyPayout(selectedItem, getEditedClockHours(record, clockEdits[record.id])), 0))}</TableCell></TableRow>}
                       {selectedClockRecords.length === 0 && <TableRow><TableCell colSpan={8} className="py-6 text-center text-muted-foreground">No matching time records found for this saved payout period.</TableCell></TableRow>}

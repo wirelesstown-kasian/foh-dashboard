@@ -11,12 +11,12 @@ const UNPAID_BREAK_TOKEN_PATTERN = /\s*\[unpaid_break_(?:started_at|ended_at|min
 const WORK_DEPARTMENT_TOKEN_PATTERN = /\s*\[work_department=[^\]]*\]/g
 const FALLBACK_WORK_DEPARTMENT_PRIORITY = ['server']
 
-function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    timeZoneName: 'shortOffset',
-  })
-  const zonePart = formatter.formatToParts(date).find(part => part.type === 'timeZoneName')?.value ?? 'GMT+0'
+const clockOffsetFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIMEZONE, timeZoneName: 'shortOffset',
+})
+
+function getTimeZoneOffsetMinutes(date: Date) {
+  const zonePart = clockOffsetFormatter.formatToParts(date).find(part => part.type === 'timeZoneName')?.value ?? 'GMT+0'
   const match = zonePart.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/)
 
   if (!match) return 0
@@ -26,19 +26,92 @@ function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
   return sign === '-' ? -total : total
 }
 
+const clockTimeFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: BUSINESS_TIMEZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+})
+const clockDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: BUSINESS_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+})
+const clockLabelFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIMEZONE, hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+})
+
+export type ClockTimeOccurrence = 'earlier' | 'later'
+
+export function isoToTimeValue(value: string | null | undefined) {
+  return value ? clockTimeFormatter.format(new Date(value)) : ''
+}
+
+export function isoToTimeInput(value: string | null | undefined) {
+  return isoToTimeValue(value).slice(0, 5)
+}
+
+export function formatClockTime(value: string | null | undefined) {
+  return value ? clockLabelFormatter.format(new Date(value)) : ''
+}
+
+function clockCalendarDate(value: Date) {
+  const parts = clockDateFormatter.formatToParts(value)
+  const part = (type: string) => parts.find(item => item.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
+
+// Construct the calendar date before resolving its zone. Adding 24 elapsed
+// hours, or calling setHours on a device-local Date, is unsafe at DST changes.
+function clockWallTime(sessionDate: string, value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(sessionDate) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return null
+  const date = new Date(`${sessionDate}T00:00:00Z`)
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== sessionDate) return null
+  const [hour, minute] = value.split(':').map(Number)
+  if (hour < BUSINESS_DAY_CUTOFF_HOUR) date.setUTCDate(date.getUTCDate() + 1)
+  const calendarDate = date.toISOString().slice(0, 10)
+  date.setUTCHours(hour, minute)
+  return { calendarDate, wallMs: date.getTime() }
+}
+
+export function getClockTimeOptions(sessionDate: string, value: string) {
+  const wall = clockWallTime(sessionDate, value)
+  if (!wall) return []
+  // Sample both sides of a transition, then verify each candidate against the
+  // requested wall time. A spring gap has no candidates; a fall fold has two.
+  const offsets = new Set([-1, 0, 1].map(day =>
+    getTimeZoneOffsetMinutes(new Date(wall.wallMs + day * 86_400_000))))
+  return [...offsets].map(offset => new Date(wall.wallMs - offset * 60_000).toISOString())
+    .filter(iso => clockCalendarDate(new Date(iso)) === wall.calendarDate && isoToTimeInput(iso) === value)
+    .sort()
+}
+
+export function timeInputToIso(
+  sessionDate: string,
+  value: string,
+  originalIso?: string | null,
+  occurrence?: ClockTimeOccurrence,
+) {
+  const options = getClockTimeOptions(sessionDate, value)
+  if (options.length === 0) return null
+  const preferred = occurrence
+    ? options[occurrence === 'later' ? options.length - 1 : 0]
+    : options.find(iso => originalIso && getTimeZoneOffsetMinutes(new Date(iso)) ===
+      getTimeZoneOffsetMinutes(new Date(originalIso))) ?? options[0]
+  // A note/department edit must preserve seconds and the original occurrence
+  // of 1 AM. Otherwise saving can silently change hours and everyone's tips.
+  if (originalIso && isoToTimeInput(originalIso) === value &&
+    Math.floor(Date.parse(originalIso) / 60_000) === Math.floor(Date.parse(preferred) / 60_000)) return originalIso
+  return preferred
+}
+
 function getZonedDateIso(
   year: number,
   monthIndex: number,
   day: number,
   hour: number,
   minute: number,
-  second: number,
-  timeZone: string
+  second: number
 ) {
   let utcGuess = Date.UTC(year, monthIndex, day, hour, minute, second, 0)
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const offsetMinutes = getTimeZoneOffsetMinutes(new Date(utcGuess), timeZone)
+    const offsetMinutes = getTimeZoneOffsetMinutes(new Date(utcGuess))
     const adjusted = Date.UTC(year, monthIndex, day, hour, minute, second, 0) - offsetMinutes * 60_000
     if (adjusted === utcGuess) break
     utcGuess = adjusted
@@ -55,8 +128,7 @@ export function getSessionCutoffIso(sessionDate: string) {
     day + 1,
     BUSINESS_DAY_CUTOFF_HOUR,
     0,
-    0,
-    BUSINESS_TIMEZONE
+    0
   )
 }
 

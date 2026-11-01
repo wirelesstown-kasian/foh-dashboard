@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
+import { isoToTimeValue, getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { ReportPeriod, formatCurrency, getReportRange } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleForWork } from '@/lib/tipEligibility'
@@ -57,8 +57,8 @@ function aggregateClockRowsByEmployee(records: ShiftClock[], employees: Employee
     }
 
     existing.hours_worked += getEffectiveClockHours(record)
-    const clockInTime = record.clock_in_at ? format(new Date(record.clock_in_at), 'HH:mm:ss') : null
-    const clockOutTime = record.clock_out_at ? format(new Date(record.clock_out_at), 'HH:mm:ss') : null
+    const clockInTime = record.clock_in_at ? isoToTimeValue(record.clock_in_at) : null
+    const clockOutTime = record.clock_out_at ? isoToTimeValue(record.clock_out_at) : null
     existing.start_time = !existing.start_time || (clockInTime && clockInTime < existing.start_time) ? clockInTime : existing.start_time
     existing.end_time = !existing.end_time || (clockOutTime && clockOutTime > existing.end_time) ? clockOutTime : existing.end_time
 

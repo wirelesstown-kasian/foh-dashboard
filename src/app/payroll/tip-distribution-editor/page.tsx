@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { supabase } from '@/lib/supabase'
 import { EMPLOYEE_PUBLIC_SELECT } from '@/lib/employeeSelect'
-import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
+import { isoToTimeValue, getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { formatCurrency } from '@/lib/reporting'
 import { calculateTips } from '@/lib/tipCalc'
 import { isTipEligibleForWork } from '@/lib/tipEligibility'
@@ -52,7 +52,7 @@ function roundMoney(value: number) {
 
 function timeValue(iso: string | null) {
   if (!iso) return null
-  return format(new Date(iso), 'HH:mm:ss')
+  return isoToTimeValue(iso)
 }
 
 function buildClockRows(date: string, employees: Employee[], clockRecords: ReturnType<typeof useClockRecords>['clockRecords']) {

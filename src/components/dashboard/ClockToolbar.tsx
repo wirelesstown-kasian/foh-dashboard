@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Employee, ShiftClock, Schedule } from '@/lib/types'
+import { BUSINESS_TIMEZONE } from '@/lib/clockUtils'
 import { formatTime, getBusinessDateTime } from '@/lib/dateUtils'
 import { isClockOnMealBreak, isClockOnUnpaidBreak } from '@/lib/clockUtils'
 import { getEmployeeScheduleDepartments, normalizeScheduleDepartment } from '@/lib/employeeSelect'
@@ -55,12 +56,14 @@ const getAnnouncementLines = (value: string) => value.split('\n').map(line => li
 
 function formatStatusTime(value: string | null | undefined) {
   if (!value) return '-'
-  return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  return new Date(value).toLocaleTimeString('en-US', { timeZone: BUSINESS_TIMEZONE, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 }
 
 function formatStatusDateTime(value: string | null | undefined) {
   if (!value) return '-'
   return new Date(value).toLocaleString('en-US', {
+    timeZone: BUSINESS_TIMEZONE,
+    timeZoneName: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -366,7 +369,7 @@ export function ClockToolbar({ schedules, clockRecords, today, onRefresh, varian
       if (!res.ok) {
         if (data.available_at) {
           const available = new Date(data.available_at)
-          throw new Error(`${data.error ?? 'Meal break is not complete yet'} You can clock back in at ${available.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}.`)
+          throw new Error(`${data.error ?? 'Meal break is not complete yet'} You can clock back in at ${available.toLocaleTimeString('en-US', { timeZone: BUSINESS_TIMEZONE, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}.`)
         }
         throw new Error(data.error ?? 'Failed to save clock event')
       }
