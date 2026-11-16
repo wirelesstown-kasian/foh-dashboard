@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
 import { CashBalanceEntry, Employee, EodReport, PayrollRun, PayrollRunItem, TipDistribution } from '@/lib/types'
 import { getPayrollPaymentBreakdown } from '@/lib/payroll'
-import { getEffectiveClockHours } from '@/lib/clockUtils'
+import { getClockWorkDepartment, getEffectiveClockHours } from '@/lib/clockUtils'
 import { summarizeLegacyPayroll, type LegacyPayrollDay } from '@/lib/legacyDashboardPayroll'
 import { exportDashboardToPdf } from '@/lib/dashboardPdf'
 import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, Download, ReceiptText, Truck, Wallet } from 'lucide-react'
@@ -250,8 +250,8 @@ function isPaidPayrollRun(run: PayrollRun & { payroll_run_items?: PayrollRunItem
 
 function getPayrollDepartmentGroup(department: string | null | undefined) {
   const value = (department ?? '').toLowerCase()
-  if (value.includes('kitchen') || value.includes('cook')) return 'kitchen'
-  if (value.includes('server')) return 'server'
+  if (value.includes('kitchen') || value.includes('cook') || value.includes('boh')) return 'kitchen'
+  if (value.includes('server') || value.includes('foh')) return 'server'
   if (value.includes('manager') || value.includes('owner')) return 'manager'
   return 'other'
 }
@@ -676,10 +676,10 @@ export default function ReportingDashboardPage() {
       }
 
       for (const record of records) {
-        const employee = employeesById.get(record.employee_id) ?? record.employee as Employee | undefined
+        const employee = employeesById.get(record.employee_id) ?? ((Array.isArray(record.employee) ? record.employee[0] : record.employee) as Employee | undefined)
         const hours = getEffectiveClockHours(record)
         if (hours <= 0) continue
-        const department = record.work_department === 'boh' || (!record.work_department && employee?.primary_department === 'boh')
+        const department = getPayrollDepartmentGroup(getClockWorkDepartment(record, employee)) === 'kitchen'
           ? 'boh'
           : 'foh'
         staffing[department].employees.add(record.employee_id)
