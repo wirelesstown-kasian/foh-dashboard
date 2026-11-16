@@ -18,7 +18,7 @@
     },
     {
       "path": "/api/cron/onboarding",
-      "schedule": "0 * * * *"
+      "schedule": "0 11 * * *"
     }
   ]
 }
