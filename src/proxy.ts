@@ -12,6 +12,8 @@ export function proxy(request: NextRequest) {
   const session = parseAppSessionValue(request.cookies.get(APP_SESSION_COOKIE)?.value)
   const hasAdminSession = isValidAdminSession(request.cookies.get(ADMIN_SESSION_COOKIE)?.value)
 
+  if (pathname.startsWith('/onboarding/')) return NextResponse.next()
+
   if (pathname === '/login') {
     if (!session && !hasAdminSession) return NextResponse.next()
     return NextResponse.redirect(new URL(session ? getHomePathForRole(session.role) : '/admin', request.url))

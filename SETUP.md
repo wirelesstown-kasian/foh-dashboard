@@ -56,6 +56,18 @@ npm run dev
 5. **EOD tab** → Enter revenue figures from Toast POS
 6. Verify tip distribution → **Save EOD** → **Send Email Report**
 
+## Onboarding setup
+
+1. Apply `supabase/migrations/20261115000000_add_onboarding.sql` after the existing migrations. It creates private applicant, document, material, and company tables plus the private storage bucket.
+2. Configure `RESEND_API_KEY`, `NEXT_PUBLIC_APP_URL`, and `CRON_SECRET`. Set `ONBOARDING_RECORD_KEY` to a stable random secret of at least 32 characters. Back up this key securely: changing or losing it makes old emailed `.nvrecord` attachments unreadable.
+3. In **Staffing → Onboarding**, review and complete the legal employer details, especially current mailing address, postal code, EIN, and records email. The 2021 election supplied for initial data does not establish that these are still current.
+4. The supplied handbook is imported as a private draft on the first manager view. Review its policies, especially the service mistake tip deduction language, then publish it. Upload, preview, and publish future versions from the same section. Existing signed acknowledgments remain tied to their original version. Managers can reissue a published version to active staff by email.
+5. The prefilled PDF templates bundled here are the 2026 W-4 and USCIS I-9 expiring May 2027. The employee must complete and sign their own fields; a manager must review the uploaded forms and I-9 documents. Update the bundled government forms and field mapping when official versions change. The app blocks outdated prefill templates.
+6. The onboarding cron runs hourly. The app login route also activates an approved hire on or after the scheduled date when the required handbook acknowledgment is present. New employees use manual check as the payment method. Do not switch them to payroll until the documents and I-9 review are complete.
+7. Completed records are emailed to the configured records inbox in AES-256-GCM encrypted `.nvrecord` format. A manager can open the attachment in **Staffing → Onboarding → Open an emailed record**.
+
+This release uses signed paper or externally completed W-4 and I-9 files uploaded to the portal. It does not claim to provide a compliant electronic W-4 or I-9 signature system.
+
 ## 7. Tablet Setup
 
 - Recommended: iPad in landscape mode, add to Home Screen as PWA

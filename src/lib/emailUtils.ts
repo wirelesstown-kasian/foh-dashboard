@@ -106,6 +106,7 @@ export async function sendEmail({
   fromName = 'FOH Dashboard',
   fromEmail = 'noreply@mail.newvillagepub.com',
   replyTo,
+  attachments,
 }: {
   resendKey: string
   to: string
@@ -114,6 +115,7 @@ export async function sendEmail({
   fromName?: string
   fromEmail?: string
   replyTo?: string | null
+  attachments?: Array<{ filename: string; content: string }>
 }) {
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -127,6 +129,7 @@ export async function sendEmail({
       reply_to: replyTo && replyTo.trim() ? replyTo.trim() : undefined,
       subject,
       html,
+      attachments,
     }),
   })
   if (!res.ok) {

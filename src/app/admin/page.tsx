@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Bell, ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText, HandCoins, Gift } from 'lucide-react'
+import { Bell, ClipboardList, Users, CalendarDays, BarChart3, LogOut, MailCheck, BriefcaseBusiness, DollarSign, FileClock, LayoutDashboard, ListChecks, ReceiptText, HandCoins, Gift, UserRoundPlus } from 'lucide-react'
 
 const adminGroups = [
   {
@@ -13,6 +13,7 @@ const adminGroups = [
       { label: 'Wage Worksheet', href: '/payroll/worksheet', icon: DollarSign },
       { label: 'Tip Distribution Editor', href: '/payroll/tip-distribution-editor', icon: HandCoins },
       { label: 'Staffing', href: '/staffing', icon: Users },
+      { label: 'Onboarding', href: '/staffing#onboarding', icon: UserRoundPlus },
       { label: 'Clock In Records', href: '/reporting/clock-records', icon: FileClock },
     ],
   },

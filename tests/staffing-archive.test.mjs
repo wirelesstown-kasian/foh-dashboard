@@ -38,6 +38,10 @@ function setup(options = {}) {
   const reads = []
   let updateAttempts = 0
   const db = {from(table) {
+    if (table === 'onboarding_cases') return {
+      select() {return this}, eq() {return this}, not() {return this}, limit() {return this},
+      then(resolve) {return Promise.resolve({data: options.pendingPin ? [{id: 'pending', first_name: 'Pending', last_name: 'Applicant'}] : [], error: null}).then(resolve)},
+    }
     assert.equal(table, 'employees', 'staffing status must not modify connected history tables')
     const filters = []
     let columns = '*', values, one = false
@@ -125,6 +129,14 @@ test('PIN conflicts, including hash-only active PINs, block reactivation without
     assert.equal(state.updates.length, 0)
     assert.equal(state.employees[1].is_active, false)
   }
+})
+
+test('PIN reserved by a pending applicant blocks employee reactivation', async () => {
+  const state = setup({pendingPin: true})
+  const response = await state.patch({action: 'reactivate', id: 'archived', pin: '2468'})
+  assert.equal(response.status, 409)
+  assert.match((await response.json()).error, /Pending Applicant/)
+  assert.equal(state.updates.length, 0)
 })
 
 test('reactivation rejects invalid requests and does not overwrite an already active employee', async () => {

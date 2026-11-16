@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  outputFileTracingIncludes: {
+    '/api/onboarding': ['./private-assets/initial-handbook.docx'],
+  },
 };
 
 export default nextConfig;

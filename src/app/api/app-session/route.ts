@@ -4,6 +4,7 @@ import { APP_SESSION_COOKIE, createAppSessionValue, getAppSessionMaxAge, parseAp
 import { ADMIN_SESSION_COOKIE } from '@/lib/adminSession'
 import { verifyPassword } from '@/lib/password'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { chicagoDate } from '@/lib/onboarding'
 
 export async function GET() {
   const cookieStore = await cookies()
@@ -58,6 +59,12 @@ export async function POST(req: NextRequest) {
   }
 
   const normalizedEmail = email.trim().toLowerCase()
+  // Make scheduled access available as soon as the employee logs in on the activation date.
+  const pending = await supabaseAdmin.from('onboarding_cases').select('id')
+    .eq('email', normalizedEmail).eq('status', 'approved').lte('activation_date', chicagoDate())
+  if (!pending.error) {
+    for (const row of pending.data ?? []) await supabaseAdmin.rpc('activate_onboarding_case', { p_case_id: row.id })
+  }
   const { data: employees, error } = await supabaseAdmin
     .from('employees')
     .select('id, name, email, role, login_enabled, login_password_hash, is_active')

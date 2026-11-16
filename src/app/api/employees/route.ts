@@ -173,6 +173,13 @@ async function reconcileEmployeeScheduleRows(employeeId: string, scheduleDepartm
 }
 
 async function findDuplicatePin(pin: string, currentEmployeeId?: string) {
+  const pending = await supabaseAdmin.from('onboarding_cases').select('id,first_name,last_name')
+    .eq('pending_pin_code', pin).not('status', 'in', '(active,cancelled)').limit(1)
+  if (pending.error && pending.error.code !== '42P01' && !/onboarding_cases|schema cache|does not exist/i.test(pending.error.message)) throw new Error(pending.error.message)
+  if (pending.data?.[0]) {
+    const applicant = pending.data[0]
+    return { id: applicant.id, name: `${applicant.first_name ?? ''} ${applicant.last_name ?? ''}`.trim() || 'a pending applicant', pin_hash: null }
+  }
   const result = await supabaseAdmin
     .from('employees')
     .select('id, name, pin_hash, pin_code')

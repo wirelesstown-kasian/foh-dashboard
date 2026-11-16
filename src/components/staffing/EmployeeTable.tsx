@@ -172,6 +172,7 @@ export function EmployeeTable() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Employee | null>(null)
+  const [onboardingProfile, setOnboardingProfile] = useState<{ application_case_id: string | null; documents: Array<{ id: string; kind: string; file_name: string }> } | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -189,6 +190,16 @@ export function EmployeeTable() {
   const [archivingId, setArchivingId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const viewingArchived = editTarget?.is_active === false
+
+  useEffect(() => {
+    if (!editTarget) { setOnboardingProfile(null); return }
+    let cancelled = false
+    fetch(`/api/onboarding/profile?employee_id=${encodeURIComponent(editTarget.id)}`, { cache: 'no-store' })
+      .then(res => res.ok ? res.json() : null)
+      .then(profile => { if (!cancelled) setOnboardingProfile(profile) })
+      .catch(() => { if (!cancelled) setOnboardingProfile(null) })
+    return () => { cancelled = true }
+  }, [editTarget])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -809,6 +820,7 @@ export function EmployeeTable() {
               )}
             </div>
             </fieldset>
+            {editTarget && onboardingProfile?.application_case_id && <div className="rounded-lg border bg-slate-50 p-3 text-sm"><p className="font-medium">Onboarding records</p><a className="text-blue-700 underline" target="_blank" rel="noreferrer" href={`/api/onboarding/file?application_case_id=${onboardingProfile.application_case_id}`}>Open initial application PDF</a><div className="mt-1 flex flex-wrap gap-3">{onboardingProfile.documents.map(doc => <a key={doc.id} className="text-xs text-blue-700 underline" target="_blank" rel="noreferrer" href={`/api/onboarding/file?document_id=${doc.id}`}>{doc.kind.toUpperCase()}: {doc.file_name}</a>)}</div></div>}
             {saveError && (
               <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
                 {saveError}
