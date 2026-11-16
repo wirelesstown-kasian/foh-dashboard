@@ -126,9 +126,9 @@ export async function maybeSendOnboardingRecord(caseId: string) {
   for (const result of [caseResult, materials, acknowledgments, documents, company]) if (result.error) throw new Error(result.error.message)
   const row = caseResult.data
   if (!row || row.record_email_sent_at || !company.data?.records_email || !process.env.RESEND_API_KEY || !row.application_path) return false
-  const required = (materials.data ?? []).filter(m => m.is_current && m.effective_date <= chicagoDate() && m.required && materialAssigned(m.departments, row.schedule_departments, row.primary_department))
+  const required = (materials.data ?? []).filter(m => m.is_current && m.effective_date <= chicagoDate() && m.required && (row.selected_documents ?? []).includes(m.id) && materialAssigned(m.departments, row.schedule_departments, row.primary_department))
   if (required.some(m => !(acknowledgments.data ?? []).some(a => a.material_id === m.id))) return false
-  for (const kind of ['w4', 'i9']) if (!(documents.data ?? []).some(d => d.kind === kind && d.manager_verified_at)) return false
+  for (const kind of ['w4', 'i9']) if ((row.selected_documents ?? []).includes(kind) && !(documents.data ?? []).some(d => d.kind === kind && d.manager_verified_at)) return false
   const claim = await supabaseAdmin.from('onboarding_cases').update({ record_email_claimed_at: new Date().toISOString() })
     .eq('id', caseId).is('record_email_sent_at', null).is('record_email_claimed_at', null).select('id').maybeSingle()
   if (claim.error) throw new Error(claim.error.message)

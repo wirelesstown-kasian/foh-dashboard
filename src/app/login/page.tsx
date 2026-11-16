@@ -19,7 +19,7 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [pin, setPin] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -51,7 +51,7 @@ function LoginForm() {
       const res = await fetch('/api/app-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, pin }),
       })
       const data = (await res.json().catch(() => ({}))) as { error?: string; can_manage_admin?: boolean }
       if (!res.ok) {
@@ -76,7 +76,7 @@ function LoginForm() {
           </div>
           <h1 className="mt-4 text-2xl font-bold text-slate-900">FOH Login</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Sign in with the app login managed in Staffing. PIN stays available for task actions inside service.
+            Sign in with your email and four-digit employee PIN.
           </p>
         </div>
 
@@ -95,12 +95,14 @@ function LoginForm() {
             </div>
           </div>
           <div>
-            <Label>Password</Label>
+            <Label>Four-digit PIN</Label>
             <Input
               type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 8 characters"
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              onChange={(event) => setPin(event.target.value)}
+              placeholder="4 digits"
               className="mt-1"
             />
           </div>
@@ -111,7 +113,7 @@ function LoginForm() {
           )}
           <Button
             className="w-full"
-            disabled={saving || !email.trim() || !password.trim()}
+            disabled={saving || !email.trim() || !/^\d{4}$/.test(pin)}
             onClick={handleSubmit}
           >
             {saving ? 'Signing In…' : 'Sign In'}

@@ -5,7 +5,6 @@ import { ADMIN_SESSION_COOKIE, hasManagerAccess } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { EmployeeRole, PaymentMethod } from '@/lib/types'
 import { isValidPin } from '@/lib/validation'
-import { hashPassword } from '@/lib/password'
 import { getAppSettings } from '@/lib/appSettings'
 import {
   EMPLOYEE_PUBLIC_SELECT,
@@ -335,9 +334,6 @@ export async function POST(req: NextRequest) {
   if (login_enabled === true && !(typeof email === 'string' && email.trim())) {
     return NextResponse.json({ error: 'Email is required when app login is enabled' }, { status: 400 })
   }
-  if (login_enabled === true && !(typeof login_password === 'string' && login_password.trim().length >= 8)) {
-    return NextResponse.json({ error: 'Login password must be at least 8 characters' }, { status: 400 })
-  }
 
   const hourlyWage = typeof hourly_wage === 'number' ? hourly_wage : typeof hourly_wage === 'string' && hourly_wage.trim() ? Number(hourly_wage) : null
   const guaranteedHourly = typeof guaranteed_hourly === 'number' ? guaranteed_hourly : typeof guaranteed_hourly === 'string' && guaranteed_hourly.trim() ? Number(guaranteed_hourly) : null
@@ -375,7 +371,6 @@ export async function POST(req: NextRequest) {
   }
 
   const pin_hash = await hashPin(pin)
-  const loginPasswordHash = login_enabled === true ? await hashPassword(login_password.trim()) : null
   const insertPayload = {
     name: name.trim(),
     phone: typeof phone === 'string' && phone.trim() ? phone.trim() : null,
@@ -394,7 +389,7 @@ export async function POST(req: NextRequest) {
     payment_method: paymentMethod,
     birth_date: typeof birth_date === 'string' && birth_date ? birth_date : null,
     login_enabled: login_enabled === true,
-    login_password_hash: loginPasswordHash,
+    login_password_hash: null,
     pin_hash,
     pin_code: pin,
   }
@@ -517,7 +512,7 @@ export async function PATCH(req: NextRequest) {
 
   const { data: currentEmployee, error: currentEmployeeError } = await supabaseAdmin
     .from('employees')
-    .select('login_password_hash')
+    .select('id')
     .eq('id', id)
     .single()
 
@@ -538,19 +533,7 @@ export async function PATCH(req: NextRequest) {
     update.pin_code = pin
   }
 
-  if (login_enabled === true) {
-    const hasExistingLoginPassword = typeof currentEmployee.login_password_hash === 'string' && currentEmployee.login_password_hash.length > 0
-    if (typeof login_password === 'string' && login_password.trim()) {
-      if (login_password.trim().length < 8) {
-        return NextResponse.json({ error: 'Login password must be at least 8 characters' }, { status: 400 })
-      }
-      update.login_password_hash = await hashPassword(login_password.trim())
-    } else if (!hasExistingLoginPassword) {
-      return NextResponse.json({ error: 'Set a login password before enabling app login' }, { status: 400 })
-    }
-  } else {
-    update.login_password_hash = null
-  }
+  update.login_password_hash = null
 
   const error = await writeEmployeeWithOptionalFallback('update', update, id)
   if (error) {

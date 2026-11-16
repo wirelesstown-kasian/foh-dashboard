@@ -3,7 +3,7 @@ import { PDFDocument } from 'pdf-lib'
 export type ApplicantForForms = {
   first_name: string; last_name: string; address: string; address_city: string;
   address_state: string; address_postal_code: string; email: string; phone: string;
-  activation_date: string | null
+  activation_date: string | null; filing_status?: string | null; w4_step3_amount?: number | null
 }
 export type EmployerForForms = {
   legal_name: string; street: string; city: string; state: string;
@@ -22,6 +22,9 @@ export async function prefillOnboardingForm(kind: 'w4' | 'i9', template: Uint8Ar
     set('topmostSubform[0].Page1[0].Step1a[0].f1_03[0]', row.address)
     set('topmostSubform[0].Page1[0].Step1a[0].f1_04[0]', address)
     set('topmostSubform[0].Page1[0].f1_05[0]', ssn)
+    const filingIndex = { single: 0, married_joint: 1, head_of_household: 2 }[row.filing_status ?? '']
+    if (filingIndex !== undefined) form.getCheckBox(`topmostSubform[0].Page1[0].c1_1[${filingIndex}]`).check()
+    if (row.w4_step3_amount != null) set('topmostSubform[0].Page1[0].f1_08[0]', String(row.w4_step3_amount))
     set('topmostSubform[0].Page1[0].f1_12[0]', `${employer.legal_name}\n${employer.street}, ${employer.city}, ${employer.state} ${employer.postal_code}`)
     set('topmostSubform[0].Page1[0].f1_13[0]', startDate)
     set('topmostSubform[0].Page1[0].f1_14[0]', employer.ein)

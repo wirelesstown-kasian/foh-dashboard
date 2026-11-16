@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { APP_SESSION_COOKIE, createAppSessionValue, getAppSessionMaxAge, parseAppSessionValue } from '@/lib/appAuth'
 import { ADMIN_SESSION_COOKIE } from '@/lib/adminSession'
-import { verifyPassword } from '@/lib/password'
+import { verifyPin } from '@/lib/pin'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { chicagoDate } from '@/lib/onboarding'
 
@@ -53,12 +53,15 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { email, password } = await req.json() as { email?: string; password?: string }
-  if (typeof email !== 'string' || !email.trim() || typeof password !== 'string' || !password.trim()) {
-    return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
+  const { email, pin } = await req.json() as { email?: string; pin?: string }
+  if (typeof email !== 'string' || !email.trim() || !/^\d{4}$/.test(pin ?? '')) {
+    return NextResponse.json({ error: 'Email and four-digit PIN are required' }, { status: 400 })
   }
 
   const normalizedEmail = email.trim().toLowerCase()
+  const attempts = await supabaseAdmin.from('app_pin_attempts').select('failures,locked_until').eq('email', normalizedEmail).maybeSingle()
+  if (attempts.error) return NextResponse.json({ error: attempts.error.message }, { status: 500 })
+  if (attempts.data?.locked_until && new Date(attempts.data.locked_until) > new Date()) return NextResponse.json({ error: 'Too many attempts. Try again in 15 minutes.' }, { status: 429 })
   // Make scheduled access available as soon as the employee logs in on the activation date.
   const pending = await supabaseAdmin.from('onboarding_cases').select('id')
     .eq('email', normalizedEmail).eq('status', 'approved').lte('activation_date', chicagoDate())
@@ -67,7 +70,7 @@ export async function POST(req: NextRequest) {
   }
   const { data: employees, error } = await supabaseAdmin
     .from('employees')
-    .select('id, name, email, role, login_enabled, login_password_hash, is_active')
+    .select('id, name, email, role, login_enabled, pin_hash, pin_code, is_active')
     .ilike('email', normalizedEmail)
     .eq('is_active', true)
     .eq('login_enabled', true)
@@ -78,14 +81,14 @@ export async function POST(req: NextRequest) {
   }
 
   const employee = employees?.[0]
-  if (!employee?.login_password_hash || !employee.email) {
-    return NextResponse.json({ error: 'No active app login found for that email' }, { status: 401 })
+  const pinMatches = Boolean(employee?.pin_hash && await verifyPin(pin!, employee.pin_hash)) || employee?.pin_code === pin
+  if (!employee?.email || !pinMatches) {
+    const failures = (attempts.data?.failures ?? 0) + 1
+    const tracked = await supabaseAdmin.from('app_pin_attempts').upsert({ email: normalizedEmail, failures, locked_until: failures >= 5 ? new Date(Date.now() + 15 * 60000).toISOString() : null, updated_at: new Date().toISOString() })
+    if (tracked.error) return NextResponse.json({ error: tracked.error.message }, { status: 500 })
+    return NextResponse.json({ error: 'Incorrect email or PIN' }, { status: 401 })
   }
-
-  const passwordMatches = await verifyPassword(password, employee.login_password_hash)
-  if (!passwordMatches) {
-    return NextResponse.json({ error: 'Incorrect email or password' }, { status: 401 })
-  }
+  await supabaseAdmin.from('app_pin_attempts').delete().eq('email', normalizedEmail)
 
   const cookieStore = await cookies()
   cookieStore.set(APP_SESSION_COOKIE, createAppSessionValue({

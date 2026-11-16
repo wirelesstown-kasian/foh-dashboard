@@ -5,7 +5,7 @@ import { OnboardingManager } from '@/components/onboarding/OnboardingManager'
 export default function StaffingPage() {
   return (
     <div className="p-6">
-      <AdminSubpageHeader title="Staffing" subtitle="Manage employee profiles, roles, PINs, and app login access." />
+      <AdminSubpageHeader title="Staffing" subtitle="Manage employee profiles, roles, PINs, and onboarding." />
       <EmployeeTable />
       <OnboardingManager />
     </div>
