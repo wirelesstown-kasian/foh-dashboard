@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks, subYears, addMonths, addWeeks, addYears } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { MissingTipDistributionNotice } from '@/components/reporting/MissingTipDistributionNotice'
-import { useClockRecords, useEodReports, usePayrollRuns } from '@/components/reporting/useReportingData'
+import { useClockRecords, useEodReports, useEmployees, usePayrollRuns } from '@/components/reporting/useReportingData'
 import {
   historicalPayroll, historicalRevenue, monthlyTrendValues, nonOverlappingPayroll, nonOverlappingSales, periodRows,
   type HistoricalAdjustments,
@@ -14,8 +14,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { supabase } from '@/lib/supabase'
-import { CashBalanceEntry, EodReport, PayrollRun, PayrollRunItem, TipDistribution } from '@/lib/types'
+import { CashBalanceEntry, Employee, EodReport, PayrollRun, PayrollRunItem, TipDistribution } from '@/lib/types'
 import { getPayrollPaymentBreakdown } from '@/lib/payroll'
+import { getEffectiveClockHours } from '@/lib/clockUtils'
 import { summarizeLegacyPayroll, type LegacyPayrollDay } from '@/lib/legacyDashboardPayroll'
 import { exportDashboardToPdf } from '@/lib/dashboardPdf'
 import { ArrowDownRight, ArrowUpRight, Banknote, CalendarDays, CreditCard, DollarSign, Download, ReceiptText, Truck, Wallet } from 'lucide-react'
@@ -558,6 +559,7 @@ export default function ReportingDashboardPage() {
   const dashboardRef = useRef<HTMLDivElement>(null)
   const { eodReports, loading: eodLoading, error: eodError } = useEodReports()
   const { clockRecords } = useClockRecords()
+  const employees = useEmployees()
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
   const [selectedYearlyChart, setSelectedYearlyChart] = useState<YearlyChartKey>('net')
@@ -651,6 +653,59 @@ export default function ReportingDashboardPage() {
     () => eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate),
     [eodReports, endDate, startDate]
   )
+  const dailyOperationsRows = useMemo(() => {
+    const employeesById = new Map(employees.map(employee => [employee.id, employee]))
+    const reportsByDate = new Map(currentReports.map(report => [report.session_date, report]))
+    const clocksByDate = new Map<string, typeof clockRecords>()
+
+    for (const record of clockRecords) {
+      if (record.session_date < startDate || record.session_date > endDate) continue
+      const records = clocksByDate.get(record.session_date) ?? []
+      records.push(record)
+      clocksByDate.set(record.session_date, records)
+    }
+
+    const dates = Array.from(new Set([...reportsByDate.keys(), ...clocksByDate.keys()])).sort((left, right) => right.localeCompare(left))
+    return dates.map(date => {
+      const report = reportsByDate.get(date)
+      const records = clocksByDate.get(date) ?? []
+      const staffing = {
+        foh: { employees: new Set<string>(), hours: 0 },
+        boh: { employees: new Set<string>(), hours: 0 },
+        estimatedPayroll: 0,
+      }
+
+      for (const record of records) {
+        const employee = employeesById.get(record.employee_id) ?? record.employee as Employee | undefined
+        const hours = getEffectiveClockHours(record)
+        if (hours <= 0) continue
+        const department = record.work_department === 'boh' || (!record.work_department && employee?.primary_department === 'boh')
+          ? 'boh'
+          : 'foh'
+        staffing[department].employees.add(record.employee_id)
+        staffing[department].hours += hours
+        staffing.estimatedPayroll += hours * Number(employee?.hourly_wage ?? 0)
+      }
+
+      const tipsPaid = (report?.tip_distributions ?? []).reduce((sum, distribution) => sum + Number(distribution.net_tip ?? 0), 0)
+      const netSales = report ? getNetRevenue(report) : 0
+      return {
+        date,
+        gross: Number(report?.revenue_total ?? 0),
+        tax: Number(report?.sales_tax ?? 0),
+        netSales,
+        collectedTips: Number(report?.tip_total ?? 0),
+        tipsPaid,
+        fohStaff: staffing.foh.employees.size,
+        fohHours: staffing.foh.hours,
+        bohStaff: staffing.boh.employees.size,
+        bohHours: staffing.boh.hours,
+        estimatedPayroll: staffing.estimatedPayroll,
+        laborRate: netSales > 0 ? staffing.estimatedPayroll / netSales : null,
+        afterLabor: netSales - staffing.estimatedPayroll,
+      }
+    })
+  }, [clockRecords, currentReports, employees, endDate, startDate])
   const previousReports = useMemo(
     () => eodReports.filter(report => report.session_date >= previousStartDate && report.session_date <= previousEndDate),
     [eodReports, previousEndDate, previousStartDate]
@@ -1338,6 +1393,57 @@ export default function ReportingDashboardPage() {
             selected={period === 'yearly' && selectedYearlyChart === card.key}
           />
         ))}
+      </div>
+
+      <div className="mt-5 rounded-xl border bg-white p-4" data-pdf-section="daily-operations">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Daily Operations</p>
+            <h2 className="text-lg font-semibold text-slate-950">Sales, tips, staffing, and labor by business day</h2>
+          </div>
+          <p className="max-w-xl text-right text-xs text-muted-foreground">
+            Payroll is an estimate from clocked hours and each employee&apos;s hourly wage. Finalized payroll remains reported by pay date.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1180px] text-sm">
+            <thead className="border-y bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Date</th>
+                <th className="px-3 py-2 text-right">Gross</th>
+                <th className="px-3 py-2 text-right">Tax</th>
+                <th className="px-3 py-2 text-right">Net Sales</th>
+                <th className="px-3 py-2 text-right">Tips Collected</th>
+                <th className="px-3 py-2 text-right">Tip Out</th>
+                <th className="px-3 py-2 text-right">FOH Staff / Hrs</th>
+                <th className="px-3 py-2 text-right">BOH Staff / Hrs</th>
+                <th className="px-3 py-2 text-right">Est. Payroll</th>
+                <th className="px-3 py-2 text-right">Labor %</th>
+                <th className="px-3 py-2 text-right">After Labor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailyOperationsRows.map(row => (
+                <tr key={row.date} className="border-b last:border-0">
+                  <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{format(toDate(row.date), 'EEE, MMM d')}</td>
+                  <td className="px-3 py-2 text-right">{formatCurrency(row.gross)}</td>
+                  <td className="px-3 py-2 text-right text-slate-500">{formatCurrency(row.tax)}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatCurrency(row.netSales)}</td>
+                  <td className="px-3 py-2 text-right">{formatCurrency(row.collectedTips)}</td>
+                  <td className="px-3 py-2 text-right text-teal-700">{formatCurrency(row.tipsPaid)}</td>
+                  <td className="px-3 py-2 text-right">{row.fohStaff} / {row.fohHours.toFixed(1)}h</td>
+                  <td className="px-3 py-2 text-right">{row.bohStaff} / {row.bohHours.toFixed(1)}h</td>
+                  <td className="px-3 py-2 text-right font-semibold text-violet-700">{formatCurrency(row.estimatedPayroll)}</td>
+                  <td className="px-3 py-2 text-right">{row.laborRate === null ? '—' : `${(row.laborRate * 100).toFixed(1)}%`}</td>
+                  <td className="px-3 py-2 text-right font-semibold text-slate-950">{formatCurrency(row.afterLabor)}</td>
+                </tr>
+              ))}
+              {dailyOperationsRows.length === 0 && (
+                <tr><td colSpan={11} className="px-3 py-6 text-center text-muted-foreground">No EOD or clock data is available for this period.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="mt-5 rounded-xl border bg-white p-4" data-pdf-section="departments">
