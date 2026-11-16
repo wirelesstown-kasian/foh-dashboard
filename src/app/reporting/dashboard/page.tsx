@@ -841,6 +841,19 @@ export default function ReportingDashboardPage() {
     }
     return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [currentImportedPayrollTotals, currentPayrollRuns, currentLegacyPayroll])
+  const payrollHoursByDepartment = useMemo(() => {
+    const employeesById = new Map(employees.map(employee => [employee.id, employee]))
+    const hours = new Map<string, number>()
+
+    for (const record of clockRecords) {
+      if (record.session_date < startDate || record.session_date > endDate) continue
+      const employee = employeesById.get(record.employee_id) ?? ((Array.isArray(record.employee) ? record.employee[0] : record.employee) as Employee | undefined)
+      const department = getPayrollDepartmentGroup(getClockWorkDepartment(record, employee))
+      hours.set(department, (hours.get(department) ?? 0) + getEffectiveClockHours(record))
+    }
+
+    return hours
+  }, [clockRecords, employees, endDate, startDate])
   const payrollPanel = useMemo(() => {
     const totals = {
       kitchen: 0,
@@ -1482,6 +1495,7 @@ export default function ReportingDashboardPage() {
               <div key={dept} className="rounded-lg border bg-slate-50 p-3">
                 <div className="text-xs font-medium uppercase text-slate-500">{dept}</div>
                 <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(amount)}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{(payrollHoursByDepartment.get(dept) ?? 0).toFixed(1)} combined hrs</div>
               </div>
             ))}
           </div>
