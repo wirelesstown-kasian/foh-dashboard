@@ -1327,27 +1327,57 @@ export default function ReportingDashboardPage() {
               formatValue={activeChart.formatValue}
             />
           </div>
-          <div className="mt-5 rounded-xl border bg-white p-4" data-pdf-section="departments">
-            <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="mt-5 rounded-xl border bg-white p-4" data-pdf-section="daily-operations">
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
               <div>
-                <p className="text-xs font-medium uppercase text-muted-foreground">Payroll by Department</p>
-                <h2 className="text-lg font-semibold text-slate-950">Payroll and combined hours</h2>
+                <p className="text-xs font-medium uppercase text-muted-foreground">Daily Operations</p>
+                <h2 className="text-lg font-semibold text-slate-950">Sales, tips, staffing, and labor by business day</h2>
               </div>
-              <Badge variant="outline">{currentLegacyTotals.totalPayrollOut > 0 ? 'Includes legacy estimate' : 'Saved + imported'}</Badge>
+              <p className="max-w-xl text-right text-xs text-muted-foreground">
+                Payroll is an estimate from clocked hours and each employee&apos;s hourly wage. Finalized payroll remains reported by pay date.
+              </p>
             </div>
-            {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-pdf-grid="departments">
-                {payrollByDepartment.map(([dept, amount]) => (
-                  <div key={dept} className="rounded-lg border bg-slate-50 p-3">
-                    <div className="text-xs font-medium uppercase text-slate-500">{dept}</div>
-                    <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(amount)}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{(payrollHoursByDepartment.get(dept) ?? 0).toFixed(1)} combined hrs</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No saved payout or imported payroll total is recorded in this range.</p>
-            )}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1080px] text-sm">
+                <thead className="border-y bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Date</th>
+                    <th className="px-3 py-2 text-right">Gross</th>
+                    <th className="px-3 py-2 text-right">Tax</th>
+                    <th className="px-3 py-2 text-right">Net Sales</th>
+                    <th className="px-3 py-2 text-right">Tips Collected</th>
+                    <th className="px-3 py-2 text-right">Tip Out</th>
+                    {dailyDepartmentColumns.map(column => (
+                      <th key={column.key} className="px-3 py-2 text-right">{column.label} Staff / Hrs</th>
+                    ))}
+                    <th className="px-3 py-2 text-right">Est. Payroll</th>
+                    <th className="px-3 py-2 text-right">Labor %</th>
+                    <th className="px-3 py-2 text-right">After Labor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyOperationsRows.map(row => (
+                    <tr key={row.date} className="border-b last:border-0">
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{format(toDate(row.date), 'EEE, MMM d')}</td>
+                      <td className="px-3 py-2 text-right">{formatCurrency(row.gross)}</td>
+                      <td className="px-3 py-2 text-right text-slate-500">{formatCurrency(row.tax)}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatCurrency(row.netSales)}</td>
+                      <td className="px-3 py-2 text-right">{formatCurrency(row.collectedTips)}</td>
+                      <td className="px-3 py-2 text-right text-teal-700">{formatCurrency(row.tipsPaid)}</td>
+                      {row.departmentStaffing.map(department => (
+                        <td key={department.key} className="px-3 py-2 text-right">{department.staffCount} / {department.hours.toFixed(1)}h</td>
+                      ))}
+                      <td className="px-3 py-2 text-right font-semibold text-violet-700">{formatCurrency(row.estimatedPayroll)}</td>
+                      <td className="px-3 py-2 text-right">{row.laborRate === null ? '—' : `${(row.laborRate * 100).toFixed(1)}%`}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-slate-950">{formatCurrency(row.afterLabor)}</td>
+                    </tr>
+                  ))}
+                  {dailyOperationsRows.length === 0 && (
+                    <tr><td colSpan={9 + dailyDepartmentColumns.length} className="px-3 py-6 text-center text-muted-foreground">No EOD or clock data is available for this period.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -1371,6 +1401,28 @@ export default function ReportingDashboardPage() {
             <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316"
               onSelect={period === 'yearly' ? () => selectYearlyChart('delivery') : undefined}
               selected={period === 'yearly' && selectedYearlyChart === 'delivery'} />
+          </div>
+          <div className="mt-5 border-t pt-5" data-pdf-section="departments">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium uppercase text-muted-foreground">Payroll by Department</p>
+                <h2 className="text-base font-semibold text-slate-950">Payroll and combined hours</h2>
+              </div>
+              <Badge variant="outline">{currentLegacyTotals.totalPayrollOut > 0 ? 'Includes legacy estimate' : 'Saved + imported'}</Badge>
+            </div>
+            {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-2" data-pdf-grid="departments">
+                {payrollByDepartment.map(([dept, amount]) => (
+                  <div key={dept} className="rounded-lg border bg-slate-50 p-3">
+                    <div className="text-xs font-medium uppercase text-slate-500">{dept}</div>
+                    <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(amount)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{(payrollHoursByDepartment.get(dept) ?? 0).toFixed(1)} combined hrs</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No saved payout or imported payroll total is recorded in this range.</p>
+            )}
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2" data-pdf-grid="mix">
             {([
@@ -1448,59 +1500,6 @@ export default function ReportingDashboardPage() {
             selected={period === 'yearly' && selectedYearlyChart === card.key}
           />
         ))}
-      </div>
-
-      <div className="mt-5 rounded-xl border bg-white p-4" data-pdf-section="daily-operations">
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <p className="text-xs font-medium uppercase text-muted-foreground">Daily Operations</p>
-            <h2 className="text-lg font-semibold text-slate-950">Sales, tips, staffing, and labor by business day</h2>
-          </div>
-          <p className="max-w-xl text-right text-xs text-muted-foreground">
-            Payroll is an estimate from clocked hours and each employee&apos;s hourly wage. Finalized payroll remains reported by pay date.
-          </p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] text-sm">
-            <thead className="border-y bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-right">Gross</th>
-                <th className="px-3 py-2 text-right">Tax</th>
-                <th className="px-3 py-2 text-right">Net Sales</th>
-                <th className="px-3 py-2 text-right">Tips Collected</th>
-                <th className="px-3 py-2 text-right">Tip Out</th>
-                {dailyDepartmentColumns.map(column => (
-                  <th key={column.key} className="px-3 py-2 text-right">{column.label} Staff / Hrs</th>
-                ))}
-                <th className="px-3 py-2 text-right">Est. Payroll</th>
-                <th className="px-3 py-2 text-right">Labor %</th>
-                <th className="px-3 py-2 text-right">After Labor</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dailyOperationsRows.map(row => (
-                <tr key={row.date} className="border-b last:border-0">
-                  <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{format(toDate(row.date), 'EEE, MMM d')}</td>
-                  <td className="px-3 py-2 text-right">{formatCurrency(row.gross)}</td>
-                  <td className="px-3 py-2 text-right text-slate-500">{formatCurrency(row.tax)}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatCurrency(row.netSales)}</td>
-                  <td className="px-3 py-2 text-right">{formatCurrency(row.collectedTips)}</td>
-                  <td className="px-3 py-2 text-right text-teal-700">{formatCurrency(row.tipsPaid)}</td>
-                  {row.departmentStaffing.map(department => (
-                    <td key={department.key} className="px-3 py-2 text-right">{department.staffCount} / {department.hours.toFixed(1)}h</td>
-                  ))}
-                  <td className="px-3 py-2 text-right font-semibold text-violet-700">{formatCurrency(row.estimatedPayroll)}</td>
-                  <td className="px-3 py-2 text-right">{row.laborRate === null ? '—' : `${(row.laborRate * 100).toFixed(1)}%`}</td>
-                  <td className="px-3 py-2 text-right font-semibold text-slate-950">{formatCurrency(row.afterLabor)}</td>
-                </tr>
-              ))}
-              {dailyOperationsRows.length === 0 && (
-                <tr><td colSpan={9 + dailyDepartmentColumns.length} className="px-3 py-6 text-center text-muted-foreground">No EOD or clock data is available for this period.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
 
     </div>
