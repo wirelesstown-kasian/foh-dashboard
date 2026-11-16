@@ -1327,6 +1327,28 @@ export default function ReportingDashboardPage() {
               formatValue={activeChart.formatValue}
             />
           </div>
+          <div className="mt-5 rounded-xl border bg-white p-4" data-pdf-section="departments">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium uppercase text-muted-foreground">Payroll by Department</p>
+                <h2 className="text-lg font-semibold text-slate-950">Payroll and combined hours</h2>
+              </div>
+              <Badge variant="outline">{currentLegacyTotals.totalPayrollOut > 0 ? 'Includes legacy estimate' : 'Saved + imported'}</Badge>
+            </div>
+            {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-pdf-grid="departments">
+                {payrollByDepartment.map(([dept, amount]) => (
+                  <div key={dept} className="rounded-lg border bg-slate-50 p-3">
+                    <div className="text-xs font-medium uppercase text-slate-500">{dept}</div>
+                    <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(amount)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{(payrollHoursByDepartment.get(dept) ?? 0).toFixed(1)} combined hrs</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No saved payout or imported payroll total is recorded in this range.</p>
+            )}
+          </div>
         </div>
 
         <div className="rounded-xl border bg-white p-4" data-pdf-section="mix">
@@ -1349,28 +1371,6 @@ export default function ReportingDashboardPage() {
             <MixBar label="Delivery" value={currentTotals.delivery} total={mixTotal} color="#f97316"
               onSelect={period === 'yearly' ? () => selectYearlyChart('delivery') : undefined}
               selected={period === 'yearly' && selectedYearlyChart === 'delivery'} />
-          </div>
-          <div className="mt-5 border-t pt-5" data-pdf-section="departments">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium uppercase text-muted-foreground">Payroll by Department</p>
-                <h2 className="text-base font-semibold text-slate-950">Payroll and combined hours</h2>
-              </div>
-              <Badge variant="outline">{currentLegacyTotals.totalPayrollOut > 0 ? 'Includes legacy estimate' : 'Saved + imported'}</Badge>
-            </div>
-            {hasCurrentSavedPayroll && payrollByDepartment.length > 0 ? (
-              <div className="grid gap-2 sm:grid-cols-2" data-pdf-grid="departments">
-                {payrollByDepartment.map(([dept, amount]) => (
-                  <div key={dept} className="rounded-lg border bg-slate-50 p-3">
-                    <div className="text-xs font-medium uppercase text-slate-500">{dept}</div>
-                    <div className="mt-1 text-xl font-bold text-slate-950">{formatCurrency(amount)}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">{(payrollHoursByDepartment.get(dept) ?? 0).toFixed(1)} combined hrs</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">No saved payout or imported payroll total is recorded in this range.</p>
-            )}
           </div>
           <div className="mt-5 grid gap-2 sm:grid-cols-2" data-pdf-grid="mix">
             {([
