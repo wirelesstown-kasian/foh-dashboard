@@ -1289,8 +1289,8 @@ export default function ReportingDashboardPage() {
         )}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.7fr_1fr]" data-pdf-layout="main">
-        <div>
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,400px)]" data-pdf-layout="main">
+        <div className="min-w-0">
           <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4" data-pdf-grid="summary">
             <button type="button" disabled={period !== 'yearly'} onClick={() => selectYearlyChart('net')}
               aria-pressed={period === 'yearly' && selectedYearlyChart === 'net'}
@@ -1337,7 +1337,7 @@ export default function ReportingDashboardPage() {
                 Payroll is an estimate from clocked hours and each employee&apos;s hourly wage. Finalized payroll remains reported by pay date.
               </p>
             </div>
-            <div className="overflow-x-auto">
+            <div className="min-w-0 overflow-x-auto">
               <table className="w-full min-w-[1080px] text-sm">
                 <thead className="border-y bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
@@ -1381,7 +1381,7 @@ export default function ReportingDashboardPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border bg-white p-4" data-pdf-section="mix">
+        <div className="min-w-0 rounded-xl border bg-white p-4" data-pdf-section="mix">
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-medium uppercase text-muted-foreground">Revenue Mix</p>
@@ -1403,8 +1403,8 @@ export default function ReportingDashboardPage() {
               selected={period === 'yearly' && selectedYearlyChart === 'delivery'} />
           </div>
           <div className="mt-5 border-t pt-5" data-pdf-section="departments">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-xs font-medium uppercase text-muted-foreground">Payroll by Department</p>
                 <h2 className="text-base font-semibold text-slate-950">Payroll and combined hours</h2>
               </div>
