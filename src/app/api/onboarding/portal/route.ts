@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { hashPin } from '@/lib/pin'
 import { chicagoDate, findInvite, makeApplicationPdf, materialAssigned, ONBOARDING_BUCKET, pinInUse } from '@/lib/onboarding'
-import { encryptSsn } from '@/lib/onboardingSsn'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getAppSettings } from '@/lib/appSettings'
 import { escapeHtml, sendEmail } from '@/lib/emailUtils'
@@ -53,7 +52,7 @@ export async function POST(req: NextRequest) {
         emergency_contact: typeof body.emergency_contact === 'object' && body.emergency_contact !== null ? body.emergency_contact : {},
         pin_hash: await hashPin(body.pin), pending_pin_code: body.pin,
         filing_status: body.filing_status || null, w4_step3_amount: step3,
-        ssn_ciphertext: encryptSsn(normalizedSsn),
+        ssn: normalizedSsn,
         login_password_hash: null, status: 'submitted', submitted_at: submittedAt,
       }
       const pdf = await makeApplicationPdf({ ...row, ...update })

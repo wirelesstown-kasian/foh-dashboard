@@ -6,7 +6,6 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { verifyPin } from '@/lib/pin'
 import { getAppSettings } from '@/lib/appSettings'
 import { escapeHtml, sendEmail } from '@/lib/emailUtils'
-import { encryptRecord } from '@/lib/onboardingArchive'
 
 export const ONBOARDING_BUCKET = 'onboarding-private'
 export const RESTAURANT_TIME_ZONE = 'America/Chicago'
@@ -155,11 +154,10 @@ export async function maybeSendOnboardingRecord(caseId: string) {
       const material = (materials.data ?? []).find(m => m.id === a.material_id)
       return `<li>${escapeHtml(material?.title ?? 'Archived material')} v${material?.version ?? '?'} — ${escapeHtml(a.signed_name ?? 'manager verified')} — ${escapeHtml(a.acknowledged_at)}</li>`
     }).join('')
-    const encryptedRecord = encryptRecord(attachments)
     await sendEmail({ resendKey: process.env.RESEND_API_KEY!, to: company.data.records_email,
       subject: `Completed onboarding record: ${row.first_name} ${row.last_name}`,
-      html: `<p>Completed onboarding for ${escapeHtml(`${row.first_name} ${row.last_name}`)}. The signed or reviewed documents and initial application are in the encrypted attachment. An authorized manager can open it in the Staffing onboarding section. Keep the archive key in your secure deployment records.</p><ul>${ackSummary}</ul>`,
-      attachments: [{ filename: `onboarding-${row.id}.nvrecord`, content: encryptedRecord.toString('base64') }],
+      html: `<p>Completed onboarding for ${escapeHtml(`${row.first_name} ${row.last_name}`)}. The initial application, signed or reviewed forms, and acknowledgment record are attached. These files may contain sensitive personal information; keep this email restricted to authorized managers.</p><ul>${ackSummary}</ul>`,
+      attachments,
       fromName: settings.from_name, fromEmail: settings.from_email, replyTo: settings.reply_to })
     const saved = await supabaseAdmin.from('onboarding_cases').update({ record_email_sent_at: new Date().toISOString() }).eq('id', caseId)
     if (saved.error) throw new Error(saved.error.message)

@@ -175,7 +175,7 @@ export async function PATCH(req: NextRequest) {
     }
     if (body.action === 'cancel_invite') {
       if (typeof body.id !== 'string') return errorResponse(new Error('Choose an invitation'), 400)
-      const cancelled = await supabaseAdmin.from('onboarding_cases').update({ status: 'cancelled', invite_hash: tokenHash(newInviteToken()), invite_expires_at: new Date().toISOString(), pending_pin_code: null, ssn_ciphertext: null }).eq('id', body.id).in('status', ['invited','submitted','approved']).select('id').maybeSingle()
+      const cancelled = await supabaseAdmin.from('onboarding_cases').update({ status: 'cancelled', invite_hash: tokenHash(newInviteToken()), invite_expires_at: new Date().toISOString(), pending_pin_code: null, ssn: null }).eq('id', body.id).in('status', ['invited','submitted','approved']).select('id').maybeSingle()
       if (cancelled.error) throw new Error(cancelled.error.message)
       if (!cancelled.data) return errorResponse(new Error('Only unfinished invitations can be cancelled'), 409)
       return NextResponse.json({ success: true })

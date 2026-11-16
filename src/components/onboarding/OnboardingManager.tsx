@@ -30,7 +30,6 @@ export function OnboardingManager() {
   const [selectedCaseId, setSelectedCaseId] = useState('')
   const [reissueRecipients, setReissueRecipients] = useState<Record<string, string>>({})
   const [issueMaterials, setIssueMaterials] = useState<Record<string, string>>({})
-  const [restoredFiles, setRestoredFiles] = useState<Array<{ filename: string; content: string }>>([])
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/onboarding', { cache: 'no-store' })
@@ -89,25 +88,6 @@ export function OnboardingManager() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Upload failed') } finally { setBusy(false) }
   }
 
-  async function openRecord(file: File | undefined) {
-    if (!file) return
-    setBusy(true); setError(''); setRestoredFiles([])
-    try {
-      const body = new FormData(); body.set('file', file)
-      const res = await fetch('/api/onboarding/restore', { method: 'POST', body })
-      const json = await res.json(); if (!res.ok) throw new Error(json.error ?? 'Could not open record')
-      setRestoredFiles(json.files)
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not open record') } finally { setBusy(false) }
-  }
-
-  function downloadRestored(file: { filename: string; content: string }) {
-    const binary = atob(file.content)
-    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
-    const url = URL.createObjectURL(new Blob([bytes]))
-    const link = document.createElement('a'); link.href = url; link.download = file.filename; link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
-  }
-
   function edit(row: Case) { return { ...row, ...caseEdits[row.id] } }
   function setEdit(id: string, values: Partial<Case>) { setCaseEdits(old => ({ ...old, [id]: { ...old[id], ...values } })) }
   function missingForCase(row: Case) {
@@ -145,7 +125,6 @@ export function OnboardingManager() {
       <button disabled={busy} className="rounded-md bg-blue-700 px-4 py-2 text-sm text-white disabled:opacity-50" onClick={uploadMaterial}>Upload draft</button>
       <div className="space-y-1">{data?.materials.map(row => <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 border-t py-2 text-sm"><span>{row.title} v{row.version} · {row.kind} · {row.is_current ? 'current' : row.published_at ? 'archived' : 'draft'}</span><div className="flex flex-wrap items-center gap-3"><a className="text-blue-700 underline" target="_blank" rel="noreferrer" href={`/api/onboarding/file?material_id=${row.id}`}>Open</a>{!row.is_current && !row.published_at && <button className="rounded-md border px-2 py-1" disabled={busy} onClick={() => jsonRequest('PATCH', { action: 'publish_material', id: row.id })}>Publish</button>}{row.is_current && <><select aria-label={`Employee for ${row.title}`} className="max-w-64 rounded-md border px-2 py-1" value={reissueRecipients[row.id] ?? ''} onChange={e => setReissueRecipients(old => ({ ...old, [row.id]: e.target.value }))}><option value="">Select one employee</option>{data.employees.filter(employee => employee.email && (!row.departments?.length || row.departments.some(department => employee.schedule_departments?.includes(department) || employee.primary_department === department))).map(employee => <option key={employee.id} value={employee.id}>{employee.name} ({employee.email})</option>)}</select><button className="rounded-md border px-2 py-1 disabled:opacity-50" disabled={busy || !reissueRecipients[row.id]} onClick={() => { const employee = data.employees.find(item => item.id === reissueRecipients[row.id]); if (employee && window.confirm(`Send ${row.title} update to ${employee.name} (${employee.email}) only?`)) void jsonRequest('PATCH', { action: 'reissue_material', id: row.id, employee_id: employee.id }) }}>Send to selected employee</button></>}</div></div>)}</div>
     </div>
-    <div className="space-y-2 rounded-lg border p-5"><h3 className="text-lg font-semibold">Open an emailed record</h3><p className="text-sm text-muted-foreground">Only managers can decrypt a completed record attachment. Keep the deployment archive key available for future records.</p><input type="file" accept=".nvrecord" className="text-sm" onChange={e => openRecord(e.target.files?.[0])} />{restoredFiles.map((file, i) => <button key={i} className="mr-3 text-sm text-blue-700 underline" onClick={() => downloadRestored(file)}>{file.filename}</button>)}</div>
     <div className="space-y-4"><h3 className="text-lg font-semibold">Employee onboarding cases</h3>{!data?.cases.length && <p className="text-sm text-muted-foreground">No onboarding cases yet.</p>}
       {!!data?.cases.length && <div className="overflow-x-auto rounded-lg border"><table className="w-full text-left text-sm"><thead className="bg-slate-50"><tr><th className="p-2">Employee</th><th className="p-2">Status</th><th className="p-2">Missing documents or training</th></tr></thead><tbody>{data.cases.filter(row => row.status !== 'cancelled').map(row => <tr key={row.id} className="border-t"><td className="p-2"><button className="text-blue-700 underline" onClick={() => setSelectedCaseId(row.id)}>{[row.first_name, row.last_name].filter(Boolean).join(' ') || row.email}</button></td><td className="p-2">{row.status}</td><td className="p-2">{row.status === 'invited' ? 'Application pending' : missingForCase(row).join(', ') || 'Complete'}</td></tr>)}</tbody></table></div>}
       {!!data?.cases.length && <label className="block max-w-md text-sm">Work on one employee<select className={input} value={selectedCaseId} onChange={e => setSelectedCaseId(e.target.value)}><option value="">Select an employee</option>{data.cases.filter(row => row.status !== 'cancelled').map(row => <option key={row.id} value={row.id}>{[row.first_name, row.last_name].filter(Boolean).join(' ') || row.email} ({row.status})</option>)}</select></label>}
