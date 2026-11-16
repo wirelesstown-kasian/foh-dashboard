@@ -5,6 +5,7 @@ import { addDays, endOfMonth, endOfWeek, endOfYear, format, startOfMonth, startO
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
 import { MissingTipDistributionNotice } from '@/components/reporting/MissingTipDistributionNotice'
 import { useClockRecords, useEodReports, useEmployees, usePayrollRuns } from '@/components/reporting/useReportingData'
+import { useAppSettings } from '@/components/useAppSettings'
 import {
   historicalPayroll, historicalRevenue, monthlyTrendValues, nonOverlappingPayroll, nonOverlappingSales, periodRows,
   type HistoricalAdjustments,
@@ -106,6 +107,12 @@ function getDashboardLabel(period: DashboardPeriod, refDate: Date, startDate: st
   if (period === 'weekly') return `Week of ${format(toDate(startDate), 'MMM d, yyyy')}`
   if (period === 'yearly') return format(refDate, 'yyyy')
   return format(refDate, 'MMMM yyyy')
+}
+
+function formatDepartmentKey(department: string) {
+  return department
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, letter => letter.toUpperCase())
 }
 
 function shiftDashboardDate(period: DashboardPeriod, refDate: Date, direction: 'prev' | 'next') {
@@ -560,6 +567,7 @@ export default function ReportingDashboardPage() {
   const { eodReports, loading: eodLoading, error: eodError } = useEodReports()
   const { clockRecords } = useClockRecords()
   const employees = useEmployees()
+  const { departmentDefinitions } = useAppSettings()
   const [period, setPeriod] = useState<DashboardPeriod>('monthly')
   const [refDate, setRefDate] = useState(new Date())
   const [selectedYearlyChart, setSelectedYearlyChart] = useState<YearlyChartKey>('net')
@@ -653,6 +661,21 @@ export default function ReportingDashboardPage() {
     () => eodReports.filter(report => report.session_date >= startDate && report.session_date <= endDate),
     [eodReports, endDate, startDate]
   )
+  const dailyDepartmentColumns = useMemo(() => {
+    const employeesById = new Map(employees.map(employee => [employee.id, employee]))
+    const labels = new Map(departmentDefinitions.map(definition => [definition.key.toLowerCase(), definition.label]))
+    const keys = new Set(departmentDefinitions.map(definition => definition.key.toLowerCase()))
+
+    for (const record of clockRecords) {
+      if (record.session_date < startDate || record.session_date > endDate) continue
+      const employee = employeesById.get(record.employee_id) ?? ((Array.isArray(record.employee) ? record.employee[0] : record.employee) as Employee | undefined)
+      const department = getClockWorkDepartment(record, employee).trim().toLowerCase()
+      if (department) keys.add(department)
+    }
+
+    return [...keys].map(key => ({ key, label: labels.get(key) ?? formatDepartmentKey(key) }))
+  }, [clockRecords, departmentDefinitions, employees, endDate, startDate])
+
   const dailyOperationsRows = useMemo(() => {
     const employeesById = new Map(employees.map(employee => [employee.id, employee]))
     const reportsByDate = new Map(currentReports.map(report => [report.session_date, report]))
@@ -669,22 +692,19 @@ export default function ReportingDashboardPage() {
     return dates.map(date => {
       const report = reportsByDate.get(date)
       const records = clocksByDate.get(date) ?? []
-      const staffing = {
-        foh: { employees: new Set<string>(), hours: 0 },
-        boh: { employees: new Set<string>(), hours: 0 },
-        estimatedPayroll: 0,
-      }
+      const staffing = new Map(dailyDepartmentColumns.map(column => [column.key, { employees: new Set<string>(), hours: 0 }]))
+      let estimatedPayroll = 0
 
       for (const record of records) {
         const employee = employeesById.get(record.employee_id) ?? ((Array.isArray(record.employee) ? record.employee[0] : record.employee) as Employee | undefined)
         const hours = getEffectiveClockHours(record)
         if (hours <= 0) continue
-        const department = getPayrollDepartmentGroup(getClockWorkDepartment(record, employee)) === 'kitchen'
-          ? 'boh'
-          : 'foh'
-        staffing[department].employees.add(record.employee_id)
-        staffing[department].hours += hours
-        staffing.estimatedPayroll += hours * Number(employee?.hourly_wage ?? 0)
+        const department = getClockWorkDepartment(record, employee).trim().toLowerCase() || 'unassigned'
+        const departmentStaffing = staffing.get(department) ?? { employees: new Set<string>(), hours: 0 }
+        departmentStaffing.employees.add(record.employee_id)
+        departmentStaffing.hours += hours
+        staffing.set(department, departmentStaffing)
+        estimatedPayroll += hours * Number(employee?.hourly_wage ?? 0)
       }
 
       const tipsPaid = (report?.tip_distributions ?? []).reduce((sum, distribution) => sum + Number(distribution.net_tip ?? 0), 0)
@@ -696,16 +716,16 @@ export default function ReportingDashboardPage() {
         netSales,
         collectedTips: Number(report?.tip_total ?? 0),
         tipsPaid,
-        fohStaff: staffing.foh.employees.size,
-        fohHours: staffing.foh.hours,
-        bohStaff: staffing.boh.employees.size,
-        bohHours: staffing.boh.hours,
-        estimatedPayroll: staffing.estimatedPayroll,
-        laborRate: netSales > 0 ? staffing.estimatedPayroll / netSales : null,
-        afterLabor: netSales - staffing.estimatedPayroll,
+        departmentStaffing: dailyDepartmentColumns.map(column => {
+          const value = staffing.get(column.key)
+          return { key: column.key, staffCount: value?.employees.size ?? 0, hours: value?.hours ?? 0 }
+        }),
+        estimatedPayroll,
+        laborRate: netSales > 0 ? estimatedPayroll / netSales : null,
+        afterLabor: netSales - estimatedPayroll,
       }
     })
-  }, [clockRecords, currentReports, employees, endDate, startDate])
+  }, [clockRecords, currentReports, dailyDepartmentColumns, employees, endDate, startDate])
   const previousReports = useMemo(
     () => eodReports.filter(report => report.session_date >= previousStartDate && report.session_date <= previousEndDate),
     [eodReports, previousEndDate, previousStartDate]
@@ -1406,7 +1426,7 @@ export default function ReportingDashboardPage() {
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] text-sm">
+          <table className="w-full min-w-[1080px] text-sm">
             <thead className="border-y bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-2 text-left">Date</th>
@@ -1415,8 +1435,9 @@ export default function ReportingDashboardPage() {
                 <th className="px-3 py-2 text-right">Net Sales</th>
                 <th className="px-3 py-2 text-right">Tips Collected</th>
                 <th className="px-3 py-2 text-right">Tip Out</th>
-                <th className="px-3 py-2 text-right">FOH Staff / Hrs</th>
-                <th className="px-3 py-2 text-right">BOH Staff / Hrs</th>
+                {dailyDepartmentColumns.map(column => (
+                  <th key={column.key} className="px-3 py-2 text-right">{column.label} Staff / Hrs</th>
+                ))}
                 <th className="px-3 py-2 text-right">Est. Payroll</th>
                 <th className="px-3 py-2 text-right">Labor %</th>
                 <th className="px-3 py-2 text-right">After Labor</th>
@@ -1431,15 +1452,16 @@ export default function ReportingDashboardPage() {
                   <td className="px-3 py-2 text-right font-semibold text-emerald-700">{formatCurrency(row.netSales)}</td>
                   <td className="px-3 py-2 text-right">{formatCurrency(row.collectedTips)}</td>
                   <td className="px-3 py-2 text-right text-teal-700">{formatCurrency(row.tipsPaid)}</td>
-                  <td className="px-3 py-2 text-right">{row.fohStaff} / {row.fohHours.toFixed(1)}h</td>
-                  <td className="px-3 py-2 text-right">{row.bohStaff} / {row.bohHours.toFixed(1)}h</td>
+                  {row.departmentStaffing.map(department => (
+                    <td key={department.key} className="px-3 py-2 text-right">{department.staffCount} / {department.hours.toFixed(1)}h</td>
+                  ))}
                   <td className="px-3 py-2 text-right font-semibold text-violet-700">{formatCurrency(row.estimatedPayroll)}</td>
                   <td className="px-3 py-2 text-right">{row.laborRate === null ? '—' : `${(row.laborRate * 100).toFixed(1)}%`}</td>
                   <td className="px-3 py-2 text-right font-semibold text-slate-950">{formatCurrency(row.afterLabor)}</td>
                 </tr>
               ))}
               {dailyOperationsRows.length === 0 && (
-                <tr><td colSpan={11} className="px-3 py-6 text-center text-muted-foreground">No EOD or clock data is available for this period.</td></tr>
+                <tr><td colSpan={9 + dailyDepartmentColumns.length} className="px-3 py-6 text-center text-muted-foreground">No EOD or clock data is available for this period.</td></tr>
               )}
             </tbody>
           </table>
