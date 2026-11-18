@@ -12,6 +12,9 @@ export type CheckEntry = {
   payee_name: string
   payroll_item_id: string | null
   payroll_check_amount: number | null
+  payroll_period_start?: string | null
+  payroll_period_end?: string | null
+  payroll_hours?: number | null
   payment_date: string
   amount: number
   bank_account: string | null
@@ -24,7 +27,7 @@ export type CheckEntry = {
   issued_by_name: string | null
 }
 
-export type CheckVendor = { id: string; name: string; category: string | null; archived_at: string | null }
+export type CheckVendor = { id: string; name: string; category: string | null; address: string | null; phone: string | null; archived_at: string | null }
 export type CheckEmployee = { id: string; name: string; is_active: boolean }
 export type CheckRun = { id: string; department: string; start_date: string; end_date: string; pay_date: string }
 export type PayrollCheckRow = {
@@ -45,11 +48,11 @@ export type CheckAudit = {
   after_record: Record<string, unknown>
 }
 export type CheckData = { entries: CheckEntry[]; vendors: CheckVendor[]; employees: CheckEmployee[]; runs: CheckRun[] }
-export type CheckAction = 'save' | 'prepare' | 'print' | 'resolve_print' | 'remove' | 'void'
+export type CheckAction = 'save' | 'prepare' | 'print' | 'reprint' | 'resolve_print' | 'remove' | 'void'
   | 'categorize' | 'save_vendor' | 'archive_vendor'
 
 export const checkActions = new Set<CheckAction>([
-  'save', 'prepare', 'print', 'resolve_print', 'remove', 'void', 'categorize', 'save_vendor', 'archive_vendor',
+  'save', 'prepare', 'print', 'reprint', 'resolve_print', 'remove', 'void', 'categorize', 'save_vendor', 'archive_vendor',
 ])
 
 export const checkMoney = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
