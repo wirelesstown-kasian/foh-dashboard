@@ -47,7 +47,7 @@ export type CheckAudit = {
   before_record: Record<string, unknown> | null
   after_record: Record<string, unknown>
 }
-export type CheckData = { entries: CheckEntry[]; vendors: CheckVendor[]; employees: CheckEmployee[]; runs: CheckRun[] }
+export type CheckData = { entries: CheckEntry[]; vendors: CheckVendor[]; employees: CheckEmployee[]; runs: CheckRun[]; company?: { name: string; address?: string; phone?: string; email?: string } }
 export type CheckAction = 'save' | 'prepare' | 'print' | 'reprint' | 'resolve_print' | 'remove' | 'void'
   | 'categorize' | 'save_vendor' | 'archive_vendor'
 
