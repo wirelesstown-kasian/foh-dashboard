@@ -1,75 +1,52 @@
 'use client'
 
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
 import { checkMoney, type CheckAudit, type CheckEntry, type CheckVendor } from '@/lib/checkWriter'
 import { CategoryField, Field, PinForm, checkInput, type SubmitCheck } from './check-form'
 
-export function PrintForm({ entries, submit }: { entries: CheckEntry[]; submit: SubmitCheck }) {
-  const [numbers, setNumbers] = useState<Record<string, string>>({})
+export function PrintForm({ entries, submit, reprint = false }: {
+  entries: CheckEntry[]; submit: SubmitCheck; reprint?: boolean
+}) {
+  const [numbers, setNumbers] = useState<Record<string, string>>(() => Object.fromEntries(entries.map(entry => [entry.id, entry.check_number ?? ''])))
   const [category, setCategory] = useState('')
-  const uncategorized = entries.some(entry => !entry.category)
-
-  return <PinForm label="Open print dialog" submit={pin => submit('print', {
+  const uncategorized = !reprint && entries.some(entry => !entry.category)
+  const action = reprint ? 'reprint' : 'print'
+  return <PinForm label={reprint ? 'Authorize reprint' : 'Authorize print'} submit={pin => submit(action, {
     items: entries.map(entry => ({
-      id: entry.id, revision: entry.revision, check_number: numbers[entry.id],
+      id: entry.id, revision: entry.revision, check_number: numbers[entry.id] || undefined,
       category: entry.category || category,
     })),
   }, pin)}>
-    <p className="text-sm text-muted-foreground">Load the vouchers in the order shown. Print at 100% on letter paper with headers and footers turned off.</p>
+    <p className="text-sm text-muted-foreground">
+      {reprint
+        ? 'This records an audited reprint and opens the printer.'
+        : 'Print at 100% on letter paper with headers and footers turned off. Authorized checks are recorded as issued.'}
+    </p>
     <div className="grid gap-2">
       {entries.map(entry => <div key={entry.id} className="grid grid-cols-[1fr_9rem] items-end gap-3 rounded-md border p-2.5">
         <div className="text-sm"><div className="font-medium">{entry.payee_name}</div>
           {checkMoney.format(entry.amount)} · {entry.bank_account}</div>
-        <Field label="Stock number"><input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}"
-          required maxLength={12} value={numbers[entry.id] ?? ''}
+        <Field label="Check number (optional)"><input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}"
+          maxLength={12} value={numbers[entry.id] ?? ''}
           onChange={event => setNumbers(current => ({ ...current, [entry.id]: event.target.value }))} /></Field>
       </div>)}
     </div>
     {uncategorized && <div className="grid gap-1">
       <CategoryField value={category} change={setCategory} required />
-      <p className="text-xs text-muted-foreground">Used for the selected drafts that have no category.</p>
+      <p className="text-xs text-muted-foreground">Used for selected drafts without a category.</p>
     </div>}
-  </PinForm>
-}
-
-type PrintOutcome = 'printed' | 'unused' | 'spoiled'
-
-export function PrintResults({ entries, submit }: { entries: CheckEntry[]; submit: SubmitCheck }) {
-  const [outcomes, setOutcomes] = useState<Record<string, PrintOutcome>>({})
-  return <PinForm label="Save print results" submit={pin => {
-    const items = entries.filter(entry => outcomes[entry.id]).map(entry => ({
-      id: entry.id, revision: entry.revision, outcome: outcomes[entry.id],
-    }))
-    if (!items.length) throw new Error('Choose a result for at least one check.')
-    return submit('resolve_print', { items }, pin)
-  }}>
-    <p className="text-sm text-muted-foreground">Check the printed pages first. Unused stock returns to draft. Spoiled stock is voided and retains its number.</p>
-    <Button type="button" variant="outline" className="justify-self-start" onClick={() =>
-      setOutcomes(Object.fromEntries(entries.map(entry => [entry.id, 'printed'])))}>
-      Mark all printed successfully
-    </Button>
-    <div className="grid gap-2">
-      {entries.map(entry => <div key={entry.id} className="grid grid-cols-[1fr_10rem] items-end gap-3 rounded-md border p-2.5">
-        <div className="text-sm"><div className="font-medium">{entry.payee_name}</div>
-          #{entry.check_number} · {checkMoney.format(entry.amount)}</div>
-        <Field label="Result"><select className={checkInput} value={outcomes[entry.id] ?? ''} onChange={event => {
-          const outcome = event.target.value as PrintOutcome
-          setOutcomes(current => ({ ...current, [entry.id]: outcome }))
-        }}>
-          <option value="">Keep pending</option><option value="printed">Printed successfully</option>
-          <option value="unused">Unused stock</option><option value="spoiled">Spoiled stock</option>
-        </select></Field>
-      </div>)}
-    </div>
   </PinForm>
 }
 
 export function VendorForm({ vendor, submit }: { vendor?: CheckVendor; submit: SubmitCheck }) {
   const [name, setName] = useState(vendor?.name ?? '')
   const [category, setCategory] = useState(vendor?.category ?? '')
-  return <PinForm label="Save vendor" submit={pin => submit('save_vendor', { id: vendor?.id, name, category }, pin)}>
+  const [address, setAddress] = useState(vendor?.address ?? '')
+  const [phone, setPhone] = useState(vendor?.phone ?? '')
+  return <PinForm label="Save vendor" submit={pin => submit('save_vendor', { id: vendor?.id, name, category, address, phone }, pin)}>
     <Field label="Vendor name"><input className={checkInput} maxLength={100} required value={name} onChange={event => setName(event.target.value)} /></Field>
+    <Field label="Address"><input className={checkInput} maxLength={240} value={address} onChange={event => setAddress(event.target.value)} /></Field>
+    <Field label="Phone"><input className={checkInput} maxLength={60} value={phone} onChange={event => setPhone(event.target.value)} /></Field>
     <CategoryField value={category} change={setCategory} />
   </PinForm>
 }
@@ -100,13 +77,13 @@ export function RemoveForm({ entry, submit }: { entry: CheckEntry; submit: Submi
 }
 
 const auditLabels: Record<string, string> = {
-  save: 'Saved', prepare: 'Prepared from payroll', print: 'Print authorized',
+  save: 'Saved', prepare: 'Prepared from payroll', print: 'Printed', reprint: 'Reprinted',
   resolve_print: 'Print result saved', remove: 'Draft removed', void: 'Payment voided',
   categorize: 'Accounting details updated', save_vendor: 'Vendor saved', archive_vendor: 'Vendor archived',
 }
 const auditFields: Record<string, string> = {
   status: 'Status', payment_date: 'Payment date', payee_name: 'Payee', name: 'Vendor',
-  amount: 'Amount', bank_account: 'Bank account', check_number: 'Stock number', category: 'Category',
+  amount: 'Amount', bank_account: 'Bank account', check_number: 'Check number', category: 'Category',
   memo: 'Memo', accounting_note: 'Accounting note', reference: 'Reference', archived_at: 'Archived',
 }
 
