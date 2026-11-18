@@ -10,12 +10,12 @@ import {
   type CheckAudit, type CheckData, type CheckEntry, type CheckRun, type CheckStatus, type CheckVendor, type PayrollCheckRow,
 } from '@/lib/checkWriter'
 import { printAlignmentSample, printChecks, type PrintAlignment } from '@/lib/checkVoucher'
-import { CheckForm, Field, PinForm, checkInput, type SubmitCheck } from './check-form'
-import { AccountingForm, AuditHistory, PrintForm, PrintResults, RemoveForm, VendorForm } from './check-dialogs'
+import { CheckForm, Field, PinForm, checkInput, quickBooksCategories, type SubmitCheck } from './check-form'
+import { AccountingForm, AuditHistory, PrintForm, RemoveForm, VendorForm } from './check-dialogs'
 import { PayrollChecks, PrepareChecks, type PayrollCheckItems } from './payroll-checks'
 
 const statusLabels: Record<CheckStatus, string> = {
-  draft: 'Draft', printing: 'Print pending', issued: 'Issued', void: 'Voided', removed: 'Removed',
+  draft: 'Draft', printing: 'Legacy print pending', issued: 'Issued', void: 'Voided', removed: 'Removed',
 }
 
 type CheckTab = 'drafts' | 'register' | 'payroll' | 'vendors'
@@ -24,7 +24,7 @@ type Panel =
   | { type: 'vendor'; vendor?: CheckVendor }
   | { type: 'archive'; vendor: CheckVendor }
   | { type: 'prepare'; run: CheckRun; rows: PayrollCheckRow[] }
-  | { type: 'print' | 'resolve'; entries: CheckEntry[] }
+  | { type: 'print' | 'reprint' | 'resolve'; entries: CheckEntry[] }
   | { type: 'accounting' | 'remove'; entry: CheckEntry }
   | { type: 'history'; id: string; vendor?: boolean; name: string }
 
@@ -80,8 +80,9 @@ function panelTitle(panel: Panel) {
     case 'vendor': return panel.vendor ? 'Edit vendor' : 'Add vendor'
     case 'archive': return 'Archive vendor'
     case 'prepare': return 'Choose employees for check drafts'
-    case 'print': return 'Print vouchers'
-    case 'resolve': return 'Confirm print results'
+    case 'print': return 'Print checks'
+    case 'reprint': return 'Reprint checks'
+    case 'resolve': return 'Resolve legacy print records'
     case 'accounting': return 'Edit accounting details'
     case 'remove': return panel.entry.status === 'draft' ? 'Remove draft' : 'Void payment'
     case 'history': return `History · ${panel.name}`
@@ -119,12 +120,13 @@ function AlignmentControls() {
   </details>
 }
 
-function EntryTable({ entries, chosen, toggle, edit, resolve, remove, accounting, history }: {
+function EntryTable({ entries, chosen, toggle, edit, resolve, reprint, remove, accounting, history }: {
   entries: CheckEntry[]
   chosen?: Set<string>
   toggle?: (id: string) => void
   edit: (entry: CheckEntry) => void
   resolve: (entry: CheckEntry) => void
+  reprint: (entry: CheckEntry) => void
   remove: (entry: CheckEntry) => void
   accounting: (entry: CheckEntry) => void
   history: (entry: CheckEntry) => void
@@ -168,7 +170,7 @@ function EntryTable({ entries, chosen, toggle, edit, resolve, remove, accounting
         <td className="p-3"><div className="flex flex-wrap gap-1.5">
           {entry.status === 'draft' && <Button variant="outline" size="sm" onClick={() => edit(entry)}>Edit</Button>}
           {entry.status === 'printing' && <Button variant="outline" size="sm" onClick={() => resolve(entry)}>Confirm result</Button>}
-          {entry.status === 'issued' && <Button variant="outline" size="sm" onClick={() => accounting(entry)}>Edit details</Button>}
+          {entry.status === 'issued' && <><Button variant="outline" size="sm" onClick={() => reprint(entry)}>Reprint</Button><Button variant="outline" size="sm" onClick={() => accounting(entry)}>Edit details</Button></>}
           {(entry.status === 'draft' || entry.status === 'issued') && <Button variant="ghost" size="sm" onClick={() => remove(entry)}>
             {entry.status === 'draft' ? 'Remove' : 'Void'}
           </Button>}
@@ -223,14 +225,15 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         .sort((left, right) => right.payment_date.localeCompare(left.payment_date)) })
       setChosen(current => new Set([...current].filter(id => !savedIds.has(id))))
     }
-    if (action === 'print') {
+    if (action === 'print' || action === 'reprint') {
       const printOrder = new Map(saved.map(entry => [entry.id, entry]))
       const ordered = (values.items as { id: string }[]).flatMap(item => {
         const entry = printOrder.get(item.id)
         return entry ? [entry] : []
       })
-      setPanel({ type: 'resolve', entries: ordered })
-      printChecks(ordered, readAlignment())
+      setPanel(null)
+      printChecks(ordered, readAlignment(), data)
+      setNotice(action === 'reprint' ? 'Reprint sent to the printer.' : 'Checks sent to the printer and recorded as issued.')
     } else {
       setPanel(null)
       if (action === 'prepare') {
@@ -238,7 +241,7 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         if (saved.length) setTab('drafts')
       } else {
         const messages = {
-          save: 'Saved.', resolve_print: 'Print results recorded.', remove: 'Draft removed.',
+          save: 'Saved.', resolve_print: 'Print results recorded.', reprint: 'Reprint sent to the printer.', remove: 'Draft removed.',
           void: 'Payment voided.', categorize: 'Accounting details saved.',
           save_vendor: 'Vendor saved.', archive_vendor: 'Vendor archived.',
         }
@@ -263,12 +266,13 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
       && (!category || entry.category === category)
       && (!query.trim() || [entry.payee_name, entry.check_number].some(value => value?.toLowerCase().includes(query.trim().toLowerCase())))
   }) ?? []
-  const categories = [...new Set([...(data?.entries ?? []), ...(data?.vendors ?? [])].flatMap(item => item.category ? [item.category] : []))].sort()
+  const categories = [...new Set([...quickBooksCategories, ...(data?.entries ?? []), ...(data?.vendors ?? [])].flatMap(item => item.category ? [item.category] : []))].sort()
   const bankAccounts = [...new Set(['Checking', ...(data?.entries ?? []).flatMap(item => item.bank_account ? [item.bank_account] : [])])].sort()
 
   const tableActions = {
     edit: (entry: CheckEntry) => open({ type: 'entry', entry, source: entry.payroll_item_id ? 'payroll' : 'app' }),
     resolve: (entry: CheckEntry) => open({ type: 'resolve', entries: [entry] }),
+    reprint: (entry: CheckEntry) => open({ type: 'reprint', entries: [entry] }),
     remove: (entry: CheckEntry) => open({ type: 'remove', entry }),
     accounting: (entry: CheckEntry) => open({ type: 'accounting', entry }),
     history: (entry: CheckEntry) => open({ type: 'history', id: entry.id, name: entry.payee_name }),
@@ -280,7 +284,7 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         <Link href="/admin" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" /> Admin Board
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold">Check Writer</h1>
+        <h1 className="mt-2 text-2xl font-semibold">Checks</h1>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" onClick={() => open({ type: 'entry', source: 'handwritten' })} disabled={!data}>Record handwritten check</Button>
@@ -296,9 +300,9 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
     </div>}
     {!data && !loadError && <p className="text-sm text-muted-foreground" role="status">Loading Check Writer…</p>}
     {data && <>
-      <nav aria-label="Check Writer sections" className="flex flex-wrap items-center gap-2 border-b pb-3">
-        {tabs.map(item => <Button key={item.id} variant={tab === item.id ? 'default' : 'ghost'} size="sm"
-          aria-pressed={tab === item.id} onClick={() => setTab(item.id)}>{item.label}</Button>)}
+      <nav aria-label="Checks sections" className="flex flex-wrap items-center gap-3 border-b pb-4">
+        {tabs.map(item => <Button key={item.id} variant={tab === item.id ? 'default' : 'outline'} size="lg"
+          className="min-h-12 px-5 text-base shadow-sm" aria-pressed={tab === item.id} onClick={() => setTab(item.id)}>{item.label}</Button>)}
         <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setRefresh(value => value + 1)}>Refresh</Button>
       </nav>
       {tab === 'drafts' && <>
@@ -352,7 +356,7 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         {data.vendors.length === 0 && <p className="text-sm text-muted-foreground">No vendors yet.</p>}
         {data.vendors.map(vendor => <div key={vendor.id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-2">
           <div className="text-sm"><div className="font-medium">{vendor.name}{vendor.archived_at && ' (archived)'}</div>
-            {vendor.category && <div className="text-muted-foreground">{vendor.category}</div>}</div>
+            {vendor.category && <div className="text-muted-foreground">{vendor.category}</div>}{(vendor.address || vendor.phone) && <div className="text-xs text-muted-foreground">{[vendor.address, vendor.phone].filter(Boolean).join(' · ')}</div>}</div>
           <div className="flex flex-wrap gap-1">
             {!vendor.archived_at && <>
               <Button variant="outline" size="sm" onClick={() => open({ type: 'vendor', vendor })}>Edit</Button>
@@ -376,7 +380,8 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         </PinForm>}
         {panel.type === 'prepare' && <PrepareChecks run={panel.run} rows={panel.rows} submit={submit} />}
         {panel.type === 'print' && <PrintForm entries={panel.entries} submit={submit} />}
-        {panel.type === 'resolve' && <PrintResults entries={panel.entries} submit={submit} />}
+        {panel.type === 'reprint' && <PrintForm entries={panel.entries} submit={submit} reprint />}
+        {panel.type === 'resolve' && <p className="text-sm text-muted-foreground">This legacy print record needs a manager to resolve it before it can be changed.</p>}
         {panel.type === 'accounting' && <AccountingForm entry={panel.entry} submit={submit} />}
         {panel.type === 'remove' && <RemoveForm entry={panel.entry} submit={submit} />}
         {panel.type === 'history' && <HistoryPanel id={panel.id} vendor={panel.vendor} />}
