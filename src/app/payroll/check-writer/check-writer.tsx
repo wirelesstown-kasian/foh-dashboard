@@ -266,7 +266,9 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
       && (!category || entry.category === category)
       && (!query.trim() || [entry.payee_name, entry.check_number].some(value => value?.toLowerCase().includes(query.trim().toLowerCase())))
   }) ?? []
-  const categories = [...new Set([...quickBooksCategories, ...(data?.entries ?? []), ...(data?.vendors ?? [])].flatMap(item => item.category ? [item.category] : []))].sort()
+  const savedCategories = [...(data?.entries ?? []), ...(data?.vendors ?? [])]
+    .flatMap(item => item.category ? [item.category] : [])
+  const categories = [...new Set([...quickBooksCategories, ...savedCategories])].sort()
   const bankAccounts = [...new Set(['Checking', ...(data?.entries ?? []).flatMap(item => item.bank_account ? [item.bank_account] : [])])].sort()
 
   const tableActions = {
