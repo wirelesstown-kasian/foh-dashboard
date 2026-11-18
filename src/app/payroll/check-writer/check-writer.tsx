@@ -232,7 +232,7 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         return entry ? [entry] : []
       })
       setPanel(null)
-      printChecks(ordered, readAlignment(), data)
+      printChecks(ordered, readAlignment(), data!)
       setNotice(action === 'reprint' ? 'Reprint sent to the printer.' : 'Checks sent to the printer and recorded as issued.')
     } else {
       setPanel(null)
