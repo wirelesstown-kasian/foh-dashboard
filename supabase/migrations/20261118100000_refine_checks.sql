@@ -36,7 +36,7 @@ declare
   payroll_target numeric;
   payroll_start date;
   payroll_end date;
-  payroll_hours numeric;
+  payroll_hours_to_store numeric;
   used_amount numeric;
   input jsonb;
   changes jsonb;
@@ -99,7 +99,7 @@ begin
     payroll_target := null;
     payroll_start := null;
     payroll_end := null;
-    payroll_hours := null;
+    payroll_hours_to_store := null;
     target_id := nullif(input->>'id', '')::uuid;
     reason := nullif(btrim(input->>'reason'), '');
     if length(reason) > 240 then raise exception 'Enter a reason of 240 characters or fewer.'; end if;
@@ -144,7 +144,7 @@ begin
           raise exception 'An employee is outside the selected payroll run.';
         end if;
         select pay_date, start_date, end_date into payroll_date, payroll_start, payroll_end from public.payroll_runs where id = payroll_item.run_id;
-        payroll_hours := payroll_item.hours;
+        payroll_hours_to_store := payroll_item.hours;
         payroll_target := public.check_writer_payroll_amount(payroll_item);
         select coalesce(sum(e.amount), 0) into used_amount from public.check_writer_entries e
           where e.payroll_item_id = payroll_id and e.status in ('issued', 'printing', 'draft')
@@ -193,13 +193,13 @@ begin
           created_by, created_by_name, issued_at, issued_by_name
         ) values (
           next_status, entry_source, entry_method, employee, vendor_id_to_use, payee, payroll_id, payroll_target,
-          payroll_start, payroll_end, payroll_hours, entry_date, entry_amount, bank, number, entry_category, entry_memo, nullif(btrim(input->>'reference'), ''),
+          payroll_start, payroll_end, payroll_hours_to_store, entry_date, entry_amount, bank, number, entry_category, entry_memo, nullif(btrim(input->>'reference'), ''),
           p_actor, actor_name, case when next_status = 'issued' then now() end,
           case when next_status = 'issued' then actor_name end
         ) returning * into entry;
       else
         update public.check_writer_entries set employee_id = employee, vendor_id = vendor_id_to_use, payee_name = payee,
-          payroll_check_amount = payroll_target, payroll_period_start = payroll_start, payroll_period_end = payroll_end, payroll_hours = payroll_hours, payment_date = entry_date, amount = entry_amount, bank_account = bank,
+          payroll_check_amount = payroll_target, payroll_period_start = payroll_start, payroll_period_end = payroll_end, payroll_hours = payroll_hours_to_store, payment_date = entry_date, amount = entry_amount, bank_account = bank,
           category = entry_category, memo = entry_memo, revision = revision + 1
           where id = prior.id returning * into entry;
       end if;
