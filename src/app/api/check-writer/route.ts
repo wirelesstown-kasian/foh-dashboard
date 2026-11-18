@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkActions, type CheckAction, type CheckEntry } from '@/lib/checkWriter'
 import { getPayrollPaymentBreakdown } from '@/lib/payroll'
+import { getAppSettings } from '@/lib/appSettings'
 import { verifyPin } from '@/lib/pin'
 import { getDashboardViewer } from '@/lib/routeAuth'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
@@ -58,13 +59,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ run: details, items: checkItems }, { headers: responseHeaders })
     }
 
-    const [entries, vendors, employees, runs] = await Promise.all([
+    const [entries, vendors, employees, runs, settings] = await Promise.all([
       listRows('check_writer_entries', '*', 'payment_date', false),
-      listRows('check_writer_vendors', 'id, name, category, archived_at', 'name'),
+      listRows('check_writer_vendors', 'id, name, category, address, phone, archived_at', 'name'),
       listRows('employees', 'id, name, is_active', 'name'),
       listRows('payroll_runs', runColumns, 'pay_date', false),
+      getAppSettings(),
     ])
-    return NextResponse.json({ entries: entries as unknown as CheckEntry[], vendors, employees, runs }, { headers: responseHeaders })
+    return NextResponse.json({ entries: entries as unknown as CheckEntry[], vendors, employees, runs, company: { name: settings.from_name, email: settings.from_email } }, { headers: responseHeaders })
   } catch (error) {
     console.error('Check Writer read failed', error)
     return failure('Could not load Check Writer. Try again or contact an administrator.', 500)
@@ -82,30 +84,31 @@ export async function POST(req: NextRequest) {
   if (!checkActions.has(action as CheckAction) || !data || typeof data !== 'object' || Array.isArray(data)) {
     return failure('Choose a valid check action.', 400)
   }
-  if (!isValidPin(pin)) return failure('Enter a four-digit manager PIN.', 400)
-
+  let actorId = viewer.employeeId
   try {
-    const attempt = await supabaseAdmin.rpc('check_writer_allow_pin', { p_employee_id: viewer.employeeId })
-    if (attempt.error) throw attempt.error
-    if (!attempt.data) return failure('Too many PIN attempts. Wait a minute and try again.', 429)
+    if (action !== 'save') {
+      if (!isValidPin(pin)) return failure('Enter a four-digit manager PIN.', 400)
+      const attempt = await supabaseAdmin.rpc('check_writer_allow_pin', { p_employee_id: viewer.employeeId })
+      if (attempt.error) throw attempt.error
+      if (!attempt.data) return failure('Too many PIN attempts. Wait a minute and try again.', 429)
 
-    const { data: managers, error: managerError } = await supabaseAdmin.from('employees')
-      .select('id, pin_code, pin_hash').eq('role', 'manager').eq('is_active', true)
-    if (managerError) throw managerError
-
-    let manager = managers.find(employee => employee.pin_code === pin)
-    if (!manager) {
-      for (const employee of managers) {
-        if (employee.pin_hash && await verifyPin(pin, employee.pin_hash)) {
-          manager = employee
-          break
+      const { data: managers, error: managerError } = await supabaseAdmin.from('employees')
+        .select('id, pin_code, pin_hash').eq('role', 'manager').eq('is_active', true)
+      if (managerError) throw managerError
+      let manager = managers.find(employee => employee.pin_code === pin)
+      if (!manager) {
+        for (const employee of managers) {
+          if (employee.pin_hash && await verifyPin(pin, employee.pin_hash)) {
+            manager = employee
+            break
+          }
         }
       }
+      if (!manager) return failure('Manager PIN was incorrect.', 401)
+      actorId = manager.id
     }
-    if (!manager) return failure('Manager PIN was incorrect.', 401)
-
     const { data: saved, error } = await supabaseAdmin.rpc('check_writer_change', {
-      p_action: action, p_actor: manager.id, p_data: data,
+      p_action: action, p_actor: actorId, p_data: data,
     })
     if (!error) return NextResponse.json({ saved }, { headers: responseHeaders })
     if (error.code === 'P0001') return failure(error.message, 409)
