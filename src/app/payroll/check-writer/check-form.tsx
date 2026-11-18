@@ -1,0 +1,149 @@
+'use client'
+
+import { cloneElement, useId, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
+import { Button } from '@/components/ui/button'
+import { BUSINESS_TIMEZONE } from '@/lib/clockUtils'
+import { checkMoney, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
+
+export type SubmitCheck = (action: CheckAction, data: Record<string, unknown>, pin: string) => Promise<CheckEntry[]>
+
+export const checkInput = 'h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm'
+export const checkLabel = 'grid gap-1.5 text-sm font-medium'
+
+export function Field({ label, children }: {
+  label: string; children: ReactElement<{ 'aria-labelledby'?: string }>
+}) {
+  const labelId = useId()
+  return <label className={checkLabel}>
+    <span id={labelId}>{label}</span>
+    {cloneElement(children, { 'aria-labelledby': labelId })}
+  </label>
+}
+
+export function CategoryField({ value, change, required = false }: {
+  value: string; change: (value: string) => void; required?: boolean
+}) {
+  return <Field label="QuickBooks category">
+    <input className={checkInput} list="check-categories" value={value} onChange={event => change(event.target.value)}
+      required={required} maxLength={120} placeholder="Use the name from QuickBooks" />
+  </Field>
+}
+
+export function PinForm({ label, submit, children }: {
+  label: string; submit: (pin: string) => Promise<unknown>; children?: ReactNode
+}) {
+  const [pin, setPin] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await submit(pin)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'The action could not be completed.')
+    } finally {
+      setPin('')
+      setBusy(false)
+    }
+  }
+
+  return <form onSubmit={handleSubmit}>
+    <fieldset disabled={busy} className="grid gap-4">
+      {children}
+      <div className="flex flex-wrap items-end gap-3 border-t pt-4">
+        <Field label="Manager PIN">
+          <input className={`${checkInput} max-w-36`} type="password" inputMode="numeric" autoComplete="off"
+            pattern="[0-9]{4}" maxLength={4} required value={pin} onChange={event => setPin(event.target.value)} />
+        </Field>
+        <Button type="submit" disabled={busy}>{busy ? 'Working…' : label}</Button>
+      </div>
+      {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
+    </fieldset>
+  </form>
+}
+
+export function CheckForm({ data, entry, payroll, source, submit }: {
+  data: CheckData
+  entry?: CheckEntry
+  payroll?: PayrollCheckRow
+  source: 'app' | 'handwritten' | 'payroll' | 'payroll_balance'
+  submit: SubmitCheck
+}) {
+  const linked = Boolean(payroll || entry?.payroll_item_id)
+  const [kind, setKind] = useState<'staff' | 'vendor'>(entry?.vendor_id ? 'vendor' : 'staff')
+  const [query, setQuery] = useState('')
+  const [payeeId, setPayeeId] = useState(entry?.employee_id ?? entry?.vendor_id ?? '')
+  const [category, setCategory] = useState(entry?.category ?? '')
+  const [method, setMethod] = useState('cash')
+  const [amount, setAmount] = useState(entry ? entry.amount.toFixed(2) : payroll ? payroll.remaining.toFixed(2) : '')
+  const [date, setDate] = useState(entry?.payment_date ?? new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIMEZONE,
+  }).format(new Date()))
+  const [memo, setMemo] = useState(entry?.memo ?? '')
+  const [bank, setBank] = useState(entry?.bank_account ?? 'Checking')
+  const [number, setNumber] = useState('')
+  const [reference, setReference] = useState('')
+  const liveVoucher = source === 'app' || source === 'payroll'
+  const payees = kind === 'staff'
+    ? data.employees.map(employee => ({ ...employee, label: employee.is_active ? employee.name : `${employee.name} (inactive)` }))
+    : data.vendors.filter(vendor => !vendor.archived_at || vendor.id === entry?.vendor_id)
+      .map(vendor => ({ ...vendor, label: vendor.archived_at ? `${vendor.name} (archived)` : vendor.name }))
+  const choices = payees.filter(payee => payee.id === payeeId || payee.name.toLowerCase().includes(query.trim().toLowerCase()))
+
+  return <PinForm label={liveVoucher ? 'Save draft' : source === 'handwritten' ? 'Record handwritten check' : 'Record payment'}
+    submit={pin => submit('save', {
+      id: entry?.id, revision: entry?.revision, source, method, payment_date: date, amount,
+      payroll_item_id: payroll?.id, employee_id: !linked && kind === 'staff' ? payeeId : undefined,
+      vendor_id: !linked && kind === 'vendor' ? payeeId : undefined,
+      category, memo, bank_account: bank, check_number: number, reference,
+    }, pin)}>
+    {linked ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm">
+      {payroll?.employee_name ?? entry?.payee_name}
+      {payroll && <> · {checkMoney.format(payroll.remaining)} available to record</>}
+    </p> : <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
+      <Field label="Payee type">
+        <select className={checkInput} value={kind} onChange={event => {
+          setKind(event.target.value as 'staff' | 'vendor')
+          setPayeeId('')
+          setQuery('')
+        }}><option value="staff">Staff</option><option value="vendor">Vendor</option></select>
+      </Field>
+      <Field label={kind === 'staff' ? 'Find staff' : 'Find vendor'}>
+        <input className={checkInput} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search by name" />
+      </Field>
+      <div className="sm:col-span-2">
+        <Field label="Payee"><select className={checkInput} required value={payeeId} onChange={event => {
+          setPayeeId(event.target.value)
+          if (kind === 'vendor') {
+            const suggested = data.vendors.find(vendor => vendor.id === event.target.value)?.category
+            setCategory(suggested ?? '')
+          }
+        }}><option value="">{choices.length ? 'Select payee' : 'No matching payees'}</option>
+          {choices.map(payee => <option key={payee.id} value={payee.id}>{payee.label}</option>)}
+        </select></Field>
+      </div>
+    </div>}
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field label="Date"><input className={checkInput} type="date" required value={date} onChange={event => setDate(event.target.value)} /></Field>
+      <Field label="Amount"><input className={checkInput} inputMode="decimal" type="number" min="0.01" step="0.01"
+        max={payroll?.remaining ?? 999999999.99} required value={amount} onChange={event => setAmount(event.target.value)} /></Field>
+      {source !== 'payroll_balance' ? <Field label="Bank account">
+        <input className={checkInput} list="check-bank-accounts" maxLength={80} required value={bank} onChange={event => setBank(event.target.value)} />
+      </Field> : <Field label="Payment method"><select className={checkInput} value={method} onChange={event => setMethod(event.target.value)}>
+        <option value="cash">Cash</option><option value="ach">ACH</option>
+      </select></Field>}
+      {source === 'handwritten' && <Field label="Preprinted check number">
+        <input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}" maxLength={12} required value={number} onChange={event => setNumber(event.target.value)} />
+      </Field>}
+      {source === 'payroll_balance' && <Field label="Payment reference (optional)">
+        <input className={checkInput} maxLength={120} value={reference} onChange={event => setReference(event.target.value)} />
+      </Field>}
+    </div>
+    <CategoryField value={category} change={setCategory} required={!liveVoucher} />
+    <Field label="Memo"><input className={checkInput} maxLength={160} value={memo} onChange={event => setMemo(event.target.value)} /></Field>
+  </PinForm>
+}

@@ -496,6 +496,7 @@ export default function WageWorksheetPage() {
   const [employeeToAdd, setEmployeeToAdd] = useState('')
   const [splitPaymentEmployeeId, setSplitPaymentEmployeeId] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [savedCheckRunId, setSavedCheckRunId] = useState<string | null>(null)
   const [confirmStep, setConfirmStep] = useState<'summary' | 'final' | 'done'>('summary')
   const [confirmMessage, setConfirmMessage] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -1163,6 +1164,7 @@ export default function WageWorksheetPage() {
       }
 
       const runId = payrollSavePayload.run_id
+      setSavedCheckRunId(runId)
 
       const sheetSync = await fetch('/api/payroll-sheet-sync', {
         method: 'POST',
@@ -2249,7 +2251,15 @@ export default function WageWorksheetPage() {
                 <Button className="w-full sm:w-auto" onClick={savePayroll} disabled={saving}>{saving ? 'Saving...' : 'Confirm & Save Payroll'}</Button>
               </>
             ) : (
-              <Button className="w-full sm:w-auto" onClick={() => closePayoutConfirmation(false)}>Done</Button>
+              <>
+                {savedCheckRunId && totals.check > 0 && (
+                  <Link href={`/payroll/check-writer?run=${savedCheckRunId}`}
+                    className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium hover:bg-accent">
+                    Prepare checks
+                  </Link>
+                )}
+                <Button className="w-full sm:w-auto" onClick={() => closePayoutConfirmation(false)}>Done</Button>
+              </>
             )}
           </div>
         </DialogContent>

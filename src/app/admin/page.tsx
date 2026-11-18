@@ -11,6 +11,7 @@ const adminGroups = [
     description: 'Employee setup, pay settings, payroll worksheet, and wage review.',
     links: [
       { label: 'Wage Worksheet', href: '/payroll/worksheet', icon: DollarSign },
+      { label: 'Check Writer', href: '/payroll/check-writer', icon: ReceiptText },
       { label: 'Tip Distribution Editor', href: '/payroll/tip-distribution-editor', icon: HandCoins },
       { label: 'Staffing', href: '/staffing', icon: Users },
       { label: 'Onboarding', href: '/staffing#onboarding', icon: UserRoundPlus },
