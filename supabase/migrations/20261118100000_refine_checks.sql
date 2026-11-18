@@ -88,7 +88,7 @@ begin
     return jsonb_build_array(to_jsonb(vendor));
   end if;
 
-  changes := case when p_action in ('prepare', 'print', 'resolve_print') then p_data->'items'
+  changes := case when p_action in ('prepare', 'print', 'reprint', 'resolve_print') then p_data->'items'
     else jsonb_build_array(p_data) end;
   if jsonb_typeof(changes) is distinct from 'array' then raise exception 'Select at least one item.'; end if;
   if jsonb_array_length(changes) not between 1 and 200 then raise exception 'Select between 1 and 200 items.'; end if;
