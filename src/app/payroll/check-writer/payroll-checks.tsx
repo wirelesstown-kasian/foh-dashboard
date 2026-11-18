@@ -100,9 +100,12 @@ export function PayrollChecks({ runs, initialRunId, entries, getRun, prepare, re
 export function PrepareChecks({ run, rows, submit }: { run: CheckRun; rows: PayrollCheckRow[]; submit: SubmitCheck }) {
   const [chosen, setChosen] = useState(() => new Set(rows.map(row => row.id)))
   const [category, setCategory] = useState('')
+  const [blankPayees, setBlankPayees] = useState<Record<string, boolean>>({})
   return <PinForm label="Create selected drafts" submit={pin => {
     if (chosen.size === 0) throw new Error('Select at least one employee.')
-    return submit('prepare', { run_id: run.id, category, items: [...chosen].map(payroll_item_id => ({ payroll_item_id })) }, pin)
+    return submit('prepare', { run_id: run.id, category, items: [...chosen].map(payroll_item_id => ({
+      payroll_item_id, omit_payee_on_print: blankPayees[payroll_item_id] ?? false,
+    })) }, pin)
   }}>
     <p className="text-sm text-muted-foreground">{runLabel(run)}</p>
     <div className="flex flex-wrap items-center gap-3">
@@ -111,18 +114,29 @@ export function PrepareChecks({ run, rows, submit }: { run: CheckRun; rows: Payr
       <Button type="button" size="sm" variant="outline" onClick={() => setChosen(new Set())}>Clear selection</Button>
     </div>
     <div className="grid gap-2">
-      {rows.map(row => <label key={row.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-        <input type="checkbox" checked={chosen.has(row.id)} onChange={event => {
-          const checked = event.target.checked
-          setChosen(current => {
-            const next = new Set(current)
-            if (checked) next.add(row.id)
-            else next.delete(row.id)
-            return next
-          })
-        }} />
-        <span className="flex-1">{row.employee_name}</span><span>{checkMoney.format(row.remaining)}</span>
-      </label>)}
+      {rows.map(row => <div key={row.id} className="grid gap-2 rounded-md border px-3 py-2 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={chosen.has(row.id)} onChange={event => {
+            const checked = event.target.checked
+            setChosen(current => {
+              const next = new Set(current)
+              if (checked) next.add(row.id)
+              else next.delete(row.id)
+              return next
+            })
+          }} />
+          <span className="flex-1">{row.employee_name}</span><span>{checkMoney.format(row.remaining)}</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input type="checkbox" checked={blankPayees[row.id] ?? false} disabled={!chosen.has(row.id)}
+            aria-label={`Leave payee blank when printing for ${row.employee_name}`}
+            onChange={event => {
+              const checked = event.target.checked
+              setBlankPayees(current => ({ ...current, [row.id]: checked }))
+            }} />
+          Leave payee blank when printing
+        </label>
+      </div>)}
     </div>
     <CategoryField value={category} change={setCategory} />
   </PinForm>

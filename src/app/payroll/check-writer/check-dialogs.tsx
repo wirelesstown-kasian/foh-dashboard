@@ -25,7 +25,9 @@ export function PrintForm({ entries, submit, reprint = false }: {
     <div className="grid gap-2">
       {entries.map(entry => <div key={entry.id} className="grid grid-cols-[1fr_9rem] items-end gap-3 rounded-md border p-2.5">
         <div className="text-sm"><div className="font-medium">{entry.payee_name}</div>
-          {checkMoney.format(entry.amount)} · {entry.bank_account}</div>
+          {checkMoney.format(entry.amount)} · {entry.bank_account}
+          {entry.omit_payee_on_print && <div className="text-xs text-muted-foreground">Payee will print blank</div>}
+        </div>
         <Field label="Check number (optional)"><input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}"
           maxLength={12} value={numbers[entry.id] ?? ''}
           onChange={event => setNumbers(current => ({ ...current, [entry.id]: event.target.value }))} /></Field>
@@ -83,6 +85,7 @@ const auditLabels: Record<string, string> = {
 }
 const auditFields: Record<string, string> = {
   status: 'Status', payment_date: 'Payment date', payee_name: 'Payee', name: 'Vendor',
+  omit_payee_on_print: 'Leave payee blank when printing',
   amount: 'Amount', bank_account: 'Bank account', check_number: 'Check number', category: 'Category',
   memo: 'Memo', accounting_note: 'Accounting note', reference: 'Reference', archived_at: 'Archived',
 }
@@ -99,7 +102,10 @@ export function AuditHistory({ records }: { records: CheckAudit[] }) {
           const before = record.before_record?.[key]
           const after = record.after_record[key]
           if (before === after || (before == null && after == null)) return []
-          const value = (value: unknown) => key === 'amount' && value != null ? checkMoney.format(Number(value)) : String(value ?? '—')
+          const value = (value: unknown) => {
+            if (key === 'omit_payee_on_print') return value ? 'Yes' : 'No'
+            return key === 'amount' && value != null ? checkMoney.format(Number(value)) : String(value ?? '—')
+          }
           return [<li key={key}>{label}: {record.before_record ? `${value(before)} → ` : ''}{value(after)}</li>]
         })}
       </ul>

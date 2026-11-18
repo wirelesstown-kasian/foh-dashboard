@@ -8,6 +8,7 @@ function escapeHtml(text: string) {
 
 type Voucher = Pick<CheckEntry, 'amount' | 'payee_name' | 'payment_date' | 'payroll_period_start' | 'payroll_period_end' | 'payroll_hours'> & {
   memo: string
+  omit_payee_on_print?: boolean
   vendorAddress?: string | null
   vendorPhone?: string | null
   companyName?: string
@@ -33,10 +34,11 @@ export function voucherDocument(rows: Voucher[], alignment: PrintAlignment, samp
     const date = `${month}/${day}/${year}`
     const amount = checkMoney.format(row.amount).slice(1)
     const words = amountInWords(row.amount)
+    const payee = row.omit_payee_on_print ? '' : row.payee_name
     const details = detailLine(row)
     const company = [row.companyName, row.companyAddress, row.companyPhone, row.companyEmail].filter(Boolean).join(' · ')
     const stub = (position: string) => `<div class="stub ${position}">
-      <span>${escapeHtml(row.payee_name)}</span><span>${escapeHtml(date)}</span><span>${escapeHtml(checkMoney.format(row.amount))}</span>
+      <span>${escapeHtml(payee)}</span><span>${escapeHtml(date)}</span><span>${escapeHtml(checkMoney.format(row.amount))}</span>
       <small>${escapeHtml(row.memo)}</small>
       ${details ? `<small>${escapeHtml(details)}</small>` : ''}
       ${company ? `<small class="company">${escapeHtml(company)}</small>` : ''}
@@ -44,7 +46,7 @@ export function voucherDocument(rows: Voucher[], alignment: PrintAlignment, samp
     return `<section class="sheet">
       <div class="voucher">
         <div class="date">${escapeHtml(date)}</div>
-        <div class="payee" style="font-size:${row.payee_name.length > 55 ? '8' : '11'}pt">${escapeHtml(row.payee_name)}</div>
+        <div class="payee" style="font-size:${payee.length > 55 ? '8' : '11'}pt">${escapeHtml(payee)}</div>
         <div class="amount">${escapeHtml(amount)}</div>
         <div class="words" style="font-size:${words.length > 88 ? '8' : '11'}pt">${escapeHtml(words)}</div>
         <div class="memo">${escapeHtml(row.memo)}</div>

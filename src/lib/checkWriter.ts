@@ -10,6 +10,7 @@ export type CheckEntry = {
   employee_id: string | null
   vendor_id: string | null
   payee_name: string
+  omit_payee_on_print: boolean
   payroll_item_id: string | null
   payroll_check_amount: number | null
   payroll_period_start?: string | null

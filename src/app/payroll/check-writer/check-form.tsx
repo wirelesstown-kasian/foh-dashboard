@@ -1,6 +1,7 @@
 'use client'
 
 import { cloneElement, useId, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
+import { Combobox } from '@base-ui/react/combobox'
 import { Button } from '@/components/ui/button'
 import { BUSINESS_TIMEZONE } from '@/lib/clockUtils'
 import { checkMoney, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
@@ -95,7 +96,7 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   submit: SubmitCheck
 }) {
   const linked = Boolean(payroll || entry?.payroll_item_id)
-  const [query, setQuery] = useState('')
+  const payeeInputId = useId()
   const [payeeId, setPayeeId] = useState(() => entry?.employee_id ? `staff:${entry.employee_id}` : entry?.vendor_id ? `vendor:${entry.vendor_id}` : '')
   const [category, setCategory] = useState(entry?.category ?? '')
   const [method, setMethod] = useState('cash')
@@ -103,6 +104,7 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   const [date, setDate] = useState(entry?.payment_date ?? new Intl.DateTimeFormat('en-CA', {
     year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIMEZONE,
   }).format(new Date()))
+  const [omitPayee, setOmitPayee] = useState(entry?.omit_payee_on_print ?? false)
   const [memo, setMemo] = useState(entry?.memo ?? '')
   const [bank, setBank] = useState(entry?.bank_account ?? 'Checking')
   const [number, setNumber] = useState(entry?.check_number ?? '')
@@ -120,12 +122,15 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
       label: vendor.archived_at ? `${vendor.name} (archived vendor)` : vendor.name, name: vendor.name, category: vendor.category,
     })),
   ]
-  const choices = payees.filter(payee => payee.key === payeeId || payee.label.toLowerCase().includes(query.trim().toLowerCase()))
-  const selectedPayee = payees.find(payee => payee.key === payeeId)
+  const selectedPayee = payees.find(payee => payee.key === payeeId) ?? null
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy) return
+    if (!linked && !selectedPayee) {
+      setError('Choose a payee from the search results.')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -134,7 +139,7 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
         payroll_item_id: payroll?.id,
         employee_id: !linked && selectedPayee?.type === 'staff' ? selectedPayee.id : undefined,
         vendor_id: !linked && selectedPayee?.type === 'vendor' ? selectedPayee.id : undefined,
-        category, memo, bank_account: bank, check_number: number, reference,
+        category, memo, omit_payee_on_print: liveVoucher ? omitPayee : undefined, bank_account: bank, check_number: number, reference,
       })
     } catch (error) {
       setError(error instanceof Error ? error.message : 'The check could not be saved.')
@@ -148,19 +153,35 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
       {linked ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm">
         {payroll?.employee_name ?? entry?.payee_name}
         {payroll && <> · {checkMoney.format(payroll.remaining)} available to record</>}
-      </p> : <div className="grid gap-3">
-        <Field label="Find vendor or staff">
-          <input className={checkInput} type="search" value={query} onChange={event => setQuery(event.target.value)}
-            placeholder="Search vendors and all staff" />
-        </Field>
-        <Field label="Payee"><select className={checkInput} required value={payeeId} onChange={event => {
-          const selected = payees.find(payee => payee.key === event.target.value)
-          setPayeeId(event.target.value)
-          if (selected?.type === 'vendor') setCategory(selected.category ?? '')
-        }}><option value="">{choices.length ? 'Select vendor or staff' : 'No matching vendors or staff'}</option>
-          {choices.map(payee => <option key={payee.key} value={payee.key}>{payee.label}</option>)}
-        </select></Field>
+      </p> : <div className={checkLabel}>
+        <label htmlFor={payeeInputId}>Payee</label>
+        <Combobox.Root<(typeof payees)[number]> items={payees} value={selectedPayee} autoHighlight required
+          itemToStringLabel={item => item.label} isItemEqualToValue={(item, selected) => item.key === selected.key}
+          onValueChange={selected => {
+            setPayeeId(selected?.key ?? '')
+            if (selected?.type === 'vendor') setCategory(selected.category ?? '')
+          }}>
+          <Combobox.Input id={payeeInputId} className={checkInput} placeholder="Search staff or vendors" />
+          <Combobox.Portal>
+            <Combobox.Positioner align="start" sideOffset={4} className="z-[60] w-[var(--anchor-width)]">
+              <Combobox.Popup className="overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md">
+                <Combobox.Empty className="px-3 py-2 text-sm text-muted-foreground empty:hidden">No matching payees</Combobox.Empty>
+                <Combobox.List className="max-h-52 overflow-y-auto p-1 empty:hidden">
+                  {(item: (typeof payees)[number]) => <Combobox.Item key={item.key} value={item}
+                    className="flex cursor-default justify-between gap-2 rounded px-2 py-1.5 text-sm data-highlighted:bg-accent data-highlighted:text-accent-foreground">
+                    <span className="min-w-0 break-words">{item.label}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{item.type === 'staff' ? 'Staff' : 'Vendor'}</span>
+                  </Combobox.Item>}
+                </Combobox.List>
+              </Combobox.Popup>
+            </Combobox.Positioner>
+          </Combobox.Portal>
+        </Combobox.Root>
       </div>}
+      {liveVoucher && <label className="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" checked={omitPayee} onChange={event => setOmitPayee(event.target.checked)} />
+        Leave payee blank when printing
+      </label>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Date"><input className={checkInput} type="date" required value={date} onChange={event => setDate(event.target.value)} /></Field>
         <Field label="Amount"><input className={checkInput} inputMode="decimal" type="number" min="0.01" step="0.01"
