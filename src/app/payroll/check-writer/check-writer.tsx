@@ -7,10 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   checkCsv, checkMemo, checkMoney, isPartialCheck,
-  type CheckAudit, type CheckData, type CheckEntry, type CheckRun, type CheckStatus, type CheckVendor, type PayrollCheckRow,
+  type CheckCategory, type CheckAudit, type CheckData, type CheckEntry, type CheckRun, type CheckStatus, type CheckVendor, type PayrollCheckRow,
 } from '@/lib/checkWriter'
 import { printAlignmentSample, printChecks, type PrintAlignment } from '@/lib/checkVoucher'
-import { CheckForm, Field, PinForm, checkInput, quickBooksCategories, type SubmitCheck } from './check-form'
+import { CategoryContext, CheckForm, Field, PinForm, checkInput, quickBooksCategories, type SubmitCheck } from './check-form'
 import { AccountingForm, AuditHistory, PrintForm, RemoveForm, VendorForm } from './check-dialogs'
 import { PayrollChecks, PrepareChecks, type PayrollCheckItems } from './payroll-checks'
 
@@ -18,9 +18,10 @@ const statusLabels: Record<CheckStatus, string> = {
   draft: 'Draft', printing: 'Legacy print pending', issued: 'Issued', void: 'Voided', removed: 'Removed',
 }
 
-type CheckTab = 'drafts' | 'register' | 'payroll' | 'vendors'
+type CheckTab = 'drafts' | 'register' | 'payroll' | 'vendors' | 'categories'
 type Panel =
   | { type: 'entry'; source: 'app' | 'handwritten' | 'payroll' | 'payroll_balance'; entry?: CheckEntry; payroll?: PayrollCheckRow }
+  | { type: 'category'; category?: CheckCategory }
   | { type: 'vendor'; vendor?: CheckVendor }
   | { type: 'archive'; vendor: CheckVendor }
   | { type: 'prepare'; run: CheckRun; rows: PayrollCheckRow[] }
@@ -33,6 +34,7 @@ const tabs: { id: CheckTab; label: string }[] = [
   { id: 'register', label: 'Check register' },
   { id: 'payroll', label: 'Saved payroll' },
   { id: 'vendors', label: 'Vendors' },
+  { id: 'categories', label: 'Categories' },
 ]
 
 async function request<T>(query = '', options?: RequestInit): Promise<T> {
@@ -77,6 +79,7 @@ function panelTitle(panel: Panel) {
       if (panel.entry) return 'Edit check draft'
       if (panel.source === 'handwritten') return 'Record handwritten check'
       return panel.source === 'payroll_balance' ? 'Record payroll balance payment' : 'Write a check'
+    case 'category': return panel.category ? 'Edit category' : 'New category'
     case 'vendor': return panel.vendor ? 'Edit vendor' : 'Add vendor'
     case 'archive': return 'Archive vendor'
     case 'prepare': return 'Choose employees for check drafts'
@@ -99,6 +102,8 @@ function readAlignment(): PrintAlignment {
 }
 
 function AlignmentControls() {
+  const [sampleUrl, setSampleUrl] = useState('')
+  useEffect(() => () => { if (sampleUrl) URL.revokeObjectURL(sampleUrl) }, [sampleUrl])
   const [alignment, setAlignment] = useState<PrintAlignment>(readAlignment)
   function update(axis: keyof PrintAlignment, input: number) {
     const next = { ...alignment, [axis]: Math.max(-0.5, Math.min(0.5, input)) }
@@ -114,8 +119,9 @@ function AlignmentControls() {
           value={alignment.x} onChange={event => update('x', Number(event.target.value))} /></Field>
         <Field label="Vertical offset (in)"><input className={checkInput} type="number" min="-0.5" max="0.5" step="0.01"
           value={alignment.y} onChange={event => update('y', Number(event.target.value))} /></Field>
-        <Button variant="outline" onClick={() => printAlignmentSample(alignment)}>Print alignment sample</Button>
+        <Button variant="outline" onClick={async () => setSampleUrl(await printAlignmentSample(alignment))}>Print alignment sample</Button>
       </div>
+      {sampleUrl && <><iframe title="Alignment sample PDF" src={sampleUrl} className="h-96 w-full" /><a href={sampleUrl} target="_blank" rel="noopener">Open alignment PDF</a></>}
     </div>
   </details>
 }
@@ -189,6 +195,8 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
   const [panel, setPanel] = useState<Panel | null>(null)
   const [chosen, setChosen] = useState<Set<string>>(() => new Set())
   const [notice, setNotice] = useState('')
+  const [printUrl, setPrintUrl] = useState('')
+  useEffect(() => () => { if (printUrl) URL.revokeObjectURL(printUrl) }, [printUrl])
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('')
   const [from, setFrom] = useState('')
@@ -215,6 +223,11 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, data: values, pin }),
     })
+    if (action.endsWith('_category')) {
+      const category = saved[0] as unknown as CheckCategory
+      setData(current => current && { ...current, categories: [...current.categories.filter(item => item.id !== category.id), category].sort((a, b) => a.name.localeCompare(b.name)) })
+      return saved
+    }
     if (action === 'save_vendor' || action === 'archive_vendor') {
       const vendor = saved[0] as unknown as CheckVendor
       setData(current => current && { ...current, vendors: [...current.vendors.filter(item => item.id !== vendor.id), vendor]
@@ -232,8 +245,12 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         return entry ? [entry] : []
       })
       setPanel(null)
-      printChecks(ordered, readAlignment(), data!)
-      setNotice(action === 'reprint' ? 'Reprint sent to the printer.' : 'Checks sent to the printer and recorded as issued.')
+      try {
+        setPrintUrl(await printChecks(ordered, readAlignment(), data!))
+        setNotice(action === 'reprint' ? 'Reprint PDF ready. Print at actual size (100%).' : 'Check PDF ready. Checks recorded as issued; print at actual size (100%).')
+      } catch {
+        setNotice('The action was recorded, but the PDF could not be generated. Use Reprint from the register to try again.')
+      }
     } else {
       setPanel(null)
       if (action === 'prepare') {
@@ -241,8 +258,9 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         if (saved.length) setTab('drafts')
       } else {
         const messages = {
-          save: 'Saved.', resolve_print: 'Print results recorded.', reprint: 'Reprint sent to the printer.', remove: 'Draft removed.',
+          save: 'Saved.', resolve_print: 'Print results recorded.', reprint: 'Reprint PDF ready. Print at actual size (100%).', remove: 'Draft removed.',
           void: 'Payment voided.', categorize: 'Accounting details saved.',
+          save_category: 'Category saved.', archive_category: 'Category archived.', restore_category: 'Category restored.',
           save_vendor: 'Vendor saved.', archive_vendor: 'Vendor archived.',
         }
         setNotice(messages[action])
@@ -369,25 +387,58 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         </div>)}
       </section>}
     </>}
+    {data && tab === 'categories' && <section className="grid gap-3 rounded-xl border p-4">
+      <Button onClick={() => open({ type: 'category' })}>New category</Button>
+      {data.categories.map(category => <div key={category.id} className="flex items-center justify-between border-t py-2">
+        <span>{category.name}{category.archived_at ? ' (archived)' : ''}</span>
+        <Button variant="outline" onClick={() => open({ type: 'category', category })}>Manage</Button>
+      </div>)}
+    </section>}
+    <Dialog open={!!printUrl} onOpenChange={open => { if (!open) setPrintUrl('') }}>
+      <DialogContent className="sm:max-w-4xl">
+        <DialogHeader><DialogTitle>Check PDF ready</DialogTitle><DialogDescription>Print on US Letter at actual size (100%). Disable fit to page.</DialogDescription></DialogHeader>
+        <iframe title="Issued checks PDF" src={printUrl} className="h-[65vh] w-full" />
+        <a href={printUrl} target="_blank" rel="noopener">Open PDF for printing</a>
+        <a href={printUrl} download="checks.pdf">Download checks PDF</a>
+      </DialogContent>
+    </Dialog>
+    <CategoryContext.Provider value={{ categories: data?.categories ?? [], submit }}>
     <Dialog open={panel !== null} onOpenChange={open => { if (!open) setPanel(null) }}>
       {panel && data && <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" key={panel.type}>
         <DialogHeader>
           <DialogTitle>{panelTitle(panel)}</DialogTitle>
           <DialogDescription className="sr-only">Check Writer {panel.type} details</DialogDescription>
         </DialogHeader>
+        {panel.type === 'category' && <CategoryManager category={panel.category} submit={submit} close={() => setPanel(null)} />}
         {panel.type === 'entry' && <CheckForm data={data} source={panel.source} entry={panel.entry} payroll={panel.payroll} submit={submit} />}
         {panel.type === 'vendor' && <VendorForm vendor={panel.vendor} submit={submit} />}
         {panel.type === 'archive' && <PinForm label="Archive vendor" submit={pin => submit('archive_vendor', { id: panel.vendor.id }, pin)}>
           <p className="text-sm">Archive {panel.vendor.name}? Existing check history will still be available.</p>
         </PinForm>}
         {panel.type === 'prepare' && <PrepareChecks run={panel.run} rows={panel.rows} submit={submit} />}
-        {panel.type === 'print' && <PrintForm entries={panel.entries} submit={submit} />}
-        {panel.type === 'reprint' && <PrintForm entries={panel.entries} submit={submit} reprint />}
+        {panel.type === 'print' && <PrintForm entries={panel.entries} submit={submit} data={data} />}
+        {panel.type === 'reprint' && <PrintForm entries={panel.entries} submit={submit} data={data} reprint />}
         {panel.type === 'resolve' && <p className="text-sm text-muted-foreground">This legacy print record needs a manager to resolve it before it can be changed.</p>}
         {panel.type === 'accounting' && <AccountingForm entry={panel.entry} submit={submit} />}
         {panel.type === 'remove' && <RemoveForm entry={panel.entry} submit={submit} />}
         {panel.type === 'history' && <HistoryPanel id={panel.id} vendor={panel.vendor} />}
       </DialogContent>}
     </Dialog>
+    </CategoryContext.Provider>
   </div>
+}
+
+function CategoryManager({ category, submit, close }: { category?: CheckCategory; submit: SubmitCheck; close: () => void }) {
+  const [name, setName] = useState(category?.name ?? '')
+  const [action, setAction] = useState<'save_category' | 'archive_category' | 'restore_category'>('save_category')
+  return <PinForm label="Save category changes" submit={async pin => {
+    await submit(action, { id: category?.id, name }, pin); close()
+  }}>
+    <Field label="Category name"><input className={checkInput} required maxLength={120} value={name} onChange={event => setName(event.target.value)} /></Field>
+    {category && <Field label="Action"><select className={checkInput} value={action} onChange={event => setAction(event.target.value as typeof action)}>
+      <option value="save_category">Edit name</option>
+      <option value={category.archived_at ? 'restore_category' : 'archive_category'}>{category.archived_at ? 'Restore' : 'Archive'}</option>
+    </select></Field>}
+    <p className="text-sm">Historical transactions retain the category name recorded at the time.</p>
+  </PinForm>
 }

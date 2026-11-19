@@ -1,14 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { checkMoney, type CheckAudit, type CheckEntry, type CheckVendor } from '@/lib/checkWriter'
+import { Button } from '@/components/ui/button'
 import { CategoryField, Field, PinForm, checkInput, type SubmitCheck } from './check-form'
 
-export function PrintForm({ entries, submit, reprint = false }: {
-  entries: CheckEntry[]; submit: SubmitCheck; reprint?: boolean
+export function PrintForm({ entries, submit, data, reprint = false }: {
+  entries: CheckEntry[]; submit: SubmitCheck; data: import('@/lib/checkWriter').CheckData; reprint?: boolean
 }) {
   const [numbers, setNumbers] = useState<Record<string, string>>(() => Object.fromEntries(entries.map(entry => [entry.id, entry.check_number ?? ''])))
   const [category, setCategory] = useState('')
+  const [preview, setPreview] = useState('')
+  const [previewError, setPreviewError] = useState('')
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
   const uncategorized = !reprint && entries.some(entry => !entry.category)
   const action = reprint ? 'reprint' : 'print'
   return <PinForm label={reprint ? 'Authorize reprint' : 'Authorize print'} submit={pin => submit(action, {
@@ -22,6 +26,18 @@ export function PrintForm({ entries, submit, reprint = false }: {
         ? 'This records an audited reprint and opens the printer.'
         : 'Print at 100% on letter paper with headers and footers turned off. Authorized checks are recorded as issued.'}
     </p>
+    <Button type="button" variant="outline" onClick={async () => {
+      setPreviewError('')
+      try {
+        let alignment = { x: 0, y: 0 }
+        try { alignment = JSON.parse(localStorage.getItem('foh-check-print-alignment') ?? '{}') } catch {}
+        const { checkPdf } = await import('@/lib/checkPdf')
+        const bytes = await checkPdf(entries.map(entry => ({ ...entry, check_number: numbers[entry.id] || null })), alignment, data)
+        setPreview(URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' })))
+      } catch { setPreviewError('Could not generate preview. Try again.') }
+    }}>Preview PDF alignment</Button>
+    {previewError && <p role="alert">{previewError}</p>}
+    {preview && <><iframe title="Check PDF print preview" src={preview} className="h-96 w-full border" /><a href={preview} target="_blank" rel="noopener">Open preview full size</a></>}
     <div className="grid gap-2">
       {entries.map(entry => <div key={entry.id} className="grid grid-cols-[1fr_9rem] items-end gap-3 rounded-md border p-2.5">
         <div className="text-sm"><div className="font-medium">{entry.payee_name}</div>
