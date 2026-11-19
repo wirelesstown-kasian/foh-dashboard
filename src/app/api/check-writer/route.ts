@@ -59,14 +59,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ run: details, items: checkItems }, { headers: responseHeaders })
     }
 
-    const [entries, vendors, employees, runs, settings] = await Promise.all([
+    const [entries, vendors, employees, runs, settings, categories] = await Promise.all([
       listRows('check_writer_entries', '*', 'payment_date', false),
       listRows('check_writer_vendors', 'id, name, category, address, phone, archived_at', 'name'),
       listRows('employees', 'id, name, is_active', 'name'),
       listRows('payroll_runs', runColumns, 'pay_date', false),
       getAppSettings(),
+      listRows('check_writer_categories', '*', 'name'),
     ])
-    return NextResponse.json({ entries: entries as unknown as CheckEntry[], vendors, employees, runs, company: { name: settings.from_name, email: settings.from_email } }, { headers: responseHeaders })
+    return NextResponse.json({ entries: entries as unknown as CheckEntry[], vendors, employees, runs, categories, company: { name: settings.from_name, email: settings.from_email } }, { headers: responseHeaders })
   } catch (error) {
     console.error('Check Writer read failed', error)
     return failure('Could not load Check Writer. Try again or contact an administrator.', 500)
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
     if (!error) return NextResponse.json({ saved }, { headers: responseHeaders })
     if (error.code === 'P0001') return failure(error.message, 409)
     if (error.code === '23505') {
-      const message = error.message.includes('active_vendor')
+      const message = error.message.includes('category_name') ? 'A category already uses that name.' : error.message.includes('active_vendor')
         ? 'An active vendor already uses that name.'
         : 'That check number is already in use for this bank account.'
       return failure(message, 409)

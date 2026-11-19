@@ -1,10 +1,10 @@
 'use client'
 
-import { cloneElement, useId, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
+import { cloneElement, createContext, useContext, useId, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import { Combobox } from '@base-ui/react/combobox'
 import { Button } from '@/components/ui/button'
 import { BUSINESS_TIMEZONE } from '@/lib/clockUtils'
-import { checkMoney, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
+import { checkMoney, type CheckCategory, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
 
 export type SubmitCheck = (action: CheckAction, data: Record<string, unknown>, pin?: string) => Promise<CheckEntry[]>
 
@@ -29,25 +29,44 @@ export function Field({ label, children }: {
   </label>
 }
 
+export const CategoryContext = createContext<{ categories: CheckCategory[]; submit?: SubmitCheck }>({ categories: [] })
+
 export function CategoryField({ value, change, required = false }: {
   value: string; change: (value: string) => void; required?: boolean
 }) {
-  const selected = quickBooksCategories.includes(value as typeof quickBooksCategories[number]) ? value : value ? newCategory : ''
+  const { categories, submit } = useContext(CategoryContext)
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const active = categories.filter(item => !item.archived_at)
   return <div className="grid gap-2">
-    <Field label="QuickBooks category">
-      <select className={checkInput} required={required} value={selected} onChange={event => {
-        if (event.target.value === newCategory) change('')
-        else change(event.target.value)
-      }}>
-        <option value="">Select category</option>
-        {quickBooksCategories.map(category => <option key={category} value={category}>{category}</option>)}
-        <option value={newCategory}>Add new category…</option>
-      </select>
-    </Field>
-    {selected === newCategory && <Field label="New QuickBooks category">
-      <input className={checkInput} required={required} maxLength={120} value={value}
-        onChange={event => change(event.target.value)} placeholder="Enter a new category" />
-    </Field>}
+    <Field label="QuickBooks category"><select className={checkInput} required={required} value={value} onChange={event => {
+      if (event.target.value === newCategory) setCreating(true)
+      else change(event.target.value)
+    }}>
+      <option value="">Select category</option>
+      {value && !active.some(item => item.name === value) && <option value={value}>{value} (historical)</option>}
+      {active.map(item => <option key={item.id} value={item.name}>{item.name}</option>)}
+      <option value={newCategory}>Add new category…</option>
+    </select></Field>
+    {creating && <section className="grid gap-2 rounded border p-3" aria-label="New category">
+      <Field label="New category name"><input className={checkInput} maxLength={120} value={name} onChange={event => setName(event.target.value)} /></Field>
+      <Field label="Category manager PIN"><input className={checkInput} type="password" inputMode="numeric" maxLength={4} value={pin} onChange={event => setPin(event.target.value)} /></Field>
+      <Button type="button" disabled={busy} onClick={async () => {
+        setBusy(true); setError('')
+        try {
+          if (!name.trim() || !submit) throw new Error('Enter a category name.')
+          const saved = await submit('save_category', { name: name.trim() }, pin)
+          change((saved[0] as unknown as CheckCategory).name)
+          setCreating(false); setName(''); setPin('')
+        } catch (error) { setError(error instanceof Error ? error.message : 'Could not create category.') }
+        finally { setBusy(false) }
+      }}>Create and select category</Button>
+      <Button type="button" variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
+      {error && <p role="alert">{error}</p>}
+    </section>}
   </div>
 }
 

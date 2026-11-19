@@ -16,6 +16,7 @@ export type CheckEntry = {
   payroll_period_start?: string | null
   payroll_period_end?: string | null
   payroll_hours?: number | null
+  payroll_snapshot?: Record<string, number | null> | null
   payment_date: string
   amount: number
   bank_account: string | null
@@ -28,6 +29,7 @@ export type CheckEntry = {
   issued_by_name: string | null
 }
 
+export type CheckCategory = { id: string; name: string; archived_at: string | null }
 export type CheckVendor = { id: string; name: string; category: string | null; address: string | null; phone: string | null; archived_at: string | null }
 export type CheckEmployee = { id: string; name: string; is_active: boolean }
 export type CheckRun = { id: string; department: string; start_date: string; end_date: string; pay_date: string }
@@ -48,12 +50,12 @@ export type CheckAudit = {
   before_record: Record<string, unknown> | null
   after_record: Record<string, unknown>
 }
-export type CheckData = { entries: CheckEntry[]; vendors: CheckVendor[]; employees: CheckEmployee[]; runs: CheckRun[]; company?: { name: string; address?: string; phone?: string; email?: string } }
+export type CheckData = { entries: CheckEntry[]; categories: CheckCategory[]; vendors: CheckVendor[]; employees: CheckEmployee[]; runs: CheckRun[]; company?: { name: string; address?: string; phone?: string; email?: string } }
 export type CheckAction = 'save' | 'prepare' | 'print' | 'reprint' | 'resolve_print' | 'remove' | 'void'
-  | 'categorize' | 'save_vendor' | 'archive_vendor'
+  | 'categorize' | 'save_vendor' | 'archive_vendor' | 'save_category' | 'archive_category' | 'restore_category'
 
 export const checkActions = new Set<CheckAction>([
-  'save', 'prepare', 'print', 'reprint', 'resolve_print', 'remove', 'void', 'categorize', 'save_vendor', 'archive_vendor',
+  'save', 'prepare', 'print', 'reprint', 'resolve_print', 'remove', 'void', 'categorize', 'save_vendor', 'archive_vendor', 'save_category', 'archive_category', 'restore_category',
 ])
 
 export const checkMoney = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })

@@ -1,4 +1,4 @@
-import { amountInWords, checkMemo, checkMoney, type CheckData, type CheckEntry } from './checkWriter'
+import { amountInWords, checkMoney, type CheckData, type CheckEntry } from './checkWriter'
 
 export type PrintAlignment = { x: number; y: number }
 
@@ -79,36 +79,16 @@ export function voucherDocument(rows: Voucher[], alignment: PrintAlignment, samp
   </style></head><body>${pages.join('')}</body></html>`
 }
 
-function printDocument(html: string) {
-  const frame = document.createElement('iframe')
-  frame.title = 'Checks print sheet'
-  frame.style.cssText = 'position:fixed; width:1px; height:1px; border:0; opacity:0; pointer-events:none'
-  frame.addEventListener('load', () => {
-    const printWindow = frame.contentWindow
-    if (!printWindow) return
-    printWindow.addEventListener('afterprint', () => frame.remove(), { once: true })
-    printWindow.focus()
-    printWindow.print()
-  }, { once: true })
-  frame.srcdoc = html
-  document.body.appendChild(frame)
-  window.setTimeout(() => frame.remove(), 300_000)
+export async function printChecks(entries: CheckEntry[], alignment: PrintAlignment, data: CheckData) {
+  const { checkPdf } = await import('./checkPdf')
+  const bytes = await checkPdf(entries, alignment, data)
+  const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }))
+  return url
 }
 
-export function printChecks(entries: CheckEntry[], alignment: PrintAlignment, data: CheckData) {
-  const vendors = new Map(data.vendors.map(vendor => [vendor.id, vendor]))
-  const company = data.company
-  printDocument(voucherDocument(entries.map(entry => {
-    const vendor = entry.vendor_id ? vendors.get(entry.vendor_id) : undefined
-    return {
-      ...entry, memo: checkMemo(entry), vendorAddress: vendor?.address, vendorPhone: vendor?.phone,
-      companyName: company?.name, companyAddress: company?.address, companyPhone: company?.phone, companyEmail: company?.email,
-    }
-  }), alignment))
-}
-
-export function printAlignmentSample(alignment: PrintAlignment) {
-  printDocument(voucherDocument([
-    { payee_name: 'Sample Payee', payment_date: '2026-01-01', amount: 123.45, memo: 'Partial payroll payout - Sample memo' },
-  ], alignment, true))
+export async function printAlignmentSample(alignment: PrintAlignment) {
+  const url = await printChecks([
+    { payee_name: 'Sample Payee', payment_date: '2026-01-01', amount: 123.45, memo: 'Alignment sample', payroll_check_amount: null } as CheckEntry,
+  ], alignment, { entries: [], categories: [], vendors: [], employees: [], runs: [] })
+  return url
 }
