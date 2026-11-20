@@ -3,7 +3,7 @@ import { amountInWords, checkMemo, checkMoney, type CheckData, type CheckEntry }
 import type { PrintAlignment } from './checkVoucher'
 
 // Coordinates in PDF points, measured from the supplied Letter reference, top-left origin.
-export const CHECK_LAYOUT = { width: 612, height: 792, date: [503.64, 67.32], payee: [82.44, 101.40], amount: [540, 104.52], words: [35.64, 126.12], memo: [62.52, 212.52], stubs: [287.16, 544.92] } as const
+export const CHECK_LAYOUT = { width: 612, height: 792, date: [503.64, 67.32], payee: [82.44, 101.40], amount: [540, 104.52], words: [35.64, 126.12], memo: [82.44, 203], stubs: [287.16, 544.92] } as const
 
 export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment, data: CheckData) {
   const pdf = await PDFDocument.create()
@@ -29,19 +29,19 @@ export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment,
     const date = entry.payment_date.split('-').reverse()
     const formattedDate = `${date[1]}/${date[0]}/${date[2]}`
     text(formattedDate, ...CHECK_LAYOUT.date, 65, 8.7434)
-    text(name, ...CHECK_LAYOUT.payee, 390, 8.7434, true)
-    text(`**${checkMoney.format(entry.amount).slice(1)}`, 480, 104.52, 60, 8.7434, true, true)
-    text(amountInWords(entry.amount), ...CHECK_LAYOUT.words, 515, 8.7434)
+    text(name, ...CHECK_LAYOUT.payee, 370, 11, true)
+    text(`**${checkMoney.format(entry.amount).slice(1)}`, 470, 104.52, 70, 11, true, true)
+    text(amountInWords(entry.amount), ...CHECK_LAYOUT.words, 515, 10.5)
     const vendor = data.vendors.find(v => v.id === entry.vendor_id)
-    text(name, 70.92, 151.32, 400, 8.7434)
-    if (vendor?.address) text(vendor.address, 71, 164, 400)
+    text(name, 82.44, 192, 390, 9)
+    if (vendor?.address) text(vendor.address, 82.44, 180, 390, 8)
     text(entry.payroll_item_id ? `Pay Period: ${entry.payroll_period_start ?? ''} - ${entry.payroll_period_end ?? ''}` : checkMemo(entry), ...CHECK_LAYOUT.memo, 490, 8.7434)
-    if (entry.check_number) text(`#${entry.check_number}`, 504, 40, 65)
+    if (entry.check_number) text(entry.check_number, 504, 26, 65, 11, true, true)
     stubMode = true
     for (const top of CHECK_LAYOUT.stubs) {
       text(name, 39, top, 240)
       text(`Check date: ${formattedDate}`, 425, top, 145)
-      text(`Check number: ${entry.check_number ?? ''}`, 425, top + 30, 145)
+      text(entry.check_number ?? '', 504, top - 20, 65, 11, true, true)
       if (entry.payroll_item_id) {
         text(`Period beginning: ${entry.payroll_period_start ?? ''}`, 425, top + 10, 145)
         text(`Period ending: ${entry.payroll_period_end ?? ''}`, 425, top + 20, 145)
@@ -76,7 +76,7 @@ export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment,
         text(checkMoney.format(entry.amount), 470, top + 40, 92, 9, true, true)
       }
       text(checkMemo(entry), 39, top + 157, 523)
-      text([data.company?.name, data.company?.address, data.company?.phone, data.company?.email].filter(Boolean).join(', '), 39, top + 210, 523, 7)
+      text([data.company?.name, data.company?.address, data.company?.phone, 'admin@newvillagepub.com'].filter(Boolean).join(', '), 39, top + 210, 523, 7)
     }
   }
   pdf.catalog.set(pdf.context.obj('ViewerPreferences'), pdf.context.obj({ PrintScaling: 'None' }))

@@ -9,7 +9,7 @@ create table public.employees(id uuid primary key, name text, role text, is_acti
 create table public.payroll_runs(id uuid primary key, start_date date, end_date date, pay_date date);
 create table public.payroll_run_items(id uuid primary key, run_id uuid references payroll_runs, employee_id uuid, employee_name text, payment_method text, commission_payment_method text, payment_allocations jsonb, hours numeric, base_wages numeric, tips numeric, guarantee_top_up numeric, commission numeric, deductions numeric, gross_pay numeric, net_pay numeric);
 `)
-for (const file of readdirSync(migrations).filter(f => f.startsWith('20261118') || f.startsWith('20261119043000'))) {
+for (const file of readdirSync(migrations).filter(f => f.startsWith('20261118') || f.startsWith('20261119043000') || f.startsWith('20261119044226') || f.startsWith('20261120000000'))) {
  await db.exec(readFileSync(migrations+file,'utf8'))
 }
 const manager='00000000-0000-0000-0000-000000000001', run='00000000-0000-0000-0000-000000000002', item='00000000-0000-0000-0000-000000000003'
@@ -30,5 +30,13 @@ assert.equal((await db.query('select category from check_writer_entries where id
 await assert.rejects(action('save',{source:'app',employee_id:manager,amount:5,payment_date:'2026-11-19',category:'Renamed category'}),/active category/)
 await action('restore_category',{id:category.id})
 await action('save',{source:'app',employee_id:manager,amount:5,payment_date:'2026-11-19',category:'Renamed category'})
+const secondManager='00000000-0000-0000-0000-000000000004'
+await db.exec(`insert into employees values('${secondManager}', 'Authorizing manager', 'manager', true)`)
+const staffDraft=(await action('save',{source:'app',employee_id:manager,amount:5,payment_date:'2026-11-19'}))[0]
+assert.equal(staffDraft.category,'Payroll expenses')
+const authorized=(await db.query('select public.check_writer_change($1,$2,$3) result',['print',secondManager,JSON.stringify({items:[{id:staffDraft.id,revision:staffDraft.revision,check_number:'124'}]})])).rows[0].result[0]
+assert.equal(authorized.created_by_name,'Authorizing manager')
+assert.equal(authorized.issued_by_name,'Authorizing manager')
+assert.equal(authorized.created_by,secondManager)
 console.log('PASS: migration, category create/edit/archive/restore, archived category rejection, original names retained, payroll snapshot frozen on reprint')
 await db.close()

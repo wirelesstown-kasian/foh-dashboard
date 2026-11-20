@@ -1,10 +1,11 @@
 'use client'
 
-import { cloneElement, createContext, useContext, useId, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
+import { cloneElement, createContext, useContext, useId, useState, type ReactElement, type ReactNode } from 'react'
+import { PinModal } from '@/components/layout/PinModal'
 import { Combobox } from '@base-ui/react/combobox'
 import { Button } from '@/components/ui/button'
 import { BUSINESS_TIMEZONE } from '@/lib/clockUtils'
-import { checkMoney, type CheckCategory, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
+import { STAFF_CHECK_CATEGORY, checkMoney, type CheckCategory, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
 
 export type SubmitCheck = (action: CheckAction, data: Record<string, unknown>, pin?: string) => Promise<CheckEntry[]>
 
@@ -37,8 +38,7 @@ export function CategoryField({ value, change, required = false }: {
   const { categories, submit } = useContext(CategoryContext)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
-  const [pin, setPin] = useState('')
-  const [error, setError] = useState('')
+  const [authorizeCategory, setAuthorizeCategory] = useState(false)
   const [busy, setBusy] = useState(false)
   const active = categories.filter(item => !item.archived_at)
   return <div className="grid gap-2">
@@ -53,19 +53,17 @@ export function CategoryField({ value, change, required = false }: {
     </select></Field>
     {creating && <section className="grid gap-2 rounded border p-3" aria-label="New category">
       <Field label="New category name"><input className={checkInput} maxLength={120} value={name} onChange={event => setName(event.target.value)} /></Field>
-      <Field label="Category manager PIN"><input className={checkInput} type="password" inputMode="numeric" maxLength={4} value={pin} onChange={event => setPin(event.target.value)} /></Field>
-      <Button type="button" disabled={busy} onClick={async () => {
-        setBusy(true); setError('')
+      <Button type="button" disabled={busy || !name.trim()} onClick={() => setAuthorizeCategory(true)}>Submit new category</Button>
+      <PinModal open={authorizeCategory} title="Authorize new category" onClose={() => setAuthorizeCategory(false)} onConfirm={async pin => {
+        setBusy(true)
         try {
           if (!name.trim() || !submit) throw new Error('Enter a category name.')
           const saved = await submit('save_category', { name: name.trim() }, pin)
           change((saved[0] as unknown as CheckCategory).name)
-          setCreating(false); setName(''); setPin('')
-        } catch (error) { setError(error instanceof Error ? error.message : 'Could not create category.') }
-        finally { setBusy(false) }
-      }}>Create and select category</Button>
+          setCreating(false); setName(''); setAuthorizeCategory(false)
+        } finally { setBusy(false) }
+      }} />
       <Button type="button" variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
-      {error && <p role="alert">{error}</p>}
     </section>}
   </div>
 }
@@ -73,38 +71,24 @@ export function CategoryField({ value, change, required = false }: {
 export function PinForm({ label, submit, children }: {
   label: string; submit: (pin: string) => Promise<unknown>; children?: ReactNode
 }) {
-  const [pin, setPin] = useState('')
+  const [authorizing, setAuthorizing] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (busy) return
-    setBusy(true)
-    setError('')
-    try {
-      await submit(pin)
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'The action could not be completed.')
-    } finally {
-      setPin('')
-      setBusy(false)
-    }
-  }
-
-  return <form onSubmit={handleSubmit}>
-    <fieldset disabled={busy} className="grid gap-4">
-      {children}
-      <div className="flex flex-wrap items-end gap-3 border-t pt-4">
-        <Field label="Manager PIN">
-          <input className={`${checkInput} max-w-36`} type="password" inputMode="numeric" autoComplete="off"
-            pattern="[0-9]{4}" maxLength={4} required value={pin} onChange={event => setPin(event.target.value)} />
-        </Field>
-        <Button type="submit" disabled={busy}>{busy ? 'Working…' : label}</Button>
-      </div>
-      {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
-    </fieldset>
-  </form>
+  return <>
+    <form onSubmit={event => { event.preventDefault(); if (!busy) setAuthorizing(true) }}>
+      <fieldset disabled={busy} className="grid gap-4">
+        {children}
+        <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={busy}>Submit</Button></div>
+      </fieldset>
+    </form>
+    <PinModal open={authorizing} title="Authorize check action" description={label}
+      onClose={() => { if (!busy) setAuthorizing(false) }}
+      onConfirm={async pin => {
+        if (busy) return
+        setBusy(true)
+        try { await submit(pin); setAuthorizing(false) }
+        finally { setBusy(false) }
+      }} />
+  </>
 }
 
 export function CheckForm({ data, entry, payroll, source, submit }: {
@@ -117,7 +101,7 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   const linked = Boolean(payroll || entry?.payroll_item_id)
   const payeeInputId = useId()
   const [payeeId, setPayeeId] = useState(() => entry?.employee_id ? `staff:${entry.employee_id}` : entry?.vendor_id ? `vendor:${entry.vendor_id}` : '')
-  const [category, setCategory] = useState(entry?.category ?? '')
+  const [category, setCategory] = useState(entry?.category ?? (linked ? STAFF_CHECK_CATEGORY : ''))
   const [method, setMethod] = useState('cash')
   const [amount, setAmount] = useState(entry ? entry.amount.toFixed(2) : payroll ? payroll.remaining.toFixed(2) : '')
   const [date, setDate] = useState(entry?.payment_date ?? new Intl.DateTimeFormat('en-CA', {
@@ -128,8 +112,6 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   const [bank, setBank] = useState(entry?.bank_account ?? 'Checking')
   const [number, setNumber] = useState(entry?.check_number ?? '')
   const [reference, setReference] = useState(entry?.reference ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   const liveVoucher = source === 'app' || source === 'payroll'
   const payees = [
     ...data.employees.map(employee => ({
@@ -143,32 +125,16 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   ]
   const selectedPayee = payees.find(payee => payee.key === payeeId) ?? null
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (busy) return
-    if (!linked && !selectedPayee) {
-      setError('Choose a payee from the search results.')
-      return
-    }
-    setBusy(true)
-    setError('')
-    try {
-      await submit('save', {
-        id: entry?.id, revision: entry?.revision, source, method, payment_date: date, amount,
-        payroll_item_id: payroll?.id,
-        employee_id: !linked && selectedPayee?.type === 'staff' ? selectedPayee.id : undefined,
-        vendor_id: !linked && selectedPayee?.type === 'vendor' ? selectedPayee.id : undefined,
-        category, memo, omit_payee_on_print: liveVoucher ? omitPayee : undefined, bank_account: bank, check_number: number, reference,
-      })
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'The check could not be saved.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return <form onSubmit={handleSubmit}>
-    <fieldset disabled={busy} className="grid gap-4">
+  return <PinForm label={liveVoucher ? 'Save check draft' : 'Record payment'} submit={async pin => {
+    if (!linked && !selectedPayee) throw new Error('Choose a payee from the search results.')
+    return submit('save', {
+      id: entry?.id, revision: entry?.revision, source, method, payment_date: date, amount,
+      payroll_item_id: payroll?.id,
+      employee_id: !linked && selectedPayee?.type === 'staff' ? selectedPayee.id : undefined,
+      vendor_id: !linked && selectedPayee?.type === 'vendor' ? selectedPayee.id : undefined,
+      category, memo, omit_payee_on_print: liveVoucher ? omitPayee : undefined, bank_account: bank, check_number: number, reference,
+    }, pin)
+  }}>
       {linked ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm">
         {payroll?.employee_name ?? entry?.payee_name}
         {payroll && <> · {checkMoney.format(payroll.remaining)} available to record</>}
@@ -178,7 +144,7 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
           itemToStringLabel={item => item.label} isItemEqualToValue={(item, selected) => item.key === selected.key}
           onValueChange={selected => {
             setPayeeId(selected?.key ?? '')
-            if (selected?.type === 'vendor') setCategory(selected.category ?? '')
+            setCategory(selected?.type === 'vendor' ? selected.category ?? '' : selected?.type === 'staff' ? STAFF_CHECK_CATEGORY : '')
           }}>
           <Combobox.Input id={payeeInputId} className={checkInput} placeholder="Search staff or vendors" />
           <Combobox.Portal>
@@ -189,7 +155,7 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
                   {(item: (typeof payees)[number]) => <Combobox.Item key={item.key} value={item}
                     className="flex cursor-default justify-between gap-2 rounded px-2 py-1.5 text-sm data-highlighted:bg-accent data-highlighted:text-accent-foreground">
                     <span className="min-w-0 break-words">{item.label}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{item.type === 'staff' ? 'Staff' : 'Vendor'}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{item.type === 'staff' ? `Staff · ${STAFF_CHECK_CATEGORY}` : `Vendor · ${item.category || 'Unassigned'}`}</span>
                   </Combobox.Item>}
                 </Combobox.List>
               </Combobox.Popup>
@@ -219,10 +185,5 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
       </div>
       <CategoryField value={category} change={setCategory} required={!liveVoucher} />
       <Field label="Memo"><input className={checkInput} maxLength={160} value={memo} onChange={event => setMemo(event.target.value)} /></Field>
-      <div className="flex justify-end border-t pt-4">
-        <Button type="submit" disabled={busy}>{busy ? 'Saving…' : liveVoucher ? 'Save draft' : source === 'handwritten' ? 'Record handwritten check' : 'Record payment'}</Button>
-      </div>
-      {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
-    </fieldset>
-  </form>
+  </PinForm>
 }

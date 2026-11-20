@@ -104,3 +104,23 @@ export function checkCsv(rows: CheckEntry[]) {
     return `"${safe.replaceAll('"', '""')}"`
   }).join(',')).join('\r\n')
 }
+
+
+export const STAFF_CHECK_CATEGORY = 'Payroll expenses'
+
+/** Check numbers are remembered in the register, per bank, including voided stock. */
+export function nextCheckNumber(entries: CheckEntry[], bank: string | null) {
+  const used = entries.filter(entry => entry.bank_account?.toLowerCase() === bank?.toLowerCase())
+    .map(entry => Number(entry.check_number)).filter(number => Number.isSafeInteger(number) && number > 0)
+  const maximum = Math.max(0, ...used)
+  return maximum >= 999999999999 ? '' : String(maximum + 1)
+}
+
+export function sequentialCheckNumbers(entries: CheckEntry[], first: string) {
+  if (!/^[0-9]{1,12}$/.test(first) || Number(first) < 1) return Object.fromEntries(entries.map(entry => [entry.id, '']))
+  const start = Number(first)
+  return Object.fromEntries(entries.map((entry, index) => {
+    const number = start + index
+    return [entry.id, number <= 999999999999 ? String(number).padStart(first.length, '0') : '']
+  }))
+}

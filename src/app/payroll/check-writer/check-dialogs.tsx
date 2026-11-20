@@ -1,14 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { checkMoney, type CheckAudit, type CheckEntry, type CheckVendor } from '@/lib/checkWriter'
+import { nextCheckNumber, sequentialCheckNumbers, checkMoney, type CheckAudit, type CheckEntry, type CheckVendor } from '@/lib/checkWriter'
 import { Button } from '@/components/ui/button'
 import { CategoryField, Field, PinForm, checkInput, type SubmitCheck } from './check-form'
 
 export function PrintForm({ entries, submit, data, reprint = false }: {
   entries: CheckEntry[]; submit: SubmitCheck; data: import('@/lib/checkWriter').CheckData; reprint?: boolean
 }) {
-  const [numbers, setNumbers] = useState<Record<string, string>>(() => Object.fromEntries(entries.map(entry => [entry.id, entry.check_number ?? ''])))
+  const [numbers, setNumbers] = useState<Record<string, string>>(() => reprint ? Object.fromEntries(entries.map(entry => [entry.id, entry.check_number ?? ''])) : sequentialCheckNumbers(entries, nextCheckNumber(data.entries, entries[0]?.bank_account ?? 'Checking')))
   const [category, setCategory] = useState('')
   const [preview, setPreview] = useState('')
   const [previewError, setPreviewError] = useState('')
@@ -38,15 +38,19 @@ export function PrintForm({ entries, submit, data, reprint = false }: {
     }}>Preview PDF alignment</Button>
     {previewError && <p role="alert">{previewError}</p>}
     {preview && <><iframe title="Check PDF print preview" src={preview} className="h-96 w-full border" /><a href={preview} target="_blank" rel="noopener">Open preview full size</a></>}
+    <p className="text-xs text-muted-foreground">The next number is suggested from the register. Changing the first number fills the remaining checks in order. Verify against your check stock.</p>
     <div className="grid gap-2">
-      {entries.map(entry => <div key={entry.id} className="grid grid-cols-[1fr_9rem] items-end gap-3 rounded-md border p-2.5">
+      {entries.map((entry, index) => <div key={entry.id} className="grid grid-cols-[1fr_9rem] items-end gap-3 rounded-md border p-2.5">
         <div className="text-sm"><div className="font-medium">{entry.payee_name}</div>
           {checkMoney.format(entry.amount)} · {entry.bank_account}
           {entry.omit_payee_on_print && <div className="text-xs text-muted-foreground">Payee will print blank</div>}
         </div>
-        <Field label="Check number (optional)"><input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}"
-          maxLength={12} value={numbers[entry.id] ?? ''}
-          onChange={event => setNumbers(current => ({ ...current, [entry.id]: event.target.value }))} /></Field>
+        <Field label="Check number"><input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}"
+          required disabled={reprint} maxLength={12} value={numbers[entry.id] ?? ''}
+          onChange={event => {
+            setPreview('')
+            setNumbers(current => index === 0 ? sequentialCheckNumbers(entries, event.target.value) : ({ ...current, [entry.id]: event.target.value }))
+          }} /></Field>
       </div>)}
     </div>
     {uncategorized && <div className="grid gap-1">

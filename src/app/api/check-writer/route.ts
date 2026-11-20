@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       getAppSettings(),
       listRows('check_writer_categories', '*', 'name'),
     ])
-    return NextResponse.json({ entries: entries as unknown as CheckEntry[], vendors, employees, runs, categories, company: { name: settings.from_name, email: settings.from_email } }, { headers: responseHeaders })
+    return NextResponse.json({ entries: entries as unknown as CheckEntry[], vendors, employees, runs, categories, company: { name: settings.from_name, email: 'admin@newvillagepub.com' } }, { headers: responseHeaders })
   } catch (error) {
     console.error('Check Writer read failed', error)
     return failure('Could not load Check Writer. Try again or contact an administrator.', 500)
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
   }
   let actorId = viewer.employeeId
   try {
-    if (action !== 'save') {
+    {
       if (!isValidPin(pin)) return failure('Enter a four-digit manager PIN.', 400)
       const attempt = await supabaseAdmin.rpc('check_writer_allow_pin', { p_employee_id: viewer.employeeId })
       if (attempt.error) throw attempt.error

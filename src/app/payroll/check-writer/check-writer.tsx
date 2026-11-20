@@ -6,7 +6,7 @@ import { ArrowLeft, Download, Printer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
-  checkCsv, checkMemo, checkMoney, isPartialCheck,
+  STAFF_CHECK_CATEGORY, checkCsv, checkMemo, checkMoney, isPartialCheck,
   type CheckCategory, type CheckAudit, type CheckData, type CheckEntry, type CheckRun, type CheckStatus, type CheckVendor, type PayrollCheckRow,
 } from '@/lib/checkWriter'
 import { printAlignmentSample, printChecks, type PrintAlignment } from '@/lib/checkVoucher'
@@ -33,7 +33,7 @@ const tabs: { id: CheckTab; label: string }[] = [
   { id: 'drafts', label: 'Drafts & printing' },
   { id: 'register', label: 'Check register' },
   { id: 'payroll', label: 'Saved payroll' },
-  { id: 'vendors', label: 'Vendors' },
+  { id: 'vendors', label: 'Vendors & Staff' },
   { id: 'categories', label: 'Categories' },
 ]
 
@@ -168,10 +168,8 @@ function EntryTable({ entries, chosen, toggle, edit, resolve, reprint, remove, a
           {statusLabels[entry.status]}</span>
           {isPartialCheck(entry) && <div className="mt-1 text-xs text-muted-foreground">Partial payout</div>}
         </td>
-        <td className="p-3">{entry.created_by_name}
-          {entry.issued_by_name && entry.issued_by_name !== entry.created_by_name && <div className="text-xs text-muted-foreground">
-            Recorded by {entry.issued_by_name}
-          </div>}
+        <td className="p-3">{entry.issued_by_name || entry.created_by_name}
+
         </td>
         <td className="p-3"><div className="flex flex-wrap gap-1.5">
           {entry.status === 'draft' && <Button variant="outline" size="sm" onClick={() => edit(entry)}>Edit</Button>}
@@ -371,12 +369,16 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
           record={(payroll, source) => open({ type: 'entry', payroll, source })} editDraft={tableActions.edit} />
       </div>
       {tab === 'vendors' && <section className="grid gap-3 rounded-xl border bg-white p-4">
-        <div className="flex justify-between gap-3"><h2 className="text-lg font-semibold">Vendors</h2>
+        <div className="flex justify-between gap-3"><h2 className="text-lg font-semibold">Vendors & Staff</h2>
           <Button onClick={() => open({ type: 'vendor' })}>Add vendor</Button></div>
         {data.vendors.length === 0 && <p className="text-sm text-muted-foreground">No vendors yet.</p>}
+        {data.employees.map(employee => <div key={`staff:${employee.id}`} className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm">
+          <div><div className="font-medium">{employee.name}{!employee.is_active && ' (inactive)'}</div>
+          <div className="text-muted-foreground">Staff · Category: {STAFF_CHECK_CATEGORY}</div></div>
+        </div>)}
         {data.vendors.map(vendor => <div key={vendor.id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-2">
           <div className="text-sm"><div className="font-medium">{vendor.name}{vendor.archived_at && ' (archived)'}</div>
-            {vendor.category && <div className="text-muted-foreground">{vendor.category}</div>}{(vendor.address || vendor.phone) && <div className="text-xs text-muted-foreground">{[vendor.address, vendor.phone].filter(Boolean).join(' · ')}</div>}</div>
+            <div className="text-muted-foreground">Category: {vendor.category || 'Unassigned'}</div>{(vendor.address || vendor.phone) && <div className="text-xs text-muted-foreground">{[vendor.address, vendor.phone].filter(Boolean).join(' · ')}</div>}</div>
           <div className="flex flex-wrap gap-1">
             {!vendor.archived_at && <>
               <Button variant="outline" size="sm" onClick={() => open({ type: 'vendor', vendor })}>Edit</Button>

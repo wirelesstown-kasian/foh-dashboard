@@ -31,3 +31,16 @@ PDF viewer preferences request no scaling. Print on Letter at **Actual size / 10
 Database tests apply the Check Writer migrations in temporary PGlite Postgres and verify category create/edit/archive/restore, archived selection rejection, blank-name retention, and frozen payroll reprints. PDF tests check page boundaries, coordinates, supported payroll amounts, blank-name bulk output, and legacy checks without snapshots. The supplied private paystub is not committed. Its page size and text coordinates were inspected locally, and a synthetic generated PDF was rendered for visual comparison.
 
 A live signed-in browser flow and a physical printer/stock test remain deployment acceptance steps. The Supabase CLI could not initialize its read-only home configuration in this sandbox; the migration was prepared using the repository convention and verified by executing it in temporary Postgres.
+
+
+## November 20 alignment and authorization update
+
+Payee and numeric amount use 11pt; written amount uses 10.5pt with width fitting for long text. The memo area places the recipient at (82.44, 192) and payroll period at (82.44, 203), moving the recipient from the mailing area. Check numbers print at the top right of the check and each stub. Contact email on check PDFs is admin@newvillagepub.com.
+
+Vendors & Staff lists every staff member with the Check Writer default category Payroll expenses; vendor categories remain individually assigned. This is a check-category default and does not edit employee roles, wages, departments, schedules, or payroll calculations.
+
+Printing suggests the next number from the register for the first check's bank, counting used and voided stock. Editing the first number fills a sequential batch; operators can correct subsequent numbers when needed. The existing bank/number unique constraint prevents duplicate issuance. Verify stock and bank when printing mixed-bank selections. Reprints retain original numbers.
+
+All check actions now use Submit followed by the existing authorization keypad. PINs are verified on the server for draft saves as well as issuance. The authorized manager becomes the recorded writer for draft edits and issuance; reprints preserve the original writer and add their own audit event. PINs are never stored in browser storage.
+
+Apply 20261120000000_check_writer_authorization.sql before deploying this update.

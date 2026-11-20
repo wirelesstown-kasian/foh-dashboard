@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { checkMoney, type CheckEntry, type CheckRun, type PayrollCheckRow } from '@/lib/checkWriter'
+import { STAFF_CHECK_CATEGORY, checkMoney, type CheckEntry, type CheckRun, type PayrollCheckRow } from '@/lib/checkWriter'
 import { CategoryField, Field, PinForm, checkInput, type SubmitCheck } from './check-form'
 
 export type PayrollCheckItems = { run: CheckRun; items: Pick<PayrollCheckRow, 'id' | 'employee_name' | 'allocated'>[] }
@@ -70,7 +70,7 @@ export function PayrollChecks({ runs, initialRunId, entries, getRun, prepare, re
           const unreserved = Math.round((row.remaining - (row.open?.amount ?? 0)) * 100) / 100
           const partial = row.paid > 0 || (row.open && unreserved > 0)
           return <tr key={row.id} className="border-b last:border-0">
-              <th scope="row" className="p-2 font-medium">{row.employee_name}</th>
+              <th scope="row" className="p-2 font-medium">{row.employee_name}<div className="text-xs font-normal text-muted-foreground">Category: {row.open?.category || STAFF_CHECK_CATEGORY}</div></th>
               <td className="whitespace-nowrap p-2">{checkMoney.format(row.allocated)}</td>
               <td className="whitespace-nowrap p-2">{checkMoney.format(row.paid)}</td>
               <td className="whitespace-nowrap p-2">{checkMoney.format(row.remaining)}</td>
@@ -99,7 +99,7 @@ export function PayrollChecks({ runs, initialRunId, entries, getRun, prepare, re
 
 export function PrepareChecks({ run, rows, submit }: { run: CheckRun; rows: PayrollCheckRow[]; submit: SubmitCheck }) {
   const [chosen, setChosen] = useState(() => new Set(rows.map(row => row.id)))
-  const [category, setCategory] = useState('')
+  const [category, setCategory] = useState<string>(STAFF_CHECK_CATEGORY)
   const [blankPayees, setBlankPayees] = useState<Record<string, boolean>>({})
   return <PinForm label="Create selected drafts" submit={pin => {
     if (chosen.size === 0) throw new Error('Select at least one employee.')

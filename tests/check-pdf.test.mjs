@@ -25,6 +25,10 @@ test('Letter PDF keeps reference field coordinates, payroll amounts, blank names
  const first=streams(pdf,pdf.getPage(0)),blank=streams(pdf,pdf.getPage(1))
  assert.match(first,new RegExp(hex('Synthetic Employee')))
  assert.doesNotMatch(blank,new RegExp(hex('Synthetic Employee')))
+ assert.match(first, /11 Tf/); assert.match(first, /10.5 Tf/)
+ assert.match(first, new RegExp(hex('admin@newvillagepub.com')))
+ assert.doesNotMatch(first, new RegExp(hex('Check number:')))
+ assert.match(first, /82.44 589 Tm/)
  for(const value of ['Earnings','Deductions','$900.00','Payroll net pay: $880.00','Check payment: $880.00']) assert.match(first,new RegExp(hex(value)))
  const coordinate = first.match(/1 0 0 1 ([0-9.]+) ([0-9.]+) Tm/)
  assert.ok(Math.abs(Number(coordinate[1])-503.64)<0.001)
@@ -38,4 +42,14 @@ test('legacy payroll reprint never invents missing earnings or deductions',async
  const pdf=await PDFDocument.load(bytes),content=streams(pdf,pdf.getPage(0))
  assert.match(content,new RegExp(hex('Payroll detail not saved with original check')))
  assert.doesNotMatch(content,new RegExp(hex('$900.00')))
+})
+
+const { nextCheckNumber, sequentialCheckNumbers } = load('checkWriter')
+test('check numbering remembers used stock by bank and assigns a padded bulk sequence', () => {
+ const register = [{bank_account:'Checking',check_number:'002411',status:'void'}, {bank_account:'Other',check_number:'9999'}, {bank_account:'Checking',check_number:null}]
+ assert.equal(nextCheckNumber(register,'checking'),'2412')
+ assert.deepEqual(sequentialCheckNumbers([{id:'a'},{id:'b'},{id:'c'}],'002412'),{a:'002412',b:'002413',c:'002414'})
+ assert.deepEqual(sequentialCheckNumbers([{id:'a'},{id:'b'}],''),{a:'',b:''})
+ assert.deepEqual(sequentialCheckNumbers([{id:'a'},{id:'b'}],'999999999999'),{a:'999999999999',b:''})
+ assert.equal(nextCheckNumber([{bank_account:'Checking',check_number:'999999999999'}],'Checking'),'')
 })
