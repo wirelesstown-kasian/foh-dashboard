@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { StaffLegalDocuments } from '@/components/staffing/StaffLegalDocuments'
 import { Employee, EmployeeRole, PaymentMethod } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -166,8 +167,9 @@ function ToggleRow({
   )
 }
 
-export function EmployeeTable() {
+export function EmployeeTable({ initialEmployeeId }: { initialEmployeeId?: string } = {}) {
   const { roleDefinitions, departmentDefinitions } = useAppSettings()
+  const openedEmployeeId = useRef<string | undefined>(undefined)
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -201,39 +203,11 @@ export function EmployeeTable() {
     return () => { cancelled = true }
   }, [editTarget])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const employeesRes = await fetch('/api/employees?status=all', { cache: 'no-store' })
-      const employeeData = (await employeesRes.json().catch(() => ({}))) as { employees?: Employee[]; error?: string }
-      if (!employeesRes.ok) {
-        setSaveError(employeeData.error ?? 'Failed to load employees')
-        setEmployees([])
-        return
-      }
-      setEmployees(employeeData.employees ?? [])
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Failed to load employees')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const openAdd = () => {
-    setSaveError(null)
-    setEditTarget(null)
-    setResetPinMode(true)
-    setDepartmentDropdownOpen(false)
-    setForm(EMPTY_FORM)
-    setDialogOpen(true)
-  }
-
-  const openEdit = (emp: Employee) => {
+  const openEdit = useCallback((emp: Employee) => {
     setSaveError(null)
     const scheduleDepartments = getEmployeeScheduleDepartments(emp)
     const nameParts = splitEmployeeName(emp.name)
+    setOnboardingProfile(null)
     setEditTarget(emp)
     setForm({
       first_name: nameParts.first_name,
@@ -263,7 +237,51 @@ export function EmployeeTable() {
     setResetPinMode(false)
     setDepartmentDropdownOpen(false)
     setDialogOpen(true)
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const employeesRes = await fetch('/api/employees?status=all', { cache: 'no-store' })
+      const employeeData = (await employeesRes.json().catch(() => ({}))) as { employees?: Employee[]; error?: string }
+      if (!employeesRes.ok) {
+        setSaveError(employeeData.error ?? 'Failed to load employees')
+        setEmployees([])
+        return
+      }
+      setEmployees(employeeData.employees ?? [])
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to load employees')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useEffect(() => {
+    if (!initialEmployeeId || openedEmployeeId.current === initialEmployeeId) return
+    const timer = window.setTimeout(() => {
+      const employee = employees.find(item => item.id === initialEmployeeId)
+      if (employee) {
+        openedEmployeeId.current = initialEmployeeId
+        openEdit(employee)
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [initialEmployeeId, employees, openEdit])
+
+  const openAdd = () => {
+    setSaveError(null)
+    setEditTarget(null)
+    setResetPinMode(true)
+    setDepartmentDropdownOpen(false)
+    setForm(EMPTY_FORM)
+    setDialogOpen(true)
   }
+
 
   const handleSave = async () => {
     if (viewingArchived) return
@@ -820,7 +838,8 @@ export function EmployeeTable() {
               )}
             </div>
             </fieldset>
-            {editTarget && onboardingProfile?.application_case_id && <div className="rounded-lg border bg-slate-50 p-3 text-sm"><p className="font-medium">Onboarding records</p><a className="text-blue-700 underline" target="_blank" rel="noreferrer" href={`/api/onboarding/file?application_case_id=${onboardingProfile.application_case_id}`}>Open initial application PDF</a><div className="mt-1 flex flex-wrap gap-3">{onboardingProfile.documents.map(doc => <a key={doc.id} className="text-xs text-blue-700 underline" target="_blank" rel="noreferrer" href={`/api/onboarding/file?document_id=${doc.id}`}>{doc.kind.toUpperCase()}: {doc.file_name}</a>)}</div></div>}
+            {dialogOpen && editTarget && <StaffLegalDocuments key={editTarget.id} employeeId={editTarget.id} />}
+            {editTarget && onboardingProfile && (onboardingProfile.application_case_id || onboardingProfile.documents.length > 0) && <div className="rounded-lg border bg-slate-50 p-3 text-sm"><p className="font-medium">Onboarding records</p>{onboardingProfile.application_case_id && <a className="text-blue-700 underline" target="_blank" rel="noreferrer" href={`/api/onboarding/file?application_case_id=${onboardingProfile.application_case_id}`}>Open initial application PDF</a>}<div className="mt-1 flex flex-wrap gap-3">{onboardingProfile.documents.map(doc => <a key={doc.id} className="text-xs text-blue-700 underline" target="_blank" rel="noreferrer" href={`/api/onboarding/file?document_id=${doc.id}`}>{doc.kind.toUpperCase()}: {doc.file_name}</a>)}</div></div>}
             {saveError && (
               <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
                 {saveError}

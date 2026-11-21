@@ -28,10 +28,15 @@ const publicTabs = [
   { label: 'EOD', href: '/eod', icon: FileText },
 ]
 
-const adminPaths = ['/admin', '/task-admin', '/staffing', '/schedule-planning', '/roles-departments', '/reporting', '/email-settings']
+const adminPaths = ['/admin', '/task-admin', '/staffing', '/onboarding', '/schedule-planning', '/roles-departments', '/reporting', '/email-settings']
 
 export function TabNav() {
   const pathname = usePathname()
+  if (pathname.startsWith('/onboarding/')) return null
+  return <DashboardNavigation pathname={pathname} />
+}
+
+function DashboardNavigation({ pathname }: { pathname: string }) {
   const router = useRouter()
   const [appUserName, setAppUserName] = useState<string | null>(null)
   const [loginReady, setLoginReady] = useState(false)

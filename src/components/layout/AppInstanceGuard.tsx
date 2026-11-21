@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 
 const LOCK_KEY = 'foh-dashboard-active-instance'
@@ -36,6 +37,12 @@ function isStale(lock: LockRecord | null) {
 }
 
 export function AppInstanceGuard({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+  if (pathname.startsWith('/onboarding/')) return children
+  return <DashboardInstanceGuard>{children}</DashboardInstanceGuard>
+}
+
+function DashboardInstanceGuard({ children }: { children: React.ReactNode }) {
   const [instanceId, setInstanceId] = useState('')
   const [state, setState] = useState<GuardState>('checking')
   const [activeSince, setActiveSince] = useState<Date | null>(null)

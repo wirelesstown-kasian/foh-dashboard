@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { inflateRawSync } from 'node:zlib'
-import { findInvite, managerId, ONBOARDING_BUCKET } from '@/lib/onboarding'
+import { chicagoDate, findInvite, managerId, materialAssigned, materialReadCookie, materialReadReceipt, ONBOARDING_BUCKET } from '@/lib/onboarding'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 export const dynamic = 'force-dynamic'
@@ -83,16 +83,23 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   const manager = await managerId()
-  const invite = !manager ? await findInvite(req.nextUrl.searchParams.get('token') ?? '') : null
+  const token = req.nextUrl.searchParams.get('token') ?? ''
+  const invite = token ? await findInvite(token) : null
   if (!manager && !invite) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const materialId = req.nextUrl.searchParams.get('material_id')
   const documentId = req.nextUrl.searchParams.get('document_id')
   const applicationCaseId = req.nextUrl.searchParams.get('application_case_id')
+  let handbookOpened = false
   let file: { storage_path: string; file_name: string; mime_type: string } | null = null
   if (materialId) {
-    const result = await supabaseAdmin.from('onboarding_materials').select('storage_path,file_name,mime_type,is_current').eq('id', materialId).maybeSingle()
+    const result = await supabaseAdmin.from('onboarding_materials').select('storage_path,file_name,mime_type,is_current,kind,departments,effective_date').eq('id', materialId).maybeSingle()
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 })
-    if (result.data && (manager || (result.data.is_current && (invite?.status === 'active' || (invite?.selected_documents ?? []).includes(materialId))))) file = result.data
+    const material = result.data
+    const assigned = invite && invite.status !== 'invited' && material?.is_current && material.effective_date <= chicagoDate()
+      && materialAssigned(material.departments, invite.schedule_departments, invite.primary_department)
+      && (invite.status === 'active' || (invite.selected_documents ?? []).includes(materialId))
+    if (material && (manager || assigned)) file = material
+    handbookOpened = Boolean(assigned && material?.kind === 'handbook' && req.nextUrl.searchParams.get('preview') === '1')
   } else if (documentId) {
     const result = await supabaseAdmin.from('onboarding_documents').select('case_id,storage_path,file_name,mime_type').eq('id', documentId).maybeSingle()
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 })
@@ -106,15 +113,24 @@ export async function GET(req: NextRequest) {
   const download = await supabaseAdmin.storage.from(ONBOARDING_BUCKET).download(file.storage_path)
   if (download.error || !download.data) return NextResponse.json({ error: 'Could not read file' }, { status: 500 })
   const bytes = Buffer.from(await download.data.arrayBuffer())
+  function withReadReceipt(response: NextResponse) {
+    if (handbookOpened && invite && materialId) {
+      response.cookies.set(materialReadCookie(materialId), materialReadReceipt(token, invite.id, materialId), {
+        httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax',
+        path: '/api/onboarding/portal', maxAge: 8 * 60 * 60,
+      })
+    }
+    return response
+  }
   if (req.nextUrl.searchParams.get('preview') === '1' && file.mime_type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     const paragraphs = docxText(bytes).map(line => `<p>${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</p>`).join('')
-    return new NextResponse(`<!doctype html><html><head><meta charset="utf-8"><style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 20px;color:#172033}p{white-space:pre-wrap;margin:0 0 1em}</style></head><body>${paragraphs}</body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer' } })
+    return withReadReceipt(new NextResponse(`<!doctype html><html><head><meta charset="utf-8"><style>body{font:16px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 20px;color:#172033}p{white-space:pre-wrap;margin:0 0 1em}</style></head><body>${paragraphs}</body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer' } }))
   }
-  return new NextResponse(new Uint8Array(bytes), { headers: {
+  return withReadReceipt(new NextResponse(new Uint8Array(bytes), { headers: {
     'Content-Type': file.mime_type,
     'Content-Disposition': `inline; filename="${file.file_name.replace(/["\r\n]/g, '_')}"`,
     'Cache-Control': 'private, no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-  } })
+  } }))
 }

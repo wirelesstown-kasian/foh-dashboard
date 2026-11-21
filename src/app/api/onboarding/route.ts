@@ -1,3 +1,4 @@
+import { onboardingDocumentLinks, onboardingEmailLogo } from '@/lib/onboardingEmail'
 import { NextRequest, NextResponse } from 'next/server'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -39,9 +40,10 @@ async function sendInvite(req: NextRequest, caseId: string, email: string, stage
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin
   const link = `${appUrl.replace(/\/$/, '')}/onboarding/${token}${materialId ? `?material=${encodeURIComponent(materialId)}` : ''}`
   const due = new Date(Date.now() + 7 * 86400000).toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: 'long', day: 'numeric' })
+  const docs = stage === 'documents' ? await onboardingDocumentLinks(caseId, link) : ''
   await sendEmail({ resendKey: process.env.RESEND_API_KEY, to: email,
     subject: stage === 'application' ? 'Complete your New Village onboarding' : stage === 'reissue' ? 'Updated New Village handbook or training' : 'Your New Village onboarding documents are ready',
-    html: `<div style="font-family:Arial,sans-serif;max-width:580px;margin:auto"><img src="${escapeHtml(appUrl.replace(/\/$/, ''))}/new-village-foh-logo.svg" alt="New Village" style="max-width:180px;height:auto"><h2>New Village onboarding</h2><p>${stage === 'application' ? 'Please complete your application. Your assigned documents will appear after you submit it.' : stage === 'reissue' ? 'A handbook or training document has been updated. Please open it, read it, and complete the acknowledgment.' : 'Your manager has approved your application. Please review and sign the assigned handbook and training, then complete your tax and work authorization forms.'}</p><p><a href="${escapeHtml(link)}">${stage === 'reissue' ? 'Open updated document' : 'Open your secure onboarding page'}</a></p><p>Please complete this by ${escapeHtml(due)} (within 7 days). Your private link expires in 30 days. Do not forward it.</p></div>`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:580px;margin:auto">${onboardingEmailLogo(appUrl)}<h2>New Village onboarding</h2><p>${stage === 'application' ? 'Please complete your application. Your assigned documents will appear after you submit it.' : stage === 'reissue' ? 'A handbook or training document has been updated. Please open it, read it, and complete the acknowledgment.' : 'Please review and sign the assigned handbook and training, then complete your tax and work authorization forms.'}</p><p><a href="${escapeHtml(link)}">${stage === 'reissue' ? 'Open updated document' : 'Open your secure onboarding page'}</a></p>${docs}<p>Please complete this by ${escapeHtml(due)} (within 7 days). Your private link expires in 30 days. Do not forward it.</p></div>`,
     fromName: settings.from_name, fromEmail: settings.from_email, replyTo: settings.reply_to })
   const recorded = await supabaseAdmin.from('onboarding_cases').update({ last_invite_sent_at: new Date().toISOString(), last_invite_email: email }).eq('id', caseId)
   if (recorded.error) throw new Error(recorded.error.message)
@@ -106,8 +108,6 @@ export async function PATCH(req: NextRequest) {
       }).eq('id', id).eq('status', 'submitted').select('id,email').maybeSingle()
       if (result.error) throw new Error(result.error.message)
       if (!result.data) return errorResponse(new Error('Application is not ready for approval'), 409)
-      try { await sendInvite(req, id, result.data.email, 'documents') }
-      catch (error) { return NextResponse.json({ success: true, email_error: error instanceof Error ? error.message : 'Approval email failed' }) }
       return NextResponse.json({ success: true })
     }
     if (body.action === 'activate') {

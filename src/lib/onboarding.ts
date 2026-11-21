@@ -1,14 +1,23 @@
-import { createHash, randomBytes } from 'crypto'
+import { createHash, createHmac, randomBytes } from 'crypto'
 import { cookies } from 'next/headers'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { ADMIN_SESSION_COOKIE, getAdminSessionEmployeeId, hasManagerAccess } from '@/lib/adminSession'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { verifyPin } from '@/lib/pin'
+import { getSessionSecret } from '@/lib/appAuth'
 import { getAppSettings } from '@/lib/appSettings'
 import { escapeHtml, sendEmail } from '@/lib/emailUtils'
 
 export const ONBOARDING_BUCKET = 'onboarding-private'
 export const RESTAURANT_TIME_ZONE = 'America/Chicago'
+
+export function materialReadCookie(materialId: string) {
+  return `foh_read_${materialId}`
+}
+
+export function materialReadReceipt(inviteToken: string, caseId: string, materialId: string) {
+  return createHmac('sha256', getSessionSecret()).update(`onboarding-read:${inviteToken}:${caseId}:${materialId}`).digest('hex')
+}
 
 export function tokenHash(token: string) {
   return createHash('sha256').update(token).digest('hex')
