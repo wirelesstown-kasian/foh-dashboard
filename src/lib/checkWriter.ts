@@ -51,11 +51,11 @@ export type CheckAudit = {
   after_record: Record<string, unknown>
 }
 export type CheckData = { entries: CheckEntry[]; categories: CheckCategory[]; vendors: CheckVendor[]; employees: CheckEmployee[]; runs: CheckRun[]; company?: { name: string; address?: string; phone?: string; email?: string } }
-export type CheckAction = 'save' | 'prepare' | 'print' | 'reprint' | 'resolve_print' | 'remove' | 'void'
+export type CheckAction = 'save' | 'save_and_print' | 'prepare' | 'print' | 'reprint' | 'resolve_print' | 'remove' | 'void'
   | 'categorize' | 'save_vendor' | 'archive_vendor' | 'save_category' | 'archive_category' | 'restore_category'
 
 export const checkActions = new Set<CheckAction>([
-  'save', 'prepare', 'print', 'reprint', 'resolve_print', 'remove', 'void', 'categorize', 'save_vendor', 'archive_vendor', 'save_category', 'archive_category', 'restore_category',
+  'save', 'save_and_print', 'prepare', 'print', 'reprint', 'resolve_print', 'remove', 'void', 'categorize', 'save_vendor', 'archive_vendor', 'save_category', 'archive_category', 'restore_category',
 ])
 
 export const checkMoney = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })

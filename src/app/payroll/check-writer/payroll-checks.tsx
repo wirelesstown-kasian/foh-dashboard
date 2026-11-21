@@ -101,7 +101,7 @@ export function PrepareChecks({ run, rows, submit }: { run: CheckRun; rows: Payr
   const [chosen, setChosen] = useState(() => new Set(rows.map(row => row.id)))
   const [category, setCategory] = useState<string>(STAFF_CHECK_CATEGORY)
   const [blankPayees, setBlankPayees] = useState<Record<string, boolean>>({})
-  return <PinForm label="Create selected drafts" submit={pin => {
+  return <PinForm label="Save selected checks for future print" submit={pin => {
     if (chosen.size === 0) throw new Error('Select at least one employee.')
     return submit('prepare', { run_id: run.id, category, items: [...chosen].map(payroll_item_id => ({
       payroll_item_id, omit_payee_on_print: blankPayees[payroll_item_id] ?? false,

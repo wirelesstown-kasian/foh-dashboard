@@ -1,12 +1,12 @@
 'use client'
 
-import { cloneElement, createContext, useContext, useId, useState, type ReactElement, type ReactNode } from 'react'
+import { cloneElement, createContext, useContext, useId, useState, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PinModal } from '@/components/layout/PinModal'
 import { Combobox } from '@base-ui/react/combobox'
 import { Button } from '@/components/ui/button'
 import { BUSINESS_TIMEZONE } from '@/lib/clockUtils'
-import { STAFF_CHECK_CATEGORY, checkMoney, type CheckCategory, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
+import { STAFF_CHECK_CATEGORY, checkMoney, nextCheckNumber, type CheckCategory, type CheckAction, type CheckData, type CheckEntry, type PayrollCheckRow } from '@/lib/checkWriter'
 
 export type SubmitCheck = (action: CheckAction, data: Record<string, unknown>, pin?: string) => Promise<CheckEntry[]>
 
@@ -39,7 +39,7 @@ export function CategoryField({ value, change, required = false }: {
   const { categories, submit } = useContext(CategoryContext)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
-  const [authorizeCategory, setAuthorizeCategory] = useState(false)
+  const [categoryError, setCategoryError] = useState('')
   const [busy, setBusy] = useState(false)
   const active = categories.filter(item => !item.archived_at)
   return <div className="grid gap-2">
@@ -54,41 +54,84 @@ export function CategoryField({ value, change, required = false }: {
     </select></Field>
     {creating && <section className="grid gap-2 rounded border p-3" aria-label="New category">
       <Field label="New category name"><input className={checkInput} maxLength={120} value={name} onChange={event => setName(event.target.value)} /></Field>
-      <Button type="button" disabled={busy || !name.trim()} onClick={() => setAuthorizeCategory(true)}>Submit new category</Button>
-      <PinModal open={authorizeCategory} title="Authorize new category" onClose={() => setAuthorizeCategory(false)} onConfirm={async pin => {
+      <Button type="button" disabled={busy || !name.trim()} onClick={async () => {
+        if (!submit || !name.trim()) return
         setBusy(true)
+        setCategoryError('')
         try {
-          if (!name.trim() || !submit) throw new Error('Enter a category name.')
-          const saved = await submit('save_category', { name: name.trim() }, pin)
+          const saved = await submit('save_category', { name: name.trim(), quick_add: true })
           change((saved[0] as unknown as CheckCategory).name)
-          setCreating(false); setName(''); setAuthorizeCategory(false)
-        } finally { setBusy(false) }
-      }} />
-      <Button type="button" variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
+          setCreating(false)
+          setName('')
+        } catch (error) {
+          setCategoryError(error instanceof Error ? error.message : 'Could not add the category.')
+        } finally {
+          setBusy(false)
+        }
+      }}>Add category</Button>
+      {categoryError && <p className="text-sm text-red-700" role="alert">{categoryError}</p>}
+      <Button type="button" variant="ghost" onClick={() => { setCreating(false); setCategoryError('') }}>Cancel</Button>
     </section>}
   </div>
 }
 
-export function PinForm({ label, submit, children }: {
-  label: string; submit: (pin: string) => Promise<unknown>; children?: ReactNode
+export function PinForm({ label, submit, children, print, requirePin = true }: {
+  label: string
+  submit: (pin?: string) => Promise<unknown>
+  children?: ReactNode
+  print?: (pin: string) => Promise<unknown>
+  requirePin?: boolean
 }) {
-  const [authorizing, setAuthorizing] = useState(false)
+  const [authorization, setAuthorization] = useState<'save' | 'print' | null>(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (busy) return
+    const button = (event.nativeEvent as SubmitEvent).submitter
+    if (requirePin) {
+      setAuthorization(print && button?.getAttribute('value') === 'print' ? 'print' : 'save')
+      return
+    }
+
+    setBusy(true)
+    setError('')
+    try {
+      await submit()
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not save.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return <>
-    <form onSubmit={event => { event.preventDefault(); event.stopPropagation(); if (!busy) setAuthorizing(true) }}>
+    <form onSubmit={handleSubmit}>
       <fieldset disabled={busy} className="grid gap-4">
         {children}
-        <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={busy}>Submit</Button></div>
+        {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
+        <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+          <Button type="submit" variant={print ? 'outline' : 'default'} disabled={busy}>{label}</Button>
+          {print && <Button type="submit" value="print" disabled={busy}>Print now</Button>}
+        </div>
       </fieldset>
     </form>
-    <PinModal open={authorizing} title="Authorize check action" description={label}
-      onClose={() => { if (!busy) setAuthorizing(false) }}
+    {requirePin && <PinModal open={authorization !== null} title="Manager PIN"
+      description={authorization === 'print' ? 'Authorize printing this check' : label}
+      onClose={() => { if (!busy) setAuthorization(null) }}
       onConfirm={async pin => {
         if (busy) return
         setBusy(true)
-        try { await submit(pin); setAuthorizing(false) }
-        finally { setBusy(false) }
-      }} />
+        try {
+          if (authorization === 'print' && print) await print(pin)
+          else await submit(pin)
+          setAuthorization(null)
+        } finally {
+          setBusy(false)
+        }
+      }} />}
   </>
 }
 
@@ -128,17 +171,26 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   ]
   const selectedPayee = payees.find(payee => payee.key === payeeId) ?? null
 
-  return <><PinForm label={liveVoucher ? 'Save check draft' : 'Record payment'} submit={async pin => {
+  const suggestedNumber = nextCheckNumber(data.entries, bank)
+
+  async function saveCheck(action: 'save' | 'save_and_print', pin?: string) {
     if (!linked && !selectedPayee && !(source === 'app' && omitPayee)) throw new Error('Choose a payee from the search results.')
     if (liveVoucher && omitPayee && !memo.trim()) throw new Error('A memo is required when the payee is blank.')
-    return submit('save', {
+    return submit(action, {
       id: entry?.id, revision: entry?.revision, source, method, payment_date: date, amount,
       payroll_item_id: payroll?.id,
       employee_id: !linked && selectedPayee?.type === 'staff' ? selectedPayee.id : undefined,
       vendor_id: !linked && selectedPayee?.type === 'vendor' ? selectedPayee.id : undefined,
-      category, memo, omit_payee_on_print: liveVoucher ? omitPayee : undefined, bank_account: bank, check_number: number, reference,
+      category, memo, omit_payee_on_print: liveVoucher ? omitPayee : undefined, bank_account: bank,
+      check_number: action === 'save_and_print' ? number || suggestedNumber : number, reference,
     }, pin)
-  }}>
+  }
+
+  return <><PinForm
+    label={liveVoucher ? 'Save for future print' : 'Record payment'}
+    submit={pin => saveCheck('save', pin)}
+    print={liveVoucher ? pin => saveCheck('save_and_print', pin) : undefined}
+  >
       {linked ? <p className="rounded-md bg-slate-50 px-3 py-2 text-sm">
         {payroll?.employee_name ?? entry?.payee_name}
         {payroll && <> · {checkMoney.format(payroll.remaining)} available to record</>}
@@ -181,8 +233,9 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
         </Field> : <Field label="Payment method"><select className={checkInput} value={method} onChange={event => setMethod(event.target.value)}>
           <option value="cash">Cash</option><option value="ach">ACH</option>
         </select></Field>}
-        {source === 'handwritten' && <Field label="Check number (optional)">
-          <input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}" maxLength={12} value={number} onChange={event => setNumber(event.target.value)} />
+        {(liveVoucher || source === 'handwritten') && <Field label={liveVoucher ? 'Check stock number for printing' : 'Check number (optional)'}>
+          <input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}" maxLength={12} value={number}
+            placeholder={liveVoucher ? suggestedNumber : undefined} onChange={event => setNumber(event.target.value)} />
         </Field>}
         {source === 'payroll_balance' && <Field label="Payment reference (optional)">
           <input className={checkInput} maxLength={120} value={reference} onChange={event => setReference(event.target.value)} />
@@ -194,9 +247,9 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
     <Dialog open={quickAdd} onOpenChange={setQuickAdd}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader><DialogTitle>Quick Add Payee</DialogTitle><DialogDescription>Only a name is required. A manager can complete the vendor details later in Vendors &amp; Staff.</DialogDescription></DialogHeader>
-        <PinForm label="Create vendor and select payee" submit={async pin => {
+        <PinForm label="Create vendor and select payee" requirePin={false} submit={async () => {
           if (!quickName.trim()) throw new Error('Enter a payee name.')
-          const saved = await submit('save_vendor', { name: quickName.trim(), quick_add: true }, pin)
+          const saved = await submit('save_vendor', { name: quickName.trim(), quick_add: true })
           const vendor = saved[0] as unknown as import('@/lib/checkWriter').CheckVendor
           setPayeeId(`vendor:${vendor.id}`)
           setCategory(vendor.category ?? '')

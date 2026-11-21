@@ -28,6 +28,7 @@ test('Letter PDF keeps reference field coordinates, payroll amounts, blank names
  assert.match(first, /11 Tf/); assert.match(first, /10.5 Tf/)
  assert.match(first, new RegExp(hex('admin@newvillagepub.com')))
  assert.doesNotMatch(first, new RegExp(hex('Check number:')))
+ for (const page of [first, blank]) assert.doesNotMatch(page, new RegExp(`<${hex(entry.check_number)}>`))
  assert.match(first, /82.44 589 Tm/)
  for(const value of ['Earnings','Deductions','$900.00','Payroll net pay: $880.00','Check payment: $880.00']) assert.match(first,new RegExp(hex(value)))
  const coordinate = first.match(/1 0 0 1 ([0-9.]+) ([0-9.]+) Tm/)
@@ -52,4 +53,9 @@ test('check numbering remembers used stock by bank and assigns a padded bulk seq
  assert.deepEqual(sequentialCheckNumbers([{id:'a'},{id:'b'}],''),{a:'',b:''})
  assert.deepEqual(sequentialCheckNumbers([{id:'a'},{id:'b'}],'999999999999'),{a:'999999999999',b:''})
  assert.equal(nextCheckNumber([{bank_account:'Checking',check_number:'999999999999'}],'Checking'),'')
+})
+
+test('alignment previews are marked on the check and both stubs', async () => {
+ const preview = await PDFDocument.load(await checkPdf([entry], { x: 0, y: 0 }, data, true))
+ assert.equal((streams(preview, preview.getPage(0)).match(new RegExp(hex('PREVIEW ONLY'), 'g')) ?? []).length, 3)
 })

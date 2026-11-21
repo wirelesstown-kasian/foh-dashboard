@@ -5,7 +5,7 @@ import type { PrintAlignment } from './checkVoucher'
 // Coordinates in PDF points, measured from the supplied Letter reference, top-left origin.
 export const CHECK_LAYOUT = { width: 612, height: 792, date: [503.64, 67.32], payee: [82.44, 101.40], amount: [540, 104.52], words: [35.64, 126.12], memo: [82.44, 203], stubs: [287.16, 544.92] } as const
 
-export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment, data: CheckData) {
+export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment, data: CheckData, preview = false) {
   const pdf = await PDFDocument.create()
   const font = await pdf.embedFont(StandardFonts.TimesRoman)
   const bold = await pdf.embedFont(StandardFonts.TimesRomanBold)
@@ -16,6 +16,11 @@ export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment,
   for (const entry of entries) {
     stubMode = false
     const page = pdf.addPage([612, 792])
+    if (preview) {
+      for (const top of [132, 390, 648]) {
+        page.drawText('PREVIEW ONLY', { x: 175, y: 792 - top, size: 34, font: stubBold, color: rgb(0.7, 0.7, 0.7), opacity: 0.45 })
+      }
+    }
     const text = (value: unknown, x: number, top: number, width: number, size = 8, strong = false, right = false) => {
       // Standard PDF fonts support WinAnsi. Replace unsupported characters consistently.
       let content = String(value ?? '').replace(/[\r\n\t]/g, ' ').replace(/[^\x20-\x7e\xa0-\xff]/g, '?')
@@ -36,12 +41,10 @@ export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment,
     text(name, 82.44, 192, 390, 9)
     if (vendor?.address) text(vendor.address, 82.44, 180, 390, 8)
     text(entry.payroll_item_id ? `Pay Period: ${entry.payroll_period_start ?? ''} - ${entry.payroll_period_end ?? ''}` : checkMemo(entry), ...CHECK_LAYOUT.memo, 490, 8.7434)
-    if (entry.check_number) text(entry.check_number, 504, 26, 65, 11, true, true)
     stubMode = true
     for (const top of CHECK_LAYOUT.stubs) {
       text(name, 39, top, 240)
       text(`Check date: ${formattedDate}`, 425, top, 145)
-      text(entry.check_number ?? '', 504, top - 20, 65, 11, true, true)
       if (entry.payroll_item_id) {
         text(`Period beginning: ${entry.payroll_period_start ?? ''}`, 425, top + 10, 145)
         text(`Period ending: ${entry.payroll_period_end ?? ''}`, 425, top + 20, 145)

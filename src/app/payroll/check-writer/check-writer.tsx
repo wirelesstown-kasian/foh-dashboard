@@ -237,9 +237,9 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         .sort((left, right) => right.payment_date.localeCompare(left.payment_date)) })
       setChosen(current => new Set([...current].filter(id => !savedIds.has(id))))
     }
-    if (action === 'print' || action === 'reprint') {
+    if (action === 'print' || action === 'reprint' || action === 'save_and_print') {
       const printOrder = new Map(saved.map(entry => [entry.id, entry]))
-      const ordered = (values.items as { id: string }[]).flatMap(item => {
+      const ordered = action === 'save_and_print' ? saved : (values.items as { id: string }[]).flatMap(item => {
         const entry = printOrder.get(item.id)
         return entry ? [entry] : []
       })
@@ -257,7 +257,7 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
         if (saved.length) setTab('drafts')
       } else {
         const messages = {
-          save: 'Saved.', resolve_print: 'Print results recorded.', reprint: 'Reprint PDF ready. Print at actual size (100%).', remove: 'Draft removed.',
+          save: 'Saved.', resolve_print: 'Print results recorded.', reprint: 'Reprint PDF ready. Print at actual size (100%).', save_and_print: 'Check PDF ready.', remove: 'Draft removed.',
           void: 'Payment voided.', categorize: 'Accounting details saved.',
           save_category: 'Category saved.', archive_category: 'Category archived.', restore_category: 'Category restored.',
           save_vendor: 'Vendor saved.', archive_vendor: 'Vendor archived.',

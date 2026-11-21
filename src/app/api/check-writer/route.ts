@@ -86,8 +86,9 @@ export async function POST(req: NextRequest) {
     return failure('Choose a valid check action.', 400)
   }
   let actorId = viewer.employeeId
+  const addingDraftOption = data.quick_add === true && !data.id && (action === 'save_vendor' || action === 'save_category')
   try {
-    {
+    if (!addingDraftOption) {
       if (!isValidPin(pin)) return failure('Enter a four-digit manager PIN.', 400)
       const attempt = await supabaseAdmin.rpc('check_writer_allow_pin', { p_employee_id: viewer.employeeId })
       if (attempt.error) throw attempt.error
@@ -108,9 +109,11 @@ export async function POST(req: NextRequest) {
       if (!manager) return failure('Manager PIN was incorrect.', 401)
       actorId = manager.id
     }
-    const { data: saved, error } = await supabaseAdmin.rpc('check_writer_change', {
-      p_action: action, p_actor: actorId, p_data: data,
-    })
+    const { data: saved, error } = action === 'save_and_print'
+      ? await supabaseAdmin.rpc('check_writer_save_and_print', { p_actor: actorId, p_data: data })
+      : await supabaseAdmin.rpc('check_writer_change', {
+        p_action: action, p_actor: actorId, p_data: addingDraftOption ? { name: data.name } : data,
+      })
     if (!error) return NextResponse.json({ saved }, { headers: responseHeaders })
     if (error.code === 'P0001') return failure(error.message, 409)
     if (error.code === '23505') {

@@ -32,13 +32,13 @@ export function PrintForm({ entries, submit, data, reprint = false }: {
         let alignment = { x: 0, y: 0 }
         try { alignment = JSON.parse(localStorage.getItem('foh-check-print-alignment') ?? '{}') } catch {}
         const { checkPdf } = await import('@/lib/checkPdf')
-        const bytes = await checkPdf(entries.map(entry => ({ ...entry, check_number: numbers[entry.id] || null })), alignment, data)
+        const bytes = await checkPdf(entries, alignment, data, true)
         setPreview(URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' })))
       } catch { setPreviewError('Could not generate preview. Try again.') }
     }}>Preview PDF alignment</Button>
     {previewError && <p role="alert">{previewError}</p>}
     {preview && <><iframe title="Check PDF print preview" src={preview} className="h-96 w-full border" /><a href={preview} target="_blank" rel="noopener">Open preview full size</a></>}
-    <p className="text-xs text-muted-foreground">The next number is suggested from the register. Changing the first number fills the remaining checks in order. Verify against your check stock.</p>
+    <p className="text-xs text-muted-foreground">The next number is suggested from the register. Changing the first number fills the remaining checks in order. Verify against your check stock. Numbers are saved for the register and reports.</p>
     <div className="grid gap-2">
       {entries.map((entry, index) => <div key={entry.id} className="grid grid-cols-[1fr_9rem] items-end gap-3 rounded-md border p-2.5">
         <div className="text-sm"><div className="font-medium">{entry.payee_name}</div>
@@ -49,7 +49,6 @@ export function PrintForm({ entries, submit, data, reprint = false }: {
           required disabled={reprint} maxLength={12} value={numbers[entry.id] ?? ''}
           onChange={event => {
             const value = event.target.value
-            setPreview('')
             // Keep the edited field intact while typing, including empty/zero prefixes.
             setNumbers(current => index === 0
               ? { ...sequentialCheckNumbers(entries, value), [entry.id]: value }

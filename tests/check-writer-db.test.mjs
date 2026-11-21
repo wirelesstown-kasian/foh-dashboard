@@ -9,7 +9,7 @@ create table public.employees(id uuid primary key, name text, role text, is_acti
 create table public.payroll_runs(id uuid primary key, start_date date, end_date date, pay_date date);
 create table public.payroll_run_items(id uuid primary key, run_id uuid references payroll_runs, employee_id uuid, employee_name text, payment_method text, commission_payment_method text, payment_allocations jsonb, hours numeric, base_wages numeric, tips numeric, guarantee_top_up numeric, commission numeric, deductions numeric, gross_pay numeric, net_pay numeric);
 `)
-for (const file of readdirSync(migrations).filter(f => f.startsWith('20261118') || f.startsWith('20261119043000') || f.startsWith('20261119044226') || f.startsWith('20261120000000') || f.startsWith('20261121000000'))) {
+for (const file of readdirSync(migrations).filter(f => f.startsWith('20261118') || f.startsWith('20261119043000') || f.startsWith('20261119044226') || f.startsWith('20261120000000') || f.startsWith('20261121000000') || f.startsWith('20261121120000'))) {
  await db.exec(readFileSync(migrations+file,'utf8'))
 }
 const manager='00000000-0000-0000-0000-000000000001', run='00000000-0000-0000-0000-000000000002', item='00000000-0000-0000-0000-000000000003'
@@ -56,4 +56,13 @@ assert.equal(vendorDraft.payee_name,'Quick add vendor'); assert.equal(vendorDraf
 await db.exec(`update check_writer_entries set omit_payee_on_print=true, memo=null where id='${vendorDraft.id}'`)
 await assert.rejects(action('print',{items:[{id:vendorDraft.id,revision:vendorDraft.revision,check_number:'126',category:'Payroll expenses'}]}),/enter a memo before printing/)
 console.log('PASS: blank payee memo rules, printing, retained identities, name-only vendors, categories and payroll snapshots')
+const direct = async data => (await db.query('select public.check_writer_save_and_print($1,$2) result', [manager, JSON.stringify(data)])).rows[0].result
+const directInputs = { source: 'app', employee_id: manager, amount: 30, payment_date: '2026-11-21', category: 'Payroll expenses' }
+const countChecks = async () => (await db.query('select count(*) as n from check_writer_entries')).rows[0].n
+const beforeDirect = await countChecks()
+await assert.rejects(direct({ ...directInputs, check_number: '123' }), /duplicate key/)
+assert.equal(await countChecks(), beforeDirect, 'a failed print rolls back the draft')
+const [directIssued] = await direct({ ...directInputs, check_number: '0042' })
+assert.equal(directIssued.status, 'issued')
+assert.equal(directIssued.check_number, '0042')
 await db.close()
