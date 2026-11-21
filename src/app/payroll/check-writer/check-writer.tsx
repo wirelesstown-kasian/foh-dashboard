@@ -150,7 +150,7 @@ function EntryTable({ entries, chosen, toggle, edit, resolve, reprint, remove, a
           aria-label={`Select check for ${entry.payee_name}`} checked={chosen?.has(entry.id)} onChange={() => toggle(entry.id)} />}</td>}
         <td className="whitespace-nowrap p-3">{entry.payment_date}</td>
         <th scope="row" className="p-3 font-medium">{entry.payee_name}
-          <div className="text-xs font-normal text-muted-foreground">{entry.vendor_id ? 'Vendor' : 'Staff'}{entry.payroll_item_id && ' · Payroll'}</div>
+          <div className="text-xs font-normal text-muted-foreground">{entry.vendor_id ? 'Vendor' : entry.employee_id || entry.payroll_item_id ? 'Staff' : 'Unspecified payee'}{entry.payroll_item_id && ' · Payroll'}</div>
           {checkMemo(entry) && <div className="max-w-56 break-words text-xs font-normal text-muted-foreground">{checkMemo(entry)}</div>}
           {entry.reference && <div className="max-w-56 break-words text-xs font-normal text-muted-foreground">Ref. {entry.reference}</div>}
         </th>
@@ -230,6 +230,7 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
       const vendor = saved[0] as unknown as CheckVendor
       setData(current => current && { ...current, vendors: [...current.vendors.filter(item => item.id !== vendor.id), vendor]
         .sort((left, right) => left.name.localeCompare(right.name)) })
+      if (action === 'save_vendor' && values.quick_add) return saved
     } else {
       const savedIds = new Set(saved.map(row => row.id))
       setData(current => current && { ...current, entries: [...saved, ...current.entries.filter(entry => !savedIds.has(entry.id))]
@@ -280,7 +281,7 @@ export function CheckWriter({ initialRunId }: { initialRunId: string }) {
     if (registerStatus !== 'all' && entry.status !== registerStatus) return false
     return (!from || entry.payment_date >= from) && (!to || entry.payment_date <= to)
       && (!category || entry.category === category)
-      && (!query.trim() || [entry.payee_name, entry.check_number].some(value => value?.toLowerCase().includes(query.trim().toLowerCase())))
+      && (!query.trim() || [entry.payee_name, entry.check_number, entry.memo].some(value => value?.toLowerCase().includes(query.trim().toLowerCase())))
   }) ?? []
   const savedCategories = [...(data?.entries ?? []), ...(data?.vendors ?? [])]
     .flatMap(item => item.category ? [item.category] : [])

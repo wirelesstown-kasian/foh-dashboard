@@ -93,7 +93,7 @@ export function checkCsv(rows: CheckEntry[]) {
     'Check memo', 'Accounting note', 'Source', 'Payroll item', 'Written by', 'Recorded by',
   ]
   const values = rows.filter(row => row.status === 'issued' && row.method === 'check').map(row => [
-    row.payment_date, row.bank_account, row.check_number, row.payee_name, row.vendor_id ? 'Vendor' : 'Staff',
+    row.payment_date, row.bank_account, row.check_number, row.payee_name, row.vendor_id ? 'Vendor' : row.employee_id || row.payroll_item_id ? 'Staff' : 'Unspecified payee',
     row.amount.toFixed(2), row.category, checkMemo(row), row.accounting_note,
     row.source === 'handwritten' ? 'Handwritten' : row.source === 'payroll' ? 'Payroll' : 'Check Writer',
     row.payroll_item_id, row.created_by_name, row.issued_by_name,

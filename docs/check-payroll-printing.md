@@ -44,3 +44,11 @@ Printing suggests the next number from the register for the first check's bank, 
 All check actions now use Submit followed by the existing authorization keypad. PINs are verified on the server for draft saves as well as issuance. The authorized manager becomes the recorded writer for draft edits and issuance; reprints preserve the original writer and add their own audit event. PINs are never stored in browser storage.
 
 Apply 20261120000000_check_writer_authorization.sql before deploying this update.
+
+## November 21 blank-payee and Quick Add update
+
+Write a Check can omit payee selection when “Leave payee blank and print” is checked. A non-whitespace memo is required both by the form and database. Checks without an assigned payee are internally labeled “Blank payee”; that label is suppressed by the PDF's blank-name setting. Existing selected employee/vendor names remain stored when hidden on print. The register can search memo text and identifies unassigned payees separately from staff. Existing blank-name drafts must have a memo before issuance; historical reprints retain original details.
+
+Quick Add Payee opens a name-only vendor form with manager PIN authorization. It creates an ordinary vendor, selects it in the original mounted check form, and preserves other entered fields. Managers can complete optional vendor category, address and phone later in Vendors & Staff. Duplicate active names use the existing validation.
+
+Additional checks: `node --test tests/check-form-flow.test.mjs tests/check-writer-db.test.mjs tests/check-writer.test.mjs tests/check-pdf.test.mjs`. Apply `20261121000000_blank_payee_memo.sql` before deploying.

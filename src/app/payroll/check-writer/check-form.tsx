@@ -1,6 +1,7 @@
 'use client'
 
 import { cloneElement, createContext, useContext, useId, useState, type ReactElement, type ReactNode } from 'react'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PinModal } from '@/components/layout/PinModal'
 import { Combobox } from '@base-ui/react/combobox'
 import { Button } from '@/components/ui/button'
@@ -74,7 +75,7 @@ export function PinForm({ label, submit, children }: {
   const [authorizing, setAuthorizing] = useState(false)
   const [busy, setBusy] = useState(false)
   return <>
-    <form onSubmit={event => { event.preventDefault(); if (!busy) setAuthorizing(true) }}>
+    <form onSubmit={event => { event.preventDefault(); event.stopPropagation(); if (!busy) setAuthorizing(true) }}>
       <fieldset disabled={busy} className="grid gap-4">
         {children}
         <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={busy}>Submit</Button></div>
@@ -109,6 +110,8 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   }).format(new Date()))
   const [omitPayee, setOmitPayee] = useState(entry?.omit_payee_on_print ?? false)
   const [memo, setMemo] = useState(entry?.memo ?? '')
+  const [quickAdd, setQuickAdd] = useState(false)
+  const [quickName, setQuickName] = useState('')
   const [bank, setBank] = useState(entry?.bank_account ?? 'Checking')
   const [number, setNumber] = useState(entry?.check_number ?? '')
   const [reference, setReference] = useState(entry?.reference ?? '')
@@ -125,8 +128,9 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
   ]
   const selectedPayee = payees.find(payee => payee.key === payeeId) ?? null
 
-  return <PinForm label={liveVoucher ? 'Save check draft' : 'Record payment'} submit={async pin => {
-    if (!linked && !selectedPayee) throw new Error('Choose a payee from the search results.')
+  return <><PinForm label={liveVoucher ? 'Save check draft' : 'Record payment'} submit={async pin => {
+    if (!linked && !selectedPayee && !(source === 'app' && omitPayee)) throw new Error('Choose a payee from the search results.')
+    if (liveVoucher && omitPayee && !memo.trim()) throw new Error('A memo is required when the payee is blank.')
     return submit('save', {
       id: entry?.id, revision: entry?.revision, source, method, payment_date: date, amount,
       payroll_item_id: payroll?.id,
@@ -140,7 +144,7 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
         {payroll && <> · {checkMoney.format(payroll.remaining)} available to record</>}
       </p> : <div className={checkLabel}>
         <label htmlFor={payeeInputId}>Payee</label>
-        <Combobox.Root<(typeof payees)[number]> items={payees} value={selectedPayee} autoHighlight required
+        <Combobox.Root<(typeof payees)[number]> items={payees} value={selectedPayee} autoHighlight required={!(source === 'app' && omitPayee)}
           itemToStringLabel={item => item.label} isItemEqualToValue={(item, selected) => item.key === selected.key}
           onValueChange={selected => {
             setPayeeId(selected?.key ?? '')
@@ -162,10 +166,11 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
             </Combobox.Positioner>
           </Combobox.Portal>
         </Combobox.Root>
+        <Button type="button" variant="outline" onClick={() => setQuickAdd(true)}>Quick Add Payee</Button>
       </div>}
       {liveVoucher && <label className="flex items-center gap-2 text-sm font-medium">
         <input type="checkbox" checked={omitPayee} onChange={event => setOmitPayee(event.target.checked)} />
-        Leave payee blank when printing
+        Leave payee blank and print (memo required)
       </label>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Date"><input className={checkInput} type="date" required value={date} onChange={event => setDate(event.target.value)} /></Field>
@@ -184,6 +189,22 @@ export function CheckForm({ data, entry, payroll, source, submit }: {
         </Field>}
       </div>
       <CategoryField value={category} change={setCategory} required={!liveVoucher} />
-      <Field label="Memo"><input className={checkInput} maxLength={160} value={memo} onChange={event => setMemo(event.target.value)} /></Field>
+      <Field label={liveVoucher && omitPayee ? "Memo (required for blank payee)" : "Memo"}><input className={checkInput} required={liveVoucher && omitPayee} maxLength={160} value={memo} onChange={event => setMemo(event.target.value)} /></Field>
   </PinForm>
+    <Dialog open={quickAdd} onOpenChange={setQuickAdd}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Quick Add Payee</DialogTitle><DialogDescription>Only a name is required. A manager can complete the vendor details later in Vendors &amp; Staff.</DialogDescription></DialogHeader>
+        <PinForm label="Create vendor and select payee" submit={async pin => {
+          if (!quickName.trim()) throw new Error('Enter a payee name.')
+          const saved = await submit('save_vendor', { name: quickName.trim(), quick_add: true }, pin)
+          const vendor = saved[0] as unknown as import('@/lib/checkWriter').CheckVendor
+          setPayeeId(`vendor:${vendor.id}`)
+          setCategory(vendor.category ?? '')
+          setQuickName(''); setQuickAdd(false)
+        }}>
+          <Field label="Payee name"><input className={checkInput} required maxLength={100} value={quickName} onChange={event => setQuickName(event.target.value)} /></Field>
+        </PinForm>
+      </DialogContent>
+    </Dialog>
+  </>
 }
