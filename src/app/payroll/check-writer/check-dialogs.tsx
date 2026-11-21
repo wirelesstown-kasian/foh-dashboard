@@ -48,8 +48,12 @@ export function PrintForm({ entries, submit, data, reprint = false }: {
         <Field label="Check number"><input className={checkInput} inputMode="numeric" pattern="[0-9]{1,12}"
           required disabled={reprint} maxLength={12} value={numbers[entry.id] ?? ''}
           onChange={event => {
+            const value = event.target.value
             setPreview('')
-            setNumbers(current => index === 0 ? sequentialCheckNumbers(entries, event.target.value) : ({ ...current, [entry.id]: event.target.value }))
+            // Keep the edited field intact while typing, including empty/zero prefixes.
+            setNumbers(current => index === 0
+              ? { ...sequentialCheckNumbers(entries, value), [entry.id]: value }
+              : { ...current, [entry.id]: value })
           }} /></Field>
       </div>)}
     </div>
