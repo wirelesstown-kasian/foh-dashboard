@@ -14,15 +14,8 @@ const adminGroups = [
       { label: 'Check Writer', href: '/payroll/check-writer', icon: ReceiptText },
       { label: 'Tip Distribution Editor', href: '/payroll/tip-distribution-editor', icon: HandCoins },
       { label: 'Staffing', href: '/staffing', icon: Users },
-      { label: 'Clock In Records', href: '/reporting/clock-records', icon: FileClock },
-    ],
-  },
-  {
-    label: 'Onboarding',
-    icon: UserRoundPlus,
-    description: 'Invite new hires, review their documents, and activate staff profiles.',
-    links: [
       { label: 'Onboarding', href: '/onboarding', icon: UserRoundPlus },
+      { label: 'Clock In Records', href: '/reporting/clock-records', icon: FileClock },
     ],
   },
   {
