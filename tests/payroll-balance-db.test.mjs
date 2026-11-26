@@ -34,5 +34,15 @@ await patch(120,{item_id:id,amount:10,method:'check',direction:'pay_out'})
 item=(await db.query('select * from payroll_run_items where id=$1',[id])).rows[0]
 assert.equal(Number(item.payout_amount)-Number(item.paid_amount),30)
 assert.equal((await db.query('select count(*) count from cash_balance_entries')).rows[0].count,1)
+// Exact reported case: corrected entitlement 1,601.40; actual paid 1,466.80.
+await db.exec(`update payroll_run_items set paid_amount=1466.80,payout_amount=1466.80 where id='${id}'`)
+await patch(1601.40)
+item=(await db.query('select * from payroll_run_items where id=$1',[id])).rows[0]
+assert.equal(Math.round((Number(item.payout_amount)-Number(item.paid_amount))*100)/100,134.60)
+await patch(1601.40,{item_id:id,amount:134.60,method:'check',direction:'pay_out'})
+item=(await db.query('select * from payroll_run_items where id=$1',[id])).rows[0]
+assert.equal(Number(item.paid_amount),1601.40)
+assert.equal(Number(item.payout_amount)-Number(item.paid_amount),0)
+await assert.rejects(patch(1601.40,{item_id:id,amount:134.60,method:'check',direction:'pay_out'}),/exceeds|wrong direction/)
 console.log('PASS: persistent signed balances, partial refunds, additional payments, carry-forward deductions, cash and atomic rejection')
 await db.close()

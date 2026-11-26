@@ -151,6 +151,20 @@ function calculateSavedPayrollItem(item: PayrollRunItem, patch: Partial<PayrollR
   }) }
 }
 
+// Refresh a stale hourly entitlement only when its original rate still matches,
+// its clocks are approved, and no tip/guarantee/split allocation needs review.
+function currentClockPayrollPatch(item: PayrollRunItem, records: ShiftClock[], employees: Employee[]): Partial<PayrollRunItem> | null {
+  const employee = getPayrollItemEmployee(item, employees)
+  const rate = Number(employee?.hourly_wage ?? 0)
+  if (!employee || !records.length || rate <= 0 || Number(item.hours) <= 0 || item.payment_allocations
+    || Number(item.tips) !== 0 || Number(item.guarantee_top_up) !== 0
+    || isTipEligibleForWork(employee, item.department)
+    || normalizeMoney(Number(item.base_wages) / Number(item.hours)) !== normalizeMoney(rate)
+    || records.some(record => !record.clock_out_at || record.approval_status !== 'approved')) return null
+  const hours = normalizeMoney(records.reduce((sum, record) => sum + getEffectiveClockHours(record), 0))
+  return hours === normalizeMoney(Number(item.hours)) ? null : { hours, payment_allocations: null }
+}
+
 function appendMemo(existing: string | null | undefined, note: string) {
   const trimmedNote = note.trim()
   const trimmedExisting = existing?.trim()
@@ -707,7 +721,8 @@ export default function PayrollPayoutsReportPage() {
     const preloadKey = `${selectedRun?.id ?? ''}|${selectedItem.id}|${selectedAdjustment.toFixed(2)}`
     if (paymentPreloadKeyRef.current === preloadKey) return
     paymentPreloadKeyRef.current = preloadKey
-    setAdjustmentPaymentAmount('')
+    // Prefill an outstanding settlement, but record it only after an explicit Pay/Receive click.
+    setAdjustmentPaymentAmount(selectedAdjustment !== 0 ? Math.abs(selectedAdjustment).toFixed(2) : '')
     setAdjustmentPaymentDirection(selectedAdjustment < 0 ? 'receive_credit' : 'pay_out')
     setAdjustmentPaymentMethod(selectedItem.payment_method ?? '')
   }, [isIndividualMode, selectedAdjustment, selectedItem, selectedRun?.id])
@@ -761,22 +776,16 @@ export default function PayrollPayoutsReportPage() {
     setAdjustmentPaymentAmount('')
     setAdjustmentPaymentMethod('')
     paymentPreloadKeyRef.current = ''
-    setClockEdits(() => {
-      if (!selectedRun || !item.employee_id) return {}
-      const records = getEmployeeClockRecords({
-        employeeId: item.employee_id,
-        clockRecords,
-        employees,
-        department: selectedRun.department,
-        startDate: selectedRun.start_date,
-        endDate: selectedRun.end_date,
-        schedules,
-      })
-      return Object.fromEntries(records.map(record => [record.id, {
-        clockIn: isoToTimeInput(record.clock_in_at),
-        clockOut: isoToTimeInput(record.clock_out_at),
-      }]))
-    })
+    const records = selectedRun && item.employee_id ? getEmployeeClockRecords({
+      employeeId: item.employee_id,
+      clockRecords, employees, department: selectedRun.department,
+      startDate: selectedRun.start_date, endDate: selectedRun.end_date, schedules,
+    }) : []
+    const patch = currentClockPayrollPatch(item, records, employees)
+    if (patch) setItemEdits(current => ({ ...current, [item.id]: { ...current[item.id], ...patch } }))
+    setClockEdits(Object.fromEntries(records.map(record => [record.id, {
+      clockIn: isoToTimeInput(record.clock_in_at), clockOut: isoToTimeInput(record.clock_out_at),
+    }])))
   }
 
   const updateClockEdit = (record: ShiftClock, patch: Partial<ClockEditState>) => {
@@ -1417,7 +1426,7 @@ export default function PayrollPayoutsReportPage() {
                   <div><div className="text-xs uppercase text-muted-foreground">Paid / settled</div><div className="text-xl font-bold">{formatCurrency(Number(selectedOriginalItem?.paid_amount ?? selectedOriginalItem?.payout_amount ?? 0))}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">Updated Payout</div><div className="text-xl font-bold">{formatCurrency(Number(selectedItem.payout_amount ?? 0))}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment >= 0 ? 'Balance Due' : 'Credit / Overpaid'}</div><div className={`text-xl font-bold ${selectedAdjustment >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatBalanceCurrency(selectedAdjustment)}</div><div className="text-xs text-muted-foreground">{selectedAdjustment < 0 ? 'Negative means employee was overpaid.' : 'Positive means employee needs payout.'}</div></div>
-                  <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment < 0 ? 'Remaining Credit' : 'Remaining Balance'}</div><div className="text-xl font-bold">{formatRemainingBalance(selectedAdjustment, adjustmentRemaining)}</div></div>
+                  <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment < 0 ? 'Credit after entered refund' : 'Balance after entered payment'}</div><div className="text-xl font-bold">{formatRemainingBalance(selectedAdjustment, adjustmentRemaining)}</div></div>
                   {selectedAdjustment !== 0 && adjustmentRemaining > 0 && <div className="md:col-span-4 rounded-lg border border-amber-300 bg-amber-100 px-3 py-2 text-sm text-amber-950">This correction still has an unpaid balance or uncollected credit. You can still save it, and the payout summary memo will show the remaining amount.</div>}
                   <div>
                     <Label>{adjustmentPaymentDirection === 'receive_credit' ? 'Credit Received Now' : 'Amount Paid Now'}</Label>

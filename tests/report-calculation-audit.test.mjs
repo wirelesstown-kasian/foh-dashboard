@@ -346,3 +346,25 @@ test('staff can send and sync their Chicago business-day EOD after the UTC date 
     else process.env.TZ = previousTimezone
   }
 })
+
+test('opening an adjusted hourly payout previews 1601.40 due against 1466.80 actually paid', () => {
+ const employee = {id:'hourly-cook', name:'Hourly cook', role:'kitchen_staff', primary_department:'cook', hourly_wage:20, tip_eligible:false, is_active:true}
+ const saved = {id:'old-payroll', employee_id:employee.id, employee_name:employee.name, department:'cook', hours:73.34, base_wages:1466.80, tips:0, guarantee_top_up:0, commission:0, deductions:0, payment_method:'check', payout_amount:1466.80, paid_amount:1466.80, payment_allocations:null}
+ const hours=[7.02,5.56,8.80,8.06,8.12,5.90,5.89,8.76,7.85,7.94,6.17]
+ const dates=[1,3,5,6,7,8,10,12,13,14,15]
+ const records=hours.map((hours,index)=>{
+   const date=`2026-11-${String(dates[index]).padStart(2,'0')}`,start=`${date}T10:00:00Z`
+   return {id:`clock-${index}`,employee_id:employee.id,session_date:date,clock_in_at:start,clock_out_at:new Date(new Date(start).getTime()+hours*3600000).toISOString(),approval_status:'approved',approved_hours:hours,auto_clock_out:false}
+ })
+ const page = extract('src/app/reporting/payroll-payouts/page.tsx', ['getPayrollItemEmployee','calculateSavedPayrollItem','currentClockPayrollPatch','clockEditChanged'], {...payroll,...clockUtils,...load('src/lib/tipEligibility.ts')})
+ for (const record of records) assert.equal(page.clockEditChanged(record,{clockIn:clockUtils.isoToTimeInput(record.clock_in_at),clockOut:clockUtils.isoToTimeInput(record.clock_out_at)}),false)
+ const patch=page.currentClockPayrollPatch(saved,records,[employee])
+ assert.equal(patch.hours,80.07)
+ const refreshed=page.calculateSavedPayrollItem(saved,patch,[employee])
+ assert.equal(refreshed.payout_amount,1601.40)
+ assert.equal(refreshed.paid_amount,1466.80)
+ assert.equal(Math.round((refreshed.payout_amount-refreshed.paid_amount)*100)/100,134.60)
+ assert.equal(page.currentClockPayrollPatch({...saved,base_wages:1500},records,[employee]),null)
+ assert.equal(page.currentClockPayrollPatch({...saved,payment_allocations:{cash:0,check:1466.8,ach:0}},records,[employee]),null)
+ assert.equal(page.currentClockPayrollPatch(saved,[{...records[0],approval_status:'pending'}],[employee]),null)
+})
