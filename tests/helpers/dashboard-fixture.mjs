@@ -39,7 +39,9 @@ export function dashboardFixture(options = {}) {
       useState: initial => [cursor < state.length ? state[cursor++] : initial, () => {}]},
     '@/components/layout/AdminSubpageHeader': {AdminSubpageHeader: ({title, subtitle, rightSlot}) => React.createElement('header', null, React.createElement('h1', null, title), subtitle, rightSlot)},
     '@/components/reporting/MissingTipDistributionNotice': {MissingTipDistributionNotice: () => null},
+    '@/components/useAppSettings': {useAppSettings: () => ({departmentDefinitions: [{key:'server',label:'Server'},{key:'kitchen',label:'Kitchen'},{key:'manager',label:'Management'}]})},
     '@/components/reporting/useReportingData': {
+      useEmployees: () => [],
       useEodReports: () => ({eodReports: reports, loading: options.eodLoading ?? false, error: options.eodError ?? null}),
       useClockRecords: () => ({clockRecords: []}),
       usePayrollRuns: () => ({payrollRuns, loading: options.payrollLoading ?? false, error: null}),

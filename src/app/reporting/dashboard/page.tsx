@@ -1303,8 +1303,8 @@ export default function ReportingDashboardPage() {
               aria-pressed={period === 'yearly' && selectedYearlyChart === 'gross'}
               className={`rounded-xl border bg-white p-4 text-left enabled:cursor-pointer enabled:hover:border-blue-400 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-blue-500 ${period === 'yearly' && selectedYearlyChart === 'gross' ? 'border-blue-500 ring-2 ring-blue-200' : ''}`}>
               <p className="text-xs font-medium uppercase text-muted-foreground">Gross Revenue</p>
-              <p className="mt-1 text-3xl font-semibold text-emerald-700">{formatCurrency(currentGrossRevenue)}</p>
-              <p className="mt-2 text-xs text-muted-foreground">Cash + credit + tax + tips collected</p>
+              <p className="mt-1 text-3xl font-semibold text-emerald-700">{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(currentGrossRevenue)}</p>
+              <p className="mt-2 text-xs text-muted-foreground">Net revenue + sales tax + tips collected</p><p className="mt-1 text-xs text-muted-foreground">{currentReports.length} EOD reports · latest {currentReports.map(report => report.session_date).sort().at(-1) ?? 'none'} · Tax {formatCurrency(currentTotals.tax)} · Tips {formatCurrency(currentTotals.collectedTip)}</p>
             </button>
             <div className="rounded-xl border bg-white p-4">
               <p className="text-xs font-medium uppercase text-muted-foreground">Projected Close</p>

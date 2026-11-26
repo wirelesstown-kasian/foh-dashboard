@@ -35,6 +35,8 @@ test('Letter PDF keeps reference field coordinates, payroll amounts, blank names
  assert.ok(Math.abs(Number(coordinate[1])-503.64)<0.001)
  assert.ok(Math.abs(Number(coordinate[2])-724.68)<0.001)
  assert.doesNotMatch(first,new RegExp(hex('Social Security')))
+ assert.doesNotMatch(first,new RegExp(hex('**')))
+ assert.match(first,new RegExp(hex('Payroll - (2026-10-01 to 2026-10-31)')))
  assert.doesNotMatch(first,new RegExp(hex('YTD')))
  if(process.env.FOH_PDF_OUTPUT) writeFileSync(process.env.FOH_PDF_OUTPUT,bytes)
 })

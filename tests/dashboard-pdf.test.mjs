@@ -22,7 +22,7 @@ test('dashboard PDF uses the selected date range, chart, and closed-day settings
     assert.equal(options.chartLabel, chart)
     assert.deepEqual(Array.from(options.closedDays), ['Mon'])
     assert.match(fixture.html, /Actual Net Revenue/)
-    assert.match(fixture.html, /Payroll by department/)
+    assert.match(fixture.html, /Payroll by Department/i)
   }
 })
 
@@ -58,4 +58,15 @@ test('PDF print mode flows across pages and restores the document title after pr
     assert.equal(head[0].removed, true)
     assert.equal(body[0].removed, true)
   }
+})
+
+test('November gross sums recorded EOD gross once and explains tax/tips and date coverage', () => {
+ const fixture = dashboardFixture({period:'monthly',refDate:'2026-11-26T12:00:00',reports:[
+  {id:'nov-1',session_date:'2026-11-01',revenue_total:100,sales_tax:10,tip_total:20,tip_distributions:[]},
+  {id:'nov-2',session_date:'2026-11-24',revenue_total:200,sales_tax:20,tip_total:40,tip_distributions:[]},
+  {id:'oct',session_date:'2026-10-31',revenue_total:999,sales_tax:0,tip_total:0,tip_distributions:[]},
+ ],payrollRuns:[]})
+ assert.match(fixture.html,/Gross Revenue<\/p>[\s\S]*?\$300\.00/)
+ assert.match(fixture.html,/Net revenue \+ sales tax \+ tips collected/)
+ assert.match(fixture.html.replace(/<!--.*?-->/g,''),/latest 2026-11-24/)
 })

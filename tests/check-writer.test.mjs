@@ -47,7 +47,7 @@ test('QuickBooks bank-feed CSV includes only issued checks and treats payee text
     { ...issued, payee_name: 'ACH recipient', method: 'ach' },
   ])
   assert.match(csv, /"001234","'=Mora, ""Sons"""/)
-  assert.match(csv, /"250.01","Payroll expense","Partial payroll payout - November payout"/)
+  assert.match(csv, /"250.01","Payroll expense","Payroll - Partial payroll payout - November payout"/)
   assert.doesNotMatch(csv, /Draft payee|Pending payee|Voided payee|ACH recipient/)
 })
 
@@ -61,4 +61,10 @@ test('blank-payee vouchers omit the payee on the face and both stubs while the r
   assert.match(html, /Two Hundred Fifty and 01\/100/)
   assert.match(html, /November payout/)
   assert.match(checkCsv([blank]), /Mora & Sons/)
+})
+
+test('check memos include category or payroll period and optional additional instructions', () => {
+ assert.equal(checkMemo({...issued,payroll_item_id:null,payroll_check_amount:null,category:'Utilities',memo:null}),'Utilities')
+ assert.equal(checkMemo({...issued,payroll_item_id:null,payroll_check_amount:null,category:'Utilities',memo:'Account 123'}),'Utilities - Account 123')
+ assert.equal(checkMemo({...issued,payroll_check_amount:null,payroll_period_start:'2026-11-01',payroll_period_end:'2026-11-15',memo:'Payroll 11/17/2026'}),'Payroll - (2026-11-01 to 2026-11-15)')
 })

@@ -1,5 +1,6 @@
 'use client'
 
+import { payrollBalance } from '@/lib/payrollBalance'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns'
 import { AdminSubpageHeader } from '@/components/layout/AdminSubpageHeader'
@@ -631,7 +632,7 @@ export default function PayrollPayoutsReportPage() {
     : [], [clockRecords, employees, schedules, selectedItem?.employee_id, selectedRun])
   const selectedOriginalItem = selectedItem ? adjustmentOriginalItems[selectedItem.id] ?? selectedRun?.payroll_run_items?.find(item => item.id === selectedItem.id) ?? null : null
   const selectedAdjustment = selectedItem && selectedOriginalItem
-    ? normalizeMoney(Number(selectedItem.payout_amount ?? 0) - Number(selectedOriginalItem.payout_amount ?? 0))
+    ? payrollBalance({ ...selectedItem, paid_amount: selectedOriginalItem.paid_amount ?? selectedOriginalItem.payout_amount })
     : 0
   const adjustmentPaymentValue = Math.max(0, normalizeMoney(adjustmentPaymentAmount))
   const adjustmentRemaining = normalizeMoney(Math.max(0, Math.abs(selectedAdjustment) - adjustmentPaymentValue))
@@ -706,8 +707,7 @@ export default function PayrollPayoutsReportPage() {
     const preloadKey = `${selectedRun?.id ?? ''}|${selectedItem.id}|${selectedAdjustment.toFixed(2)}`
     if (paymentPreloadKeyRef.current === preloadKey) return
     paymentPreloadKeyRef.current = preloadKey
-    const nextAmount = Math.abs(selectedAdjustment)
-    setAdjustmentPaymentAmount(nextAmount > 0 ? nextAmount.toFixed(2) : '')
+    setAdjustmentPaymentAmount('')
     setAdjustmentPaymentDirection(selectedAdjustment < 0 ? 'receive_credit' : 'pay_out')
     setAdjustmentPaymentMethod(selectedItem.payment_method ?? '')
   }, [isIndividualMode, selectedAdjustment, selectedItem, selectedRun?.id])
@@ -858,7 +858,9 @@ export default function PayrollPayoutsReportPage() {
     setBalanceCalculated(true)
   }
 
-  const saveEdit = async () => {
+  const saveEdit = async (recordPayment = true) => {
+    const adjustmentPaymentValue = recordPayment ? Math.max(0, normalizeMoney(adjustmentPaymentAmount)) : 0
+    const adjustmentRemaining = normalizeMoney(Math.max(0, Math.abs(selectedAdjustment) - adjustmentPaymentValue))
     if (!selectedRun) return
     if (hasClockTimeChanges && !balanceCalculated) {
       setMessage('Click Calculate Balance after all clock changes before saving.')
@@ -947,6 +949,7 @@ export default function PayrollPayoutsReportPage() {
           memo: memoEdit,
           rows: rowsForSave,
           adjustment: selectedItem && selectedAdjustment !== 0 ? {
+            item_id: selectedItem.id,
             employee_id: selectedItem.employee_id,
             employee_name: selectedItem.employee_name,
             amount: adjustmentPaymentValue,
@@ -987,7 +990,7 @@ export default function PayrollPayoutsReportPage() {
       }
       const savedSelectedItem = selectedItem ? rowsForSave.find(item => item.id === selectedItem.id) ?? selectedItem : null
       const savedAdjustment = selectedOriginalItem && savedSelectedItem
-        ? normalizeMoney(Number(savedSelectedItem.payout_amount ?? 0) - Number(selectedOriginalItem.payout_amount ?? 0))
+        ? payrollBalance({ ...savedSelectedItem, paid_amount: selectedOriginalItem.paid_amount ?? selectedOriginalItem.payout_amount })
         : selectedAdjustment
       const savedAdjustmentRemaining = normalizeMoney(Math.max(0, Math.abs(savedAdjustment) - adjustmentPaymentValue))
       let sheetNotice: string | null = null
@@ -1069,7 +1072,7 @@ export default function PayrollPayoutsReportPage() {
       const keepAdjustmentSession = !!selectedItem && selectedAdjustment !== 0 && Object.keys(adjustmentOriginalItems).length > 0
       if (keepAdjustmentSession) {
         if (savedSelectedItem) {
-          setAdjustmentOriginalItems(current => ({ ...current, [savedSelectedItem.id]: savedSelectedItem }))
+          setAdjustmentOriginalItems(Object.fromEntries((payload.payroll_run?.payroll_run_items ?? rowsForSave).map(item => [item.id, item])))
           setItemEdits(current => {
             const next = { ...current }
             delete next[savedSelectedItem.id]
@@ -1316,7 +1319,7 @@ export default function PayrollPayoutsReportPage() {
                       <TableBody>
                         {editedItems.map(item => {
                           const original = adjustmentOriginalItems[item.id] ?? selectedRun.payroll_run_items?.find(originalItem => originalItem.id === item.id)
-                          const delta = normalizeMoney(Number(item.payout_amount ?? 0) - Number(original?.payout_amount ?? item.payout_amount ?? 0))
+                          const delta = payrollBalance({ ...item, paid_amount: original?.paid_amount ?? original?.payout_amount ?? item.payout_amount })
                           return (
                             <TableRow key={item.id}>
                               <TableCell>{formatPayrollPaymentSummary(item)}</TableCell>
@@ -1411,7 +1414,7 @@ export default function PayrollPayoutsReportPage() {
                   </div>
                 </div>
                 <div className="grid gap-3 rounded-xl border bg-slate-50 p-4 md:grid-cols-4">
-                  <div><div className="text-xs uppercase text-muted-foreground">Original Payout</div><div className="text-xl font-bold">{formatCurrency(Number(selectedOriginalItem?.payout_amount ?? 0))}</div></div>
+                  <div><div className="text-xs uppercase text-muted-foreground">Paid / settled</div><div className="text-xl font-bold">{formatCurrency(Number(selectedOriginalItem?.paid_amount ?? selectedOriginalItem?.payout_amount ?? 0))}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">Updated Payout</div><div className="text-xl font-bold">{formatCurrency(Number(selectedItem.payout_amount ?? 0))}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment >= 0 ? 'Balance Due' : 'Credit / Overpaid'}</div><div className={`text-xl font-bold ${selectedAdjustment >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{formatBalanceCurrency(selectedAdjustment)}</div><div className="text-xs text-muted-foreground">{selectedAdjustment < 0 ? 'Negative means employee was overpaid.' : 'Positive means employee needs payout.'}</div></div>
                   <div><div className="text-xs uppercase text-muted-foreground">{selectedAdjustment < 0 ? 'Remaining Credit' : 'Remaining Balance'}</div><div className="text-xl font-bold">{formatRemainingBalance(selectedAdjustment, adjustmentRemaining)}</div></div>
@@ -1436,7 +1439,7 @@ export default function PayrollPayoutsReportPage() {
                   </div>
                   <div className="md:col-span-1 md:self-end"><Button className="h-9 w-full" onClick={() => void saveEdit()} disabled={saving || selectedAdjustment === 0 || adjustmentPaymentValue <= 0 || (hasClockTimeChanges && !balanceCalculated)}>{saving ? 'Processing...' : adjustmentPaymentDirection === 'receive_credit' ? 'Receive' : 'Pay'}</Button></div>
                   {!directionMatchesAdjustment && <div className="md:col-span-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">{selectedAdjustment > 0 ? 'This is a balance due. Use Pay Out.' : 'This is credit/overpaid. Use Receive Credit.'}</div>}
-                  <div className="md:col-span-4"><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Reason for correcting this paid payroll" /></div>
+                  <div className="md:col-span-4"><p className="mb-2 text-xs text-muted-foreground">Leave the payment amount empty to keep this balance open. Overpayment credits can be applied from the next Wage Worksheet or recorded here when refunded.</p><Label>Adjustment Reason</Label><Textarea value={adjustmentMemo} onChange={event => setAdjustmentMemo(event.target.value)} placeholder="Reason for correcting this paid payroll" /></div>
                 </div>
                 <div className="overflow-x-auto rounded-lg border bg-white">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 px-3 py-2">
@@ -1470,7 +1473,7 @@ export default function PayrollPayoutsReportPage() {
               {editing && (
                 <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-amber-900">This will replace existing saved payroll data and refresh reports/dashboard from the updated payout.</p>
-                  <div className="flex gap-2"><Button variant="outline" size="sm" onClick={closePayrollDialog} disabled={saving}>Cancel</Button></div>
+                  <div className="flex gap-2"><Button size="sm" onClick={() => void saveEdit(false)} disabled={saving || (hasClockTimeChanges && !balanceCalculated)}>Save correction / keep balance open</Button><Button variant="outline" size="sm" onClick={closePayrollDialog} disabled={saving}>Cancel</Button></div>
                 </div>
               )}
             </div>

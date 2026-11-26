@@ -1,5 +1,7 @@
 'use client'
 
+import { payrollBalance } from '@/lib/payrollBalance'
+
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { addDays, addWeeks, endOfMonth, endOfWeek, format, parseISO, startOfMonth, startOfWeek } from 'date-fns'
 import Link from 'next/link'
@@ -490,6 +492,7 @@ export default function WageWorksheetPage() {
   const [payDate, setPayDate] = useState(initialPayrollPeriod.payDate)
   const [memo, setMemo] = useState('')
   const [rows, setRows] = useState<PayrollDraftRow[]>([])
+  const [creditApplications, setCreditApplications] = useState<Array<{ source_item_id: string; employee_id: string; amount: number }>>([])
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([])
   const [allowZeroHours, setAllowZeroHours] = useState(false)
   const [manualEmployeeIds, setManualEmployeeIds] = useState<string[]>([])
@@ -701,6 +704,7 @@ export default function WageWorksheetPage() {
       setMessage('No unpaid hours found for this period. Enable “Continue without recorded hours” to create salary or commission payroll.')
       return
     }
+    setCreditApplications([])
     setRows(sortPayrollRows(nextRows))
     setManualEmployeeIds([])
     setExcludedEmployeeIds([])
@@ -983,6 +987,7 @@ export default function WageWorksheetPage() {
   const removeRow = (employeeId: string) => {
     if (worksheetMode === 'paid_view') return
     setExcludedEmployeeIds(current => current.includes(employeeId) ? current : [...current, employeeId])
+    setCreditApplications(current => current.filter(item => item.employee_id !== employeeId))
     setRows(currentRows => currentRows.filter(row => row.employee_id !== employeeId))
   }
 
@@ -1152,6 +1157,7 @@ export default function WageWorksheetPage() {
           memo: memo.trim() || null,
           totals,
           rows,
+          credit_applications: creditApplications,
         }),
       })
       const payrollSavePayload = (await payrollSave.json().catch(() => ({}))) as {
@@ -1505,6 +1511,38 @@ export default function WageWorksheetPage() {
           <p className="text-xs text-muted-foreground">
             Top-Up adds each day’s guarantee shortfall. If you override period hours, tips, or base wages manually, review and adjust Top-Up explicitly.
           </p>
+          {worksheetMode !== 'paid_view' && <div className="grid gap-2 rounded-lg border bg-blue-50 p-3">
+            <p className="text-sm font-semibold">Outstanding payroll credits</p>
+            <p className="text-xs">Apply a prior overpayment as a deduction from this payroll. Nothing is applied automatically.</p>
+            {rows.map(row => {
+              const sources = payrollRuns.filter(run => run.end_date < startDate).flatMap(run => run.payroll_run_items ?? [])
+                .filter(item => item.employee_id === row.employee_id && payrollBalance(item) < 0)
+              const available = normalizeMoney(sources.reduce((sum, item) => sum - payrollBalance(item), 0))
+              const applied = creditApplications.filter(item => item.employee_id === row.employee_id)
+              if (!available && !applied.length) return null
+              return <div key={row.employee_id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span>{row.employee_name}: {formatCurrency(available)} credit{applied.length ? ` · ${formatCurrency(applied.reduce((sum,item)=>sum+item.amount,0))} applied` : ''}</span>
+                {applied.length > 0 && <Button type="button" size="sm" variant="outline" onClick={() => {
+                  const amount = applied.reduce((sum,item)=>sum+item.amount,0)
+                  updateRow(row.employee_id, { deductions: normalizeMoney(Math.max(0,row.deductions-amount)), memo: row.memo.split(' · ').filter(part => part !== `Prior payroll credit ${formatCurrency(amount)}`).join(' · ') })
+                  setCreditApplications(current => current.filter(item => item.employee_id !== row.employee_id))
+                }}>Remove credit application</Button>}
+                <Button type="button" size="sm" variant="outline" disabled={!!applied.length || row.net_pay <= 0} onClick={() => {
+                  let capacity = row.net_pay
+                  const applications: typeof creditApplications = []
+                  for (const item of sources) {
+                    const amount = normalizeMoney(Math.min(capacity, -payrollBalance(item)))
+                    if (amount > 0 && row.employee_id) applications.push({ source_item_id:item.id, employee_id:row.employee_id, amount })
+                    capacity = normalizeMoney(capacity-amount)
+                  }
+                  const amount = normalizeMoney(applications.reduce((sum,item)=>sum+item.amount,0))
+                  updateRow(row.employee_id, { deductions: normalizeMoney(row.deductions+amount), memo: [row.memo, `Prior payroll credit ${formatCurrency(amount)}`].filter(Boolean).join(' · ') })
+                  setCreditApplications(current => [...current,...applications])
+                }}>Apply credit to this payroll</Button>
+              </div>
+            })}
+          </div>}
+
 
           <div className="overflow-x-auto rounded-lg border bg-white">
             <Table className="min-w-[1280px] table-fixed border-collapse text-xs">
@@ -2019,7 +2057,7 @@ export default function WageWorksheetPage() {
               {editingSummary && (
                 <div className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-amber-900">
-                    Editing this saved payout updates the original payroll record. If cash payout changes, a cash in/out adjustment will be recorded.
+                    Editing this saved payout updates the original payroll record. Corrections keep an outstanding employee balance until a payment, refund, or credit application is explicitly recorded.
                   </p>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={() => { setEditingSummary(false); setSummaryItemEdits({}); setSummaryMemoEdit(selectedSummaryRun.memo ?? '') }} disabled={savingSummaryEdit}>Cancel</Button>

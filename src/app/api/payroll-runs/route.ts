@@ -41,7 +41,9 @@ type PayrollRunPayload = {
     memo?: string | null
     id?: string
   }>
+  credit_applications?: Array<{ source_item_id: string; employee_id: string; amount: number }>
   adjustment?: {
+    item_id?: string
     employee_id?: string | null
     employee_name?: string | null
     amount?: number
@@ -310,6 +312,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: itemInsert.error.message }, { status: 500 })
     }
 
+    if (payload.credit_applications?.length) {
+      const { error: creditError } = await supabaseAdmin.rpc('apply_payroll_credits', { p_run_id: runId, p_credits: payload.credit_applications, p_actor: (await getDashboardViewer())!.employeeId })
+      if (creditError) {
+        await supabaseAdmin.from('payroll_runs').delete().eq('id', runId)
+        return NextResponse.json({ error: creditError.message }, { status: 409 })
+      }
+    }
     return NextResponse.json({ run_id: runId })
   } catch (error) {
     return NextResponse.json(
@@ -345,136 +354,13 @@ export async function PATCH(req: NextRequest) {
     const allocationError = calculatedRows.map((row, index) => getPaymentAllocationError(rows[index], row.net_pay)).find(Boolean)
     if (allocationError) return NextResponse.json({ error: allocationError }, { status: 400 })
 
-    const { data: existingRun, error: existingRunError } = await supabaseAdmin
-      .from('payroll_runs')
-      .select('*')
-      .eq('id', payload.run_id)
-      .single()
+    const { data: result, error } = await supabaseAdmin.rpc('patch_payroll_payout', {
+      p_run_id: payload.run_id, p_rows: calculatedRows, p_memo: payload.memo?.trim() || null,
+      p_totals: getPayrollTotals(calculatedRows), p_adjustment: payload.adjustment ?? null, p_actor: (await getDashboardViewer())!.employeeId,
+    })
+    if (error) return NextResponse.json({ error: error.message }, { status: error.code === 'P0001' ? 409 : 500 })
+    return NextResponse.json(result)
 
-    if (existingRunError || !existingRun) {
-      return NextResponse.json({ error: existingRunError?.message ?? 'Payroll run not found' }, { status: 404 })
-    }
-
-    const totals = getPayrollTotals(calculatedRows)
-    const updateRun = await supabaseAdmin
-      .from('payroll_runs')
-      .update({
-        memo: payload.memo?.trim() || null,
-        total_cash: totals.cash,
-        total_check: totals.check,
-        total_ach: totals.ach,
-        total_gross: totals.gross,
-        total_deductions: totals.deductions,
-        total_net: totals.net,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', payload.run_id)
-
-    if (updateRun.error) return NextResponse.json({ error: updateRun.error.message }, { status: 500 })
-
-    for (const [index, row] of calculatedRows.entries()) {
-      if (!row.id) return NextResponse.json({ error: `Missing payroll item id for ${row.employee_name || 'employee row'}` }, { status: 400 })
-      const { data: updatedItem, error: updateItemError } = await supabaseAdmin
-        .from('payroll_run_items')
-        .update({
-          employee_id: row.employee_id || null,
-          employee_name: row.employee_name || 'Unknown employee',
-          role: row.role || null,
-          department: row.department || existingRun.department,
-          payment_method: row.payment_method,
-          commission_payment_method: row.commission_payment_method,
-          payment_allocations: row.payment_allocations ?? null,
-          hours: row.hours,
-          tips: row.tips,
-          base_wages: row.base_wages,
-          guarantee_top_up: row.guarantee_top_up,
-          commission: row.commission,
-          deductions: row.deductions,
-          gross_pay: row.gross_pay,
-          net_pay: row.net_pay,
-          payout_amount: row.payout_amount,
-          cash_rounding: row.cash_rounding,
-          has_auto_clock_out: row.has_auto_clock_out === true,
-          has_open_clock: row.has_open_clock === true,
-          memo: row.memo?.trim() || null,
-          display_order: index,
-        })
-        .eq('id', row.id)
-        .eq('run_id', payload.run_id)
-        .select('id')
-        .maybeSingle()
-
-      if (updateItemError) return NextResponse.json({ error: updateItemError.message }, { status: 500 })
-      if (!updatedItem) return NextResponse.json({ error: `Payroll item was not saved for ${row.employee_name || 'employee row'}.` }, { status: 500 })
-    }
-
-    let cashEntryId: string | null = null
-    const oldCash = normalizeNumber((existingRun as { total_cash?: number | string | null }).total_cash)
-    const cashDifference = Math.round((totals.cash - oldCash) * 100) / 100
-    const adjustmentAmount = normalizeNumber(payload.adjustment?.amount)
-    const adjustmentMethod = payload.adjustment?.method
-    const adjustmentDirection = payload.adjustment?.direction
-    if (adjustmentAmount > 0 && adjustmentMethod === 'cash') {
-      const entryType = adjustmentDirection === 'receive_credit' ? 'cash_in' : 'cash_out'
-      const description = [
-        adjustmentDirection === 'receive_credit' ? 'Payroll payout credit received' : 'Payroll payout balance paid',
-        `${existingRun.start_date} to ${existingRun.end_date}`,
-        `Pay date ${existingRun.pay_date}`,
-        payload.adjustment?.employee_name ? `Employee ${payload.adjustment.employee_name}` : null,
-        `Run ${payload.run_id}`,
-        'Modified after payout',
-        payload.adjustment?.memo?.trim() || null,
-      ].filter(Boolean).join(' | ')
-      const { data: cashEntry, error: cashError } = await supabaseAdmin
-        .from('cash_balance_entries')
-        .insert({
-          entry_date: existingRun.pay_date,
-          entry_type: entryType,
-          amount: adjustmentAmount,
-          description,
-          updated_at: new Date().toISOString(),
-        })
-        .select('id')
-        .single()
-
-      if (cashError) return NextResponse.json({ error: cashError.message }, { status: 500 })
-      cashEntryId = cashEntry?.id ?? null
-    } else if (cashDifference !== 0 && !payload.adjustment) {
-      const entryType = cashDifference > 0 ? 'cash_out' : 'cash_in'
-      const amount = Math.abs(cashDifference)
-      const description = [
-        'Wage Worksheet cash payout adjustment',
-        `${existingRun.start_date} to ${existingRun.end_date}`,
-        `Pay date ${existingRun.pay_date}`,
-        `Run ${payload.run_id}`,
-        'Modified after payout',
-        `Cash ${cashDifference > 0 ? 'increased' : 'decreased'} by $${amount.toFixed(2)}`,
-      ].join(' | ')
-      const { data: cashEntry, error: cashError } = await supabaseAdmin
-        .from('cash_balance_entries')
-        .insert({
-          entry_date: existingRun.pay_date,
-          entry_type: entryType,
-          amount,
-          description,
-          updated_at: new Date().toISOString(),
-        })
-        .select('id')
-        .single()
-
-      if (cashError) return NextResponse.json({ error: cashError.message }, { status: 500 })
-      cashEntryId = cashEntry?.id ?? null
-    }
-
-    const { data: updatedRun, error: updatedRunError } = await supabaseAdmin
-      .from('payroll_runs')
-      .select('*, payroll_run_items(*)')
-      .eq('id', payload.run_id)
-      .single()
-
-    if (updatedRunError) return NextResponse.json({ error: updatedRunError.message }, { status: 500 })
-
-    return NextResponse.json({ run_id: payload.run_id, cash_entry_id: cashEntryId, payroll_run: updatedRun })
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, 'Failed to update payroll payout') },

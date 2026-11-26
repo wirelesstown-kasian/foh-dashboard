@@ -65,7 +65,10 @@ export function isPartialCheck(entry: CheckEntry) {
 }
 
 export function checkMemo(entry: CheckEntry) {
-  return isPartialCheck(entry) ? ['Partial payroll payout', entry.memo].filter(Boolean).join(' - ') : entry.memo ?? ''
+  const payroll = Boolean(entry.payroll_item_id)
+  const category = payroll ? `Payroll${entry.payroll_period_start && entry.payroll_period_end ? ` - (${entry.payroll_period_start} to ${entry.payroll_period_end})` : ''}` : entry.category?.trim() || 'Payment'
+  const extra = entry.memo?.trim()
+  return [category, isPartialCheck(entry) ? 'Partial payroll payout' : '', extra && extra !== category && !(payroll && /^Payroll \d{2}\/\d{2}\/\d{4}$/.test(extra)) ? extra : ''].filter(Boolean).join(' - ')
 }
 
 const smallNumbers = [

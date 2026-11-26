@@ -35,12 +35,12 @@ export async function checkPdf(entries: CheckEntry[], alignment: PrintAlignment,
     const formattedDate = `${date[1]}/${date[0]}/${date[2]}`
     text(formattedDate, ...CHECK_LAYOUT.date, 65, 8.7434)
     text(name, ...CHECK_LAYOUT.payee, 370, 11, true)
-    text(`**${checkMoney.format(entry.amount).slice(1)}`, 470, 104.52, 70, 11, true, true)
+    text(checkMoney.format(entry.amount).slice(1), 470, 104.52, 70, 11, true, true)
     text(amountInWords(entry.amount), ...CHECK_LAYOUT.words, 515, 10.5)
     const vendor = data.vendors.find(v => v.id === entry.vendor_id)
     text(name, 82.44, 192, 390, 9)
     if (vendor?.address) text(vendor.address, 82.44, 180, 390, 8)
-    text(entry.payroll_item_id ? `Pay Period: ${entry.payroll_period_start ?? ''} - ${entry.payroll_period_end ?? ''}` : checkMemo(entry), ...CHECK_LAYOUT.memo, 490, 8.7434)
+    text(checkMemo(entry), ...CHECK_LAYOUT.memo, 490, 8.7434)
     stubMode = true
     for (const top of CHECK_LAYOUT.stubs) {
       text(name, 39, top, 240)

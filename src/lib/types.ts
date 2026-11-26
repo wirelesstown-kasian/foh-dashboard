@@ -212,6 +212,7 @@ export interface PayrollRun {
 }
 
 export interface PayrollRunItem {
+  paid_amount?: number | null
   id: string
   run_id: string
   employee_id: string | null
